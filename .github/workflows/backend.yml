@@ -1,0 +1,54 @@
+# NFR-05 / T-02 -- the smoke test is only worth writing if it runs without
+# anyone remembering to run it.
+name: backend
+
+on:
+  push:
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+  pull_request:
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+  workflow_dispatch:
+
+jobs:
+  # Everything that needs no model weight, so a broken invariant in the pure
+  # logic reports in seconds instead of waiting on a 28 MB download.
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install numpy opencv-python-headless
+      - run: python -m backend.services.auth
+      - run: python -m backend.services.events
+      - run: python -m backend.services.metrics
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+
+      - name: Install (CPU torch -- the CUDA wheel is ~2.5 GB)
+        run: |
+          pip install --extra-index-url https://download.pytorch.org/whl/cpu \
+            -r backend/requirements.txt
+          pip uninstall -y opencv-python
+          pip install opencv-python-headless
+
+      # The weight is not in the repo (28 MB). Naming it without a directory
+      # makes ultralytics fetch it into the working dir on first use.
+      - name: Cache model weight
+        uses: actions/cache@v4
+        with:
+          path: yoloe-11s-seg.pt
+          key: yoloe-11s-seg
+
+      - name: Smoke test
+        env:
+          MODEL_PATH: yoloe-11s-seg.pt
+          YOLO_CONFIG_DIR: /tmp
+          MPLCONFIGDIR: /tmp
+        run: python -m backend._smoke_test

@@ -1,0 +1,9 @@
+ultralytics>=8.4.48
+opencv-python>=4.13.0
+pillow>=12.2.0
+numpy
+fastapi>=0.115.0
+uvicorn>=0.34.0
+python-multipart>=0.0.18
+filelock>=3.13.0
+httpx>=0.28.0

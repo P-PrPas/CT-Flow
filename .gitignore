@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Model weights (fetched separately, see README)
+*.pt
+
+# Web
+frontend/node_modules/
+frontend/.next/
+
+# Media / large assets
+*.mp4
+*.mov
+*.MOV
+
+# Local runtime data
+backend/_smoke_out/
+backend/_smoke_test_set/
+backend/_smoke_upload/
+backend/_experiment_out/
+
+# Docker / secrets
+.env
+certs/*.crt
+
+# OS
+Thumbs.db
+.DS_Store

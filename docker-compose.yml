@@ -1,0 +1,35 @@
+services:
+  api:
+    build:
+      context: ..                      # needs poc/yoloe-11s-seg.pt
+      dockerfile: label_tool/backend/Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}      # must own DATA_DIR on a Linux host
+    image: ct-flow-api
+    environment:
+      LABEL_TOOL_MODE: vm              # in a container the FS is always "the vm"
+      LABEL_TOOL_VM_ROOT: /data
+      # Empty = no login and no upload (single trusted user). Fill both in to
+      # turn the tool multi-user -- see .env.example.
+      LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
+      LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
+      LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+    volumes:
+      # Everything the tool can see. Input folders and output folders both live
+      # under here -- the browser can only ever pick paths inside /data.
+      - ${DATA_DIR:-../data}:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .                       # needs certs/ too
+      dockerfile: frontend/Dockerfile
+    image: ct-flow-web
+    environment:
+      API_URL: http://api:8000         # consumed by next.config.ts rewrites
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

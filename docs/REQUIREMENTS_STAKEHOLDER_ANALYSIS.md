@@ -187,6 +187,7 @@
 | FR-33 | **แก้ปัญหาคลาสขนาดเล็ก (`defect` F1 ~0.04–0.07)** | 🟡 | **T-01 เสร็จแล้ว → [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)** — สาเหตุคือ threshold: ที่ conf 0.25 `defect` recall = 0.00, ที่ 0.05 = 0.26 (F1 0.248) · เพิ่ม `conf_by_class` ให้ `/api/predict`, `/api/evaluate`, `/api/autolabel` แล้ว ได้ `defect` 0.248 + `good_part` 0.818 พร้อมกัน · **ยังห่างจาก `READY_F1 = 0.75` → T-08 (crop) ยังต้องทำ** |
 | FR-34 | NN-matching bank แทน mean-pooling | ❌ | ทำหลัง T-08 — T-01 ชี้ว่า scale เป็นสาเหตุหลัก (defect median = 2.09% ของภาพ vs good_part 43.45%) |
 | FR-35 | Retrain closed-set detector จาก label ที่สะสม | ❌ | เป้าหมายระยะยาว ยังไม่ยืนยันว่าคุ้ม |
+| FR-36 | **เลือก YOLOE checkpoint ได้เอง** (หลายเวอร์ชัน/หลายขนาด แทนที่จะ hardcode ตัวเดียว) | ✅ | `services/models.py` — catalog ตั้งแต่ `yoloe-v8s-seg` เล็กสุด ถึง `yoloe-26x-seg` (รุ่น 26 ใหม่ล่าสุด ใหญ่สุด แม่นสุด) รวม 11 ตัวเลือก · `GET /api/config` ส่งรายการให้ dropdown ใน Setup card · เลือกได้เฉพาะตอนโปรเจกต์ยังไม่มี embedding — `Bank.lock_model()` ล็อกโมเดลไว้กับ bank ตั้งแต่กล่องแรกที่บันทึก เพราะ embedding จากคนละโมเดลผสมกันไม่ได้ (ดู [ARCHITECTURE.md](./ARCHITECTURE.md#การเลือกโมเดล)) · ค่า default (`yoloe-11s-seg`) เหมือนพฤติกรรมเดิมทุกประการ โปรเจกต์เก่าที่สอนไว้ก่อนหน้านี้ทั้งหมดใช้โมเดลนี้อยู่แล้วจึงไม่กระทบ |
 
 ---
 
@@ -202,7 +203,7 @@
 | NFR-06 | Job tracker persist/รองรับหลาย worker | ❌ | ต้องใช้ Redis/TTL (มีคอมเมนต์ในโค้ดแล้ว) · เงื่อนไขเริ่มงานคือ >1 worker ซึ่งยังไม่เกิด |
 | NFR-07 | Container ไม่รันเป็น root | 🟡 | Dockerfile สร้าง user `app` จาก build arg `APP_UID` (default 1000) แล้ว `USER app` · **ยังไม่ได้ build ยืนยัน** (Docker Desktop ไม่ได้รันตอนแก้) · บน Linux host ต้อง `--build-arg APP_UID=$(id -u)` ให้ตรงกับเจ้าของ `DATA_DIR` |
 | NFR-08 | HTTPS | ❌ | ต้องพึ่ง reverse proxy ภายนอก |
-| NFR-09 | GPU support | ❌ | Dockerfile มีคอมเมนต์วิธีสลับแล้ว |
+| NFR-09 | GPU support | 🟡 | `backend/Dockerfile` ติดตั้ง PyTorch จาก `--extra-index-url .../whl/cu126` เป็นค่าเริ่มต้น (ตรงกับ driver 12.7 ที่ตรวจจริงบนเครื่องนี้ผ่าน `nvidia-smi` — driver รองรับ CUDA ≥ 12.6) + `docker-compose.yml` ขอ GPU ผ่าน `deploy.resources.reservations.devices` · override เป็น CPU ได้ด้วย `--build-arg TORCH_INDEX_URL=.../whl/cpu` โดยไม่ต้องแก้ไฟล์ · `device: None` ใน `vpe.py` ปล่อยให้ ultralytics auto-เลือก cuda:0 เอง ไม่ต้องแก้โค้ด inference · **`docker compose build api` สำเร็จจริง** (ยืนยันแล้วว่า `torch-2.13.0+cu126` ติดตั้งได้ไม่มี error) **แต่ยังไม่ได้ยืนยัน runtime** — Docker Desktop daemon ตอบ `500` ทุก request หลัง build เสร็จ (`docker info`/`docker images` ค้าง) ยังไม่ทันได้ `docker compose up` มาเช็ค `torch.cuda.is_available()` จริงในคอนเทนเนอร์ที่รัน |
 
 ---
 
@@ -334,10 +335,11 @@
 | Task | Requirement | เงื่อนไข |
 |---|---|---|
 | T-15 · ย้าย job tracker ไป Redis + TTL | NFR-06 | เมื่อต้องรองรับหลาย worker (ยังไม่เกิด) |
-| T-16 · ✅ กำหนด UID คงที่แทน root | NFR-07 | ทำแล้ว — `ARG APP_UID` + `USER app` · ยังไม่ได้ build ยืนยัน |
+| T-16 · ✅ กำหนด UID คงที่แทน root | NFR-07 | ทำแล้ว — `ARG APP_UID` + `USER app` · **build ยืนยันสำเร็จจริงในเซสชันนี้** (`docker compose build api` ผ่านทุก step รวมขั้น `useradd`/`chown`) — ยังไม่ได้ `docker compose up` เพื่อยืนยัน runtime เพราะ Docker Desktop daemon ค้างหลัง build เสร็จ (ดู NFR-09) |
 | T-17 · ✅ เพิ่ม `mode="update"` ให้ `/api/relabel` | FR-09 | ทำแล้ว |
-| T-18 · GPU support | NFR-09 | เมื่อ throughput เป็นคอขวด |
+| T-18 · 🟡 GPU support | NFR-09 | `--extra-index-url .../whl/cu126` เป็นค่า build default แล้ว + GPU reservation ใน compose · **build image สำเร็จจริง** (ติดตั้ง `torch-2.13.0+cu126` + `torchvision-0.28.0+cu126` ผ่านทุก step) แต่ **ยังไม่ได้ยืนยัน runtime** (`torch.cuda.is_available()` ในคอนเทนเนอร์ที่รันจริง) — Docker Desktop daemon ค้าง (`500` บนทุก API call) หลัง build เสร็จ ไม่ทันได้ `docker compose up` |
 | T-19 · Retrain closed-set detector | FR-35 | หลังพิสูจน์ว่า label สะสมพอและคุ้มกว่าใช้ prompt bank ต่อ |
+| T-20 · ✅ เลือกโมเดล YOLOE ได้หลายเวอร์ชัน/ขนาด | FR-36 | ทำแล้ว — รายละเอียดที่ FR-36 · เอาการพึ่งพา `poc/yoloe-11s-seg.pt` นอก repo ออกไปพร้อมกัน (checkpoint ทุกตัว auto-download เข้า `MODELS_DIR` แทน) |
 
 ---
 
@@ -364,7 +366,7 @@
 
 ## ภาคผนวก — สรุปสถานะแบบย่อ
 
-**ทำเสร็จแล้ว (พร้อมใช้งาน):** core labeling loop ครบวงจร (label → bank → rescore → evaluate → auto-label → review), YOLO label format, class-index stability, test set แยกขาดจาก bank, background job pattern, path safety, file lock
+**ทำเสร็จแล้ว (พร้อมใช้งาน):** core labeling loop ครบวงจร (label → bank → rescore → evaluate → auto-label → review), YOLO label format, class-index stability, test set แยกขาดจาก bank, background job pattern, path safety, file lock, เลือกโมเดล YOLOE ได้หลายเวอร์ชัน/ขนาด (FR-36) ล็อกต่อ bank
 
 **ช่องว่างที่กระทบผู้ใช้มากที่สุด 5 อันดับแรก:**
 1. ~~ไม่มีสัญญาณว่า "label พอหรือยัง" / คลาสตันแล้วหรือยัง (T-07)~~ ✅ แท็บ Progress + คำเตือน plateau
@@ -375,4 +377,4 @@
 
 **ช่องว่างที่กระทบการขยายผู้ใช้:** auth และ upload มี backend ครบแล้วแต่ยังไม่มี UI — เหลือหน้า login + dropzone เท่านั้น (ศัพท์เทคนิคแก้ไปแล้วด้วย Plain language mode)
 
-**ช่องว่างเชิง infra:** job tracker หลาย worker (T-15), HTTPS (ต้องพึ่ง reverse proxy), GPU (T-18) · CI และ non-root container เขียนแล้วแต่ยังไม่ได้รัน/build ยืนยัน
+**ช่องว่างเชิง infra:** job tracker หลาย worker (T-15), HTTPS (ต้องพึ่ง reverse proxy) · CI, non-root container, และ GPU support เขียนแล้วและ **build image ยืนยันสำเร็จจริงในเซสชันนี้** — runtime (`docker compose up` + GPU ในคอนเทนเนอร์ที่รันจริง) ยังไม่ทันยืนยันเพราะ Docker Desktop daemon ค้างหลัง build เสร็จ (ดู NFR-09/NFR-07)

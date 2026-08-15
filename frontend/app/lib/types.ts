@@ -4,7 +4,12 @@ export type BankSummary = {
   classes: { name: string; count: number }[];
   labeled: string[];
   auto: string[];
+  // null until the first box is saved -- the model picker stays open until then.
+  model: string | null;
 };
+
+/** One selectable YOLOE checkpoint, as reported by GET /api/config. */
+export type ModelInfo = { id: string; family: string; size: string; note: string };
 
 /** `sig` is an 8x8 grayscale thumbnail of the image (FR-18): cheap enough to
  *  ship with every score, good enough to spot near-duplicate frames. */

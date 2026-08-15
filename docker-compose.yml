@@ -1,8 +1,8 @@
 services:
   api:
     build:
-      context: ..                      # needs poc/yoloe-11s-seg.pt
-      dockerfile: label_tool/backend/Dockerfile
+      context: .                       # this repo's root
+      dockerfile: backend/Dockerfile
       args:
         APP_UID: ${APP_UID:-1000}      # must own DATA_DIR on a Linux host
     image: ct-flow-api
@@ -18,6 +18,21 @@ services:
       # Everything the tool can see. Input folders and output folders both live
       # under here -- the browser can only ever pick paths inside /data.
       - ${DATA_DIR:-../data}:/data
+      # YOLOE checkpoints, auto-downloaded on first use per selected model
+      # (see backend/services/models.py) -- named so a restart doesn't
+      # re-fetch every weight from scratch.
+      - models:/models
+    # Requires an NVIDIA GPU + driver + the NVIDIA Container Toolkit on the
+    # host (`docker info` should list an `nvidia` runtime). No GPU available?
+    # Delete this block and rebuild with TORCH_INDEX_URL=.../whl/cpu instead
+    # (see backend/Dockerfile) -- inference still runs, just on CPU.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     restart: unless-stopped
 
   web:
@@ -33,3 +48,6 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  models:

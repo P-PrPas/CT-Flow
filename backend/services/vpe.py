@@ -8,52 +8,62 @@ import torch
 from ultralytics import YOLOE
 from ultralytics.models.yolo.yoloe import YOLOEVPSegPredictor
 
-from ..config import MODEL_PATH
+from ..services import models as model_registry
 
-_model = None
-_predictor = None
-
-
-def get_model() -> YOLOE:
-    global _model
-    if _model is None:
-        _model = YOLOE(MODEL_PATH)
-    return _model
+# ponytail: every model_id ever used stays resident for the life of the
+# process -- fine for one or two checkpoints, but switching between many
+# large ones in one long-running server will grow VRAM without bound. Add
+# an LRU with model.to("cpu") eviction if that turns from hypothetical into
+# a real OOM.
+_models: dict[str, YOLOE] = {}
+_predictors: dict[str, YOLOEVPSegPredictor] = {}
 
 
-def _get_predictor(model: YOLOE) -> YOLOEVPSegPredictor:
-    global _predictor
-    if _predictor is None:
-        _predictor = YOLOEVPSegPredictor(
+def get_model(model_id: str = model_registry.DEFAULT_MODEL_ID) -> YOLOE:
+    if model_id not in _models:
+        _models[model_id] = YOLOE(model_registry.checkpoint_path(model_id))
+    return _models[model_id]
+
+
+def _get_predictor(model_id: str, model: YOLOE) -> YOLOEVPSegPredictor:
+    if model_id not in _predictors:
+        predictor = YOLOEVPSegPredictor(
             overrides={
                 "task": model.model.task,
                 "mode": "predict",
                 "save": False,
                 "verbose": False,
                 "batch": 1,
-                "device": None,
+                "device": None,  # ultralytics auto-picks cuda:0 when available
                 "imgsz": model.overrides.get("imgsz", 640),
             },
             _callbacks=model.callbacks,
         )
-        _predictor.setup_model(model=model.model)
-    return _predictor
+        predictor.setup_model(model=model.model)
+        _predictors[model_id] = predictor
+    return _predictors[model_id]
 
 
-def extract_embedding(image_bgr, boxes: list[list[float]]) -> torch.Tensor:
+def extract_embedding(image_bgr, boxes: list[list[float]],
+                       model_id: str = model_registry.DEFAULT_MODEL_ID) -> torch.Tensor:
     """boxes: list of [x1, y1, x2, y2] in pixel coords, all treated as the
     same class -> one averaged embedding for this labeling action."""
-    model = get_model()
-    predictor = _get_predictor(model)
+    model = get_model(model_id)
+    predictor = _get_predictor(model_id, model)
     predictor.set_prompts(dict(bboxes=[list(b) for b in boxes], cls=[0] * len(boxes)))
     return predictor.get_vpe(image_bgr)
 
 
-def arm(names: list[str], combined_vpe: torch.Tensor) -> YOLOE:
+def arm(names: list[str], combined_vpe: torch.Tensor,
+        model_id: str = model_registry.DEFAULT_MODEL_ID) -> YOLOE:
     """Set the prompt bank's classes on the model. Callers doing many images
     call this once and reuse the returned model, so class-setting cost is
-    paid once per batch rather than once per image."""
-    model = get_model()
+    paid once per batch rather than once per image.
+
+    model_id must be the same checkpoint the bank's embeddings were extracted
+    with -- Bank.lock_model() is what enforces that upstream, this function
+    just trusts its caller."""
+    model = get_model(model_id)
     model.model.model[-1].nc = len(names)
     model.model.names = {i: n for i, n in enumerate(names)}
     model.model.set_classes(names, combined_vpe)

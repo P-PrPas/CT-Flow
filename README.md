@@ -26,6 +26,7 @@ No project workspaces, no training run, no label taxonomy to pre-declare.
 - [Repository layout](#repository-layout)
 - [Quick start (Docker)](#quick-start-docker)
 - [Using CT-Flow](#using-ct-flow)
+- [Model selection](#model-selection)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Multi-user & security](#multi-user--security-optional)
 - [Configuration reference](#configuration-reference)
@@ -68,6 +69,8 @@ pool.
 | Label → embed → rescore loop | Ready | the core workflow, fully wired end to end |
 | Held-out evaluation (precision/recall/F1 @ IoU 0.5) | Ready | per class + overall, with a visual report |
 | Per-class confidence thresholds (`conf_by_class`) | Ready | needed once one class is easy and another is hard — see [datasets](#datasets--measured-accuracy) |
+| Selectable YOLOE checkpoint (`services/models.py`) | Ready | 11 checkpoints, `yoloe-v8s-seg` up to `yoloe-26x-seg` — locked per project after the first label, see [model selection](#model-selection) |
+| GPU (CUDA) inference | Ready | on by default in Docker; falls back to CPU with a one-line build-arg override |
 | Auto-label + review mode | Ready | predicted boxes are fully editable before they're accepted |
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
 | Session auth (`/api/auth/*`) | Backend only | off unless `LABEL_TOOL_USERS` is set; **no sign-in screen in the UI yet** |
@@ -145,16 +148,21 @@ docker compose up --build # http://localhost:3000
 
 Everything under `DATA_DIR` is mounted at `/data` in the api container, and
 `/data` is the only thing the folder picker can reach — paths outside it are
-rejected server-side (the browser can send any string).
+rejected server-side (the browser can send any string). Model weights are
+*not* baked into the image or copied from anywhere outside this repo — the
+selected checkpoint auto-downloads into a named volume (`models`) the first
+time it's actually used, and persists there across restarts.
 
-> **Prerequisite this repo doesn't self-contain yet:** `backend/Dockerfile`
-> copies the model weight from `../poc/yoloe-11s-seg.pt`, and
-> `docker-compose.yml` builds with `context: ..` — both reach *outside* this
-> repository into the sibling `poc/` folder from the original monorepo layout.
-> A checkout of `CT-Flow` on its own, with no `poc/` folder next to it, will
-> fail to build until that weight is either committed here (with Git LFS,
-> given it's ~28 MB) or fetched at build time instead. Tracked in
-> [Known limitations](#known-limitations--roadmap).
+> **GPU by default.** The build installs a CUDA build of PyTorch and
+> `docker-compose.yml` requests a GPU for the `api` service. This needs an
+> NVIDIA GPU + driver + the [NVIDIA Container
+> Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+> on the host (`docker info` should list an `nvidia` runtime). No GPU on this
+> machine? Either delete the `deploy.reservations` block in
+> `docker-compose.yml`, or build CPU-only without touching any file:
+> ```bash
+> docker compose build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu api
+> ```
 
 ## Using CT-Flow
 
@@ -208,6 +216,30 @@ changing what the tool does underneath.
 class column is an index into that list, so it stays fixed once assigned or
 older files silently decode under the wrong class.
 
+## Model selection
+
+The **Model** dropdown in the session setup card picks which YOLOE checkpoint
+a new project teaches — from `yoloe-v8s-seg` (the oldest, smallest generation)
+up through `yoloe-26x-seg` (the newest generation's largest, most accurate
+size). The full catalog is in [`backend/services/models.py`](backend/services/models.py)
+and served at `GET /api/config`.
+
+**The choice is locked in the moment the first box is saved.** Embeddings
+from two different checkpoints don't share a vector space — mixing them into
+one prompt bank would feed `set_classes()` vectors that don't mean the same
+thing, silently or with a shape error. `Bank.lock_model()` enforces this the
+same way class-index order is locked: the first embedding decides, and a
+`model_id` that doesn't match what's already there gets a `409`, not a
+silent switch. Once a project has a model, the dropdown becomes a read-only
+chip — start a new output folder to try a different one.
+
+Bigger sizes are slower per image but generally more accurate; there's no
+rule of thumb better than trying one on your own dataset's held-out test set
+(see [Using CT-Flow](#using-ct-flow) step 3). On a 4 GB GPU the largest
+checkpoints (`yoloe-26l-seg`, `yoloe-26x-seg`) may not fit — if a model fails
+to load with an out-of-memory error, drop to a smaller size or run on CPU
+(see [Quick start](#quick-start-docker)).
+
 ## Keyboard shortcuts
 
 Opens with **`?`** in the app; inert while a text field or dialog has focus.
@@ -255,11 +287,12 @@ dependency.
 | `WEB_PORT` | `3000` | port the UI is served on |
 | `LABEL_TOOL_MODE` | `vm` in Docker | `vm` = confined to `LABEL_TOOL_VM_ROOT`; `local` = browse every drive |
 | `LABEL_TOOL_VM_ROOT` | `/data` | the confinement root in `vm` mode |
-| `MODEL_PATH` | `/models/yoloe-11s-seg.pt` | weight baked into the api image at build time |
+| `MODELS_DIR` | `/models` in Docker | where YOLOE checkpoints are cached after auto-download — a named volume in Docker, a plain repo-local folder otherwise |
 | `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — empty means no login and no upload |
 | `LABEL_TOOL_SECRET` | *(random per restart)* | signs the session cookie; unset = everyone signed out on every restart |
 | `LABEL_TOOL_MAX_UPLOAD_MB` | `25` | per-file upload cap |
 | `APP_UID` | `1000` | build arg — must own `DATA_DIR` on a Linux host, since the container doesn't run as root |
+| `TORCH_INDEX_URL` | `.../whl/cu126` | build arg — the pip index PyTorch installs from; override to `.../whl/cpu` for a GPU-less build |
 
 `local` mode only makes sense outside Docker, where the server runs on your
 own PC and browsing the server means browsing your machine.
@@ -297,8 +330,10 @@ cd frontend && npm run dev          # needs API_URL if not 127.0.0.1:8000
 .venv\Scripts\python.exe -m backend._experiment_conf 20        # conf-threshold sweep, needs data/conveyor_pvc
 ```
 
-CPU-only torch by default. For GPU, swap the base image and drop the
-`--extra-index-url .../cpu` in `backend/Dockerfile`.
+Outside Docker, `pip install`s whatever torch build is already in `.venv` —
+install a [CUDA build](https://pytorch.org/get-started/locally/) yourself if
+your GPU and driver support it, or leave the CPU build; either works, `vpe.py`
+never hardcodes a device.
 
 ## Testing & CI
 
@@ -363,12 +398,13 @@ The headline items:
   embedding distance. Cheap and has been good enough in practice; swapping
   in real embedding distance would roughly double rescore latency, so it's
   deferred until it's a measured problem.
-- **The Docker non-root change (`APP_UID`) has never been build-verified**
-  on this machine (no Docker daemon running when it was written).
-- **This repo depends on a sibling `poc/` folder outside it** for the model
-  weight and part of the Docker build context — see the callout in
-  [Quick start](#quick-start-docker). Worth resolving before anyone clones
-  `CT-Flow` on its own.
+- **GPU/non-root Docker build succeeds; runtime is unverified.**
+  `docker compose build api` completed successfully with the CUDA torch
+  wheel and the non-root user setup, but Docker Desktop's daemon stopped
+  responding (`500` on every API call) right after — `docker compose up` and
+  an actual `torch.cuda.is_available()` check inside the running container
+  are still outstanding. Restart Docker Desktop and re-run to finish
+  verifying.
 
 ## Documentation index
 

@@ -71,16 +71,38 @@ class Bank:
         self.instances: dict[str, list[dict]] = meta.get("instances", {})
         self.labeled: list[str] = meta.get("labeled", [])
         self.auto: list[str] = meta.get("auto", [])  # written by the model, not a human
+        # None = no embedding has ever landed in this bank yet, so any model
+        # is still fair game. Once set it never changes -- see lock_model().
+        self.model: str | None = meta.get("model")
 
     def _save(self):
         torch.save(self.embeddings, self.emb_path)
         self.meta_path.write_text(
             json.dumps({"instances": self.instances, "labeled": self.labeled,
-                        "auto": self.auto},
+                        "auto": self.auto, "model": self.model},
                        indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         (self.dir / "classes.txt").write_text("\n".join(self.classes), encoding="utf-8")
+
+    def lock_model(self, model_id: str) -> str:
+        """Every embedding in a bank has to come out of the same model's
+        SAVPE head -- two checkpoints don't share an embedding space, so
+        mixing them would feed set_classes() vectors that don't mean the same
+        thing. The first embedding this bank ever receives decides the model
+        for good, the same way Bank.classes locks insertion order. Returns
+        the model now in effect (== model_id on a fresh bank)."""
+        with self.lock:
+            self._load()
+            if self.model is None:
+                self.model = model_id
+                self._save()
+            elif self.model != model_id:
+                raise ValueError(
+                    f"this project was taught with {self.model!r}, not {model_id!r} -- "
+                    "start a new output folder to use a different model"
+                )
+            return self.model
 
     @property
     def classes(self) -> list[str]:
@@ -98,6 +120,7 @@ class Bank:
             "classes": [{"name": n, "count": self.count(n)} for n in self.classes],
             "labeled": self.labeled,
             "auto": self.auto,
+            "model": self.model,  # null until the first box is saved -- model picker stays open until then
         }
 
     def add(self, class_name: str, embedding: torch.Tensor, source_image: str,

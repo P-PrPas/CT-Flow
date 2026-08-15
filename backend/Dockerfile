@@ -1,4 +1,4 @@
-# Build context is the repo root (the model weight lives in ../../poc from here).
+# Build context is label_tool/ (this repo's root), see docker-compose.yml.
 FROM python:3.12-slim
 
 # opencv needs these; slim has neither
@@ -8,29 +8,34 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Any .crt dropped in label_tool/certs/ becomes trusted at build time. Needed
-# when something intercepts TLS between the build and pypi -- a corporate
-# proxy, or antivirus HTTPS scanning (AVG/Avast/Kaspersky all do this).
+# Any .crt dropped in certs/ becomes trusted at build time. Needed when
+# something intercepts TLS between the build and pypi -- a corporate proxy,
+# or antivirus HTTPS scanning (AVG/Avast/Kaspersky all do this).
 # Empty folder = no-op.
-COPY label_tool/certs/ /usr/local/share/ca-certificates/
+COPY certs/ /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
     REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
-# CPU-only torch: the full CUDA wheel is ~2.5GB and this is a labeling tool.
-# Swap to the default index + an nvidia base image if you ever want GPU.
-COPY label_tool/backend/requirements.txt backend/requirements.txt
-RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+# CUDA build of torch. cu126 needs a host driver that supports CUDA 12.6 or
+# newer -- check with `nvidia-smi`, the "CUDA Version" it prints is the
+# ceiling your driver supports, and a driver only runs wheels built for that
+# version or older (a cu128/cu130 wheel on a driver capped at 12.7 fails with
+# "CUDA driver version is insufficient"). No NVIDIA GPU on the build/run
+# host? Override at build time:
+#   docker compose build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu api
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
+COPY backend/requirements.txt backend/requirements.txt
+RUN pip install --no-cache-dir --extra-index-url ${TORCH_INDEX_URL} \
     -r backend/requirements.txt
 
-COPY poc/yoloe-11s-seg.pt /models/yoloe-11s-seg.pt
 # backend/ stays a real package (app.py, routers/, services/) so imports
 # inside it (`from .routers import ...`, `from ..services.bank import Bank`)
 # resolve the same way they do outside Docker.
-COPY label_tool/backend/ backend/
+COPY backend/ backend/
 
-ENV MODEL_PATH=/models/yoloe-11s-seg.pt \
+ENV MODELS_DIR=/models \
     LABEL_TOOL_MODE=vm \
     LABEL_TOOL_VM_ROOT=/data \
     YOLO_CONFIG_DIR=/tmp \
@@ -43,7 +48,13 @@ ENV MODEL_PATH=/models/yoloe-11s-seg.pt \
 # Docker Desktop on Windows/macOS ignores mount ownership, so the default is
 # only a real decision on Linux hosts.
 ARG APP_UID=1000
-RUN useradd --create-home --uid ${APP_UID} app && chown -R app /app
+# /models is a named volume (docker-compose.yml) so a checkpoint survives a
+# restart instead of re-downloading. A named volume's first mount inherits
+# whatever owns this directory in the image at that moment -- must happen
+# before USER, or the volume comes up root-owned and `app` can't write into it.
+RUN mkdir -p /models \
+    && useradd --create-home --uid ${APP_UID} app \
+    && chown -R app /app /models
 USER app
 
 EXPOSE 8000

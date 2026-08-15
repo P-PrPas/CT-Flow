@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from .. import config
 from ..deps import checked_path
+from ..services import models as model_registry
 from ..services.images import list_images
 
 router = APIRouter(prefix="/api", tags=["system"])
@@ -12,7 +13,9 @@ router = APIRouter(prefix="/api", tags=["system"])
 @router.get("/config")
 def get_config():
     return {"mode": config.MODE, "roots": config.browse_roots(),
-            "colors": config.LABEL_COLORS}
+            "colors": config.LABEL_COLORS,
+            "models": model_registry.public_catalog(),
+            "default_model": model_registry.DEFAULT_MODEL_ID}
 
 
 @router.get("/browse")

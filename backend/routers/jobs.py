@@ -40,7 +40,7 @@ def score(req: ScoreReq, background_tasks: BackgroundTasks):
         job_tracker.finish(job_id, {"scores": {}})
         return {"job_id": job_id, "total": 0}
     names, combined = mean
-    background_tasks.add_task(_run_score, job_id, names, combined, paths)
+    background_tasks.add_task(_run_score, job_id, names, combined, paths, bank.model)
     return {"job_id": job_id, "total": len(paths)}
 
 
@@ -56,9 +56,9 @@ def _signature(path: str) -> list[int]:
     return cv2.resize(img, (8, 8), interpolation=cv2.INTER_AREA).flatten().tolist()
 
 
-def _run_score(job_id: str, names: list[str], combined, paths: list[str]):
+def _run_score(job_id: str, names: list[str], combined, paths: list[str], model_id: str):
     try:
-        model = arm(names, combined)
+        model = arm(names, combined, model_id)
         results = {}
         for i, path in enumerate(paths):
             dets = predict_one(model, names, path, conf=0.05)
@@ -98,14 +98,14 @@ def evaluate(req: EvalReq, background_tasks: BackgroundTasks):
     names, combined = mean
     job_id = job_tracker.create(len(gt))
     background_tasks.add_task(_run_evaluate, job_id, names, combined, gt,
-                              req.conf, req.conf_by_class)
+                              req.conf, req.conf_by_class, bank.model)
     return {"job_id": job_id, "total": len(gt)}
 
 
 def _run_evaluate(job_id: str, names: list[str], combined, gt: dict, conf: float,
-                  conf_by_class: dict[str, float]):
+                  conf_by_class: dict[str, float], model_id: str):
     try:
-        model = arm(names, combined)
+        model = arm(names, combined, model_id)
         pred = {}
         for i, path in enumerate(gt):
             pred[path] = predict_one(model, names, path, conf, conf_by_class)
@@ -136,15 +136,15 @@ def autolabel(req: AutoReq, background_tasks: BackgroundTasks):
     paths = [str(checked_path(p)) for p in req.images]
     job_id = job_tracker.create(len(paths))
     background_tasks.add_task(_run_autolabel, job_id, str(checked_path(req.output_dir)),
-                              names, combined, paths, req.conf, req.conf_by_class)
+                              names, combined, paths, req.conf, req.conf_by_class, bank.model)
     return {"job_id": job_id, "total": len(paths)}
 
 
 def _run_autolabel(job_id: str, output_dir: str, names: list[str], combined, paths: list[str],
-                   conf: float, conf_by_class: dict[str, float]):
+                   conf: float, conf_by_class: dict[str, float], model_id: str):
     try:
         bank = Bank(output_dir)
-        model = arm(names, combined)
+        model = arm(names, combined, model_id)
         written, empty, auto_paths = 0, [], []
         for i, path in enumerate(paths):
             dets = predict_one(model, names, path, conf, conf_by_class)

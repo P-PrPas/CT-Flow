@@ -7,7 +7,7 @@
 - **รูปแบบ error:** ทุก endpoint คืน `HTTPException` ของ FastAPI เมื่อผิดพลาด → body เป็น `{"detail": "<ข้อความ>"}` ฝั่ง frontend (`lib/api.ts`) จับคู่กับสิ่งนี้โดยตรงใน `request()`: โยน `Error(data.detail)` เมื่อ response ไม่ ok
 - **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, `output_dir`, `test_dir`, รูปภาพ) ต้องผ่าน `deps.checked_path()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.path_allowed()` (นอกขอบเขต `vm` mode) จะได้ `403`
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
-- **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...]}`
+- **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
 - **Auth:** ถ้าตั้ง `LABEL_TOOL_USERS` ไว้ ทุก endpoint **ยกเว้น** `GET /api/config` และ `/api/auth/*` ต้องมี session cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้ง ระบบไม่มี login เลยและทุก endpoint เปิดเหมือนเดิม (ดู `services/auth.py`)
 - **`conf_by_class`:** `/api/predict`, `/api/evaluate`, `/api/autolabel` รับ dict `{ชื่อคลาส: threshold}` เพื่อ override `conf` เป็นรายคลาส (`{}` = พฤติกรรมเดิม) — เหตุผลและตัวเลขอยู่ใน [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
 
@@ -47,9 +47,10 @@
 ## System (`routers/system.py`)
 
 ### `GET /api/config`
-รายงานโหมดการทำงานปัจจุบัน + root ที่ browse ได้ + สีที่ใช้แสดงกล่องแต่ละคลาส
+รายงานโหมดการทำงานปัจจุบัน + root ที่ browse ได้ + สีที่ใช้แสดงกล่องแต่ละคลาส + รายการโมเดลที่เลือกได้
 
-- **Response:** `{"mode": "local"|"vm", "roots": [str...], "colors": [str...]}`
+- **Response:** `{"mode": "local"|"vm", "roots": [str...], "colors": [str...], "models": [ModelInfo...], "default_model": str}`
+- `ModelInfo` = `{"id": str, "family": str, "size": str, "note": str}` — ดู [`services/models.py`](../backend/services/models.py), `id` คือค่าที่ส่งเป็น `model_id` ใน `POST /api/label`
 - ใช้เป็น healthcheck endpoint ของ container `api` ด้วย (`docker-compose.yml`)
 
 ### `GET /api/browse`
@@ -90,10 +91,11 @@
 ### `POST /api/label`
 บันทึกป้าย: สกัด SAVPE embedding เข้า bank ต่อคลาส, mark ภาพว่า labeled, เขียนไฟล์ label YOLO format
 
-- **Body:** `{"output_dir": str, "image": str, "boxes": [Box...], "mode": "replace"|"update"}` (`mode` default `"replace"`)
+- **Body:** `{"output_dir": str, "image": str, "boxes": [Box...], "model_id": str, "mode": "replace"|"update"}` (`mode` default `"replace"`, `model_id` default คือ `default_model` จาก `GET /api/config`)
 - **Response:** `{"bank": BankSummary}`
 - **400** ถ้าอ่านภาพไม่ได้ หรือ `boxes` ว่างเปล่า
-- **พฤติกรรม:** กล่องถูกจัดกลุ่มตามคลาสก่อน แล้วเรียก `extract_embedding()` **หนึ่งครั้งต่อคลาสต่อการบันทึก** (เฉลี่ยจากทุกกล่องของคลาสนั้นในภาพเดียวกัน) → `bank.add()` ต่อคลาส → `bank.mark_labeled()` → `bank.write_yolo_labels()` โดย `merge=True` เมื่อ `mode="update"`
+- **409** ถ้า `model_id` ไม่ตรงกับโมเดลที่ bank นี้ล็อกไว้แล้ว (bank มี embedding อยู่ก่อนจาก checkpoint อื่น) — เกิดก่อนเรียก `extract_embedding()` เสมอ ไม่เสียเวลาโหลดโมเดลผิดตัว
+- **พฤติกรรม:** `bank.lock_model(model_id)` ก่อน (ตั้งค่าให้ถ้า bank ยังไม่มีโมเดลเลย, ปฏิเสธถ้าไม่ตรง) → กล่องถูกจัดกลุ่มตามคลาสก่อน แล้วเรียก `extract_embedding()` **หนึ่งครั้งต่อคลาสต่อการบันทึก** (เฉลี่ยจากทุกกล่องของคลาสนั้นในภาพเดียวกัน) → `bank.add()` ต่อคลาส → `bank.mark_labeled()` → `bank.write_yolo_labels()` โดย `merge=True` เมื่อ `mode="update"`
 - แต่ละ instance ใน bank บันทึก `labeled_by` = ผู้ใช้ที่ login อยู่ (FR-31) หรือ `null` เมื่อไม่มีระบบ login
 
 ### `POST /api/relabel`
@@ -111,6 +113,7 @@
 - **Response:** `{"boxes": [{"cls": str, "box": [...], "conf": float}]}`
 - bank ว่าง → `{"boxes": []}` ทันที ไม่มี forward pass
 - ไม่แตะ bank และไม่เขียนไฟล์ใด ๆ — กล่องที่คืนมาเป็นข้อเสนอ ยังไม่ใช่ป้าย
+- ใช้โมเดลที่ล็อกไว้กับ bank เสมอ (`bank.model`) — **ไม่รับ `model_id` จาก client**, เหมือน `/api/score`, `/api/evaluate`, `/api/autolabel` ทั้งหมด
 
 ### `GET` / `POST` / `DELETE /api/history`
 ประวัติผล evaluate เก็บที่ `<output_dir>/_bank/eval_history.json` (T-07) เก็บสูงสุด 200 จุด
@@ -195,4 +198,4 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 - **พฤติกรรม:** arm โมเดลครั้งเดียว → predict ทีละภาพ → เขียนไฟล์ label เฉพาะภาพที่มี detection (ไม่งั้นนับเป็น `no_detection`) → `bank.mark_auto()` เฉพาะภาพที่เขียนป้ายจริง
 - **ผลลัพธ์ (`result`):** `{"written": int, "no_detection": int, "no_detection_images": [path...], "bank": BankSummary}` — คืนรายชื่อภาพที่ไม่เจออะไรเลย ไม่ใช่แค่จำนวน (FR-28)
 
-**สัญญาร่วมของ background job ทั้งสามตัว:** สร้างผ่าน `job_tracker.create(total)` → tick progress ทีละภาพ → `finish(result)` เมื่อสำเร็จ หรือ `fail(error)` เมื่อ exception — ฝั่ง frontend ใช้ `lib/api.ts`'s `runJob()` POST ไปเริ่ม job แล้ว poll `/api/jobs/{id}` ทุก 400ms จนกว่า `finished`
+**สัญญาร่วมของ background job ทั้งสามตัว:** สร้างผ่าน `job_tracker.create(total)` → tick progress ทีละภาพ → `finish(result)` เมื่อสำเร็จ หรือ `fail(error)` เมื่อ exception — ฝั่ง frontend ใช้ `lib/api.ts`'s `runJob()` POST ไปเริ่ม job แล้ว poll `/api/jobs/{id}` ทุก 400ms จนกว่า `finished` · "arm โมเดล" ทั้งสามที่นี่หมายถึง `vpe.arm(names, combined, bank.model)` เสมอ — ไม่มี body ตัวไหนรับ `model_id` จาก client

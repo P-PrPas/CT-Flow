@@ -9,7 +9,7 @@ import type { Box } from "../components/BoxCanvas";
 import type { JobProgress } from "../components/ProgressBar";
 import * as api from "./api";
 import { adviseAll, appendHistory, clearHistory, loadHistory, type EvalPoint } from "./history";
-import type { BankSummary, EvalImage, EvalResult, Score } from "./types";
+import type { BankSummary, EvalImage, EvalResult, ModelInfo, Score } from "./types";
 import { stemOf } from "./ui";
 
 export type Panel = "pool" | "testset" | "report" | "insights";
@@ -91,6 +91,13 @@ export function useSession() {
   const [mode, setMode] = useState("");
   const [colors, setColors] = useState<string[]>([]);
   const [reachable, setReachable] = useState<boolean | null>(null);
+
+  // --- model choice -------------------------------------------------------
+  // Which YOLOE checkpoint a *new* project starts with. Once a bank has any
+  // embedding it's locked server-side (Bank.lock_model) -- bank.model below
+  // is the source of truth from then on, this is only the picker's value.
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelId, setModelId] = useState("");
 
   // --- shell ------------------------------------------------------------
   const [panel, setPanel] = useState<Panel>("pool");
@@ -181,7 +188,10 @@ export function useSession() {
 
   useEffect(() => {
     api.getConfig()
-      .then((c) => { setMode(c.mode); setColors(c.colors); setReachable(true); })
+      .then((c) => {
+        setMode(c.mode); setColors(c.colors); setReachable(true);
+        setModels(c.models); setModelId(c.default_model);
+      })
       .catch(() => { setReachable(false); setStatus("Backend not reachable — is the API running?"); });
   }, []);
 
@@ -351,6 +361,9 @@ export function useSession() {
       const d = await api.openSession(inputDir, outputDir);
       setImages(d.images);
       setBank(d.bank);
+      // A project that already has embeddings is already locked to a model --
+      // reflect that instead of whatever the picker last happened to show.
+      if (d.bank.model) setModelId(d.bank.model);
       setScores({});
       poolReset([]);
       setEvalResult(null);
@@ -402,8 +415,9 @@ export function useSession() {
     guard("Extracting visual prompt…", async () => {
       if (!current || !pool.boxes.length) return;
       const saved = pool.boxes;
-      const d = await api.saveLabel(outputDir, current, saved, updateMode ? "update" : "replace");
+      const d = await api.saveLabel(outputDir, current, saved, updateMode ? "update" : "replace", modelId);
       setBank(d.bank);
+      if (d.bank.model) setModelId(d.bank.model);
       setClipboard({ from: current, boxes: saved });
       poolReset([]);
       setStaleScores((n) => n + 1);
@@ -435,7 +449,7 @@ export function useSession() {
     guard("Teaching the model from your corrections…", async () => {
       if (!current || !pool.boxes.length) return;
       const saved = pool.boxes;
-      const d = await api.saveLabel(outputDir, current, saved, "replace");
+      const d = await api.saveLabel(outputDir, current, saved, "replace", modelId);
       setBank(d.bank);
       setClipboard({ from: current, boxes: saved });
       poolReset([]);
@@ -547,6 +561,7 @@ export function useSession() {
     showSetup, setShowSetup, showShortcuts, setShowShortcuts,
     // config
     inputDir, setInputDir, outputDir, setOutputDir, testDir, setTestDir, conf, setConf,
+    models, modelId, setModelId,
     // pool
     images, bank, scores, current, savedBoxes, cls, setCls, updateMode, setUpdateMode, selected, setSelected,
     pool, clipboard, setClipboard, classNames, labeled, auto, remaining, bankTotal,

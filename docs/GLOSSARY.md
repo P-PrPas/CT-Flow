@@ -2,7 +2,9 @@
 
 คำอธิบายศัพท์เทคนิคที่ใช้ในเอกสารชุดนี้ เรียงตามลำดับที่มักพบเจอเมื่ออ่าน workflow ของเครื่องมือ ไม่ใช่ตามตัวอักษร
 
-**YOLOE** โมเดล object detection แบบ zero-shot จาก Ultralytics ที่รับ "prompt" (ภาพตัวอย่างหรือข้อความ) แทนการเทรนคลาสตายตัวล่วงหน้า เครื่องมือนี้ใช้น้ำหนัก `yoloe-11s-seg.pt`
+**YOLOE** โมเดล object detection แบบ zero-shot จาก Ultralytics ที่รับ "prompt" (ภาพตัวอย่างหรือข้อความ) แทนการเทรนคลาสตายตัวล่วงหน้า เครื่องมือนี้เลือกน้ำหนักได้จากหลายรุ่น/ขนาด (ดู "Checkpoint / model_id" ด้านล่าง), ค่า default คือ `yoloe-11s-seg.pt`
+
+**Checkpoint / `model_id`** ไฟล์น้ำหนักของ YOLOE หนึ่งรุ่น/ขนาดที่เลือกได้จาก dropdown ตอนเริ่มโปรเจกต์ใหม่ (`services/models.py` มีให้เลือก 11 แบบ ตั้งแต่ `yoloe-v8s-seg` เล็กสุด ถึง `yoloe-26x-seg` ใหญ่/แม่นสุด) **ล็อกกับ output folder ตลอดไปตั้งแต่กล่องแรกที่บันทึก** เพราะ embedding จากคนละ checkpoint ใช้แทนกันไม่ได้
 
 **VPE (Visual Prompt Encoding)** กลไกของ YOLOE ที่แปลงตัวอย่างภาพ (visual prompt) ให้เป็น embedding แทนคลาสหนึ่ง ๆ แทนการสอนด้วยข้อความ
 

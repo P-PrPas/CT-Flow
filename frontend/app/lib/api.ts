@@ -3,7 +3,7 @@
  *  go through /api/*, proxied to FastAPI by app/api/[...path]/route.ts. */
 import type { Box } from "../components/BoxCanvas";
 import type { JobProgress } from "../components/ProgressBar";
-import type { BankSummary, EvalResult, Score } from "./types";
+import type { BankSummary, EvalResult, ModelInfo, Score } from "./types";
 
 export type { JobProgress };
 
@@ -23,7 +23,9 @@ const post = (url: string, body: unknown) =>
 
 export const imgUrl = (path: string) => `/api/image?path=${encodeURIComponent(path)}`;
 
-export function getConfig(): Promise<{ mode: string; roots: string[]; colors: string[] }> {
+export function getConfig(): Promise<{
+  mode: string; roots: string[]; colors: string[]; models: ModelInfo[]; default_model: string;
+}> {
   return request("/api/config");
 }
 
@@ -45,9 +47,9 @@ export function openSession(
 }
 
 export function saveLabel(
-  output_dir: string, image: string, boxes: Box[], mode: "replace" | "update"
+  output_dir: string, image: string, boxes: Box[], mode: "replace" | "update", model_id: string
 ): Promise<{ bank: BankSummary }> {
-  return post("/api/label", { output_dir, image, boxes, mode });
+  return post("/api/label", { output_dir, image, boxes, mode, model_id });
 }
 
 /** Rewrites the image's label file directly -- no embedding extraction, for

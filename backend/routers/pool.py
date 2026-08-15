@@ -11,6 +11,7 @@ from ..deps import checked_path, current_user
 from ..services import bank as bank_store
 from ..services import events as event_log
 from ..services import groundtruth
+from ..services import models as model_registry
 from ..services.bank import Bank
 from ..services.images import list_images
 from ..services.vpe import arm, extract_embedding, predict_one
@@ -63,6 +64,10 @@ class LabelReq(BaseModel):
     output_dir: str
     image: str
     boxes: list[Box]
+    # Which YOLOE checkpoint to teach. Only matters the first time this bank
+    # gets an embedding -- Bank.lock_model() fixes it from then on, so this
+    # default is really "what a brand-new project starts with".
+    model_id: str = model_registry.DEFAULT_MODEL_ID
     # replace: this image's label file becomes exactly `boxes`.
     # update: `boxes` are added to whatever's already saved for this image.
     mode: Literal["replace", "update"] = "replace"
@@ -76,12 +81,16 @@ def save_label(req: LabelReq, user: str | None = Depends(current_user)):
     if not req.boxes:
         raise HTTPException(400, "no boxes")
     bank = Bank(str(checked_path(req.output_dir)))
+    try:
+        model_id = bank.lock_model(req.model_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
 
     by_class: dict[str, list[list[float]]] = {}
     for b in req.boxes:
         by_class.setdefault(b.cls, []).append(b.box)
     for cls_name, boxes in by_class.items():
-        bank.add(cls_name, extract_embedding(img, boxes), req.image, boxes[0], user)
+        bank.add(cls_name, extract_embedding(img, boxes, model_id), req.image, boxes[0], user)
     bank.mark_labeled(req.image)
 
     h, w = img.shape[:2]
@@ -110,7 +119,7 @@ def predict(req: PredictReq):
     if mean is None:
         return {"boxes": []}
     names, combined = mean
-    model = arm(names, combined)
+    model = arm(names, combined, bank.model)
     dets = predict_one(model, names, str(checked_path(req.image)), req.conf, req.conf_by_class)
     return {"boxes": dets}
 

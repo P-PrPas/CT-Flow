@@ -14,14 +14,16 @@
 
 ## รายการงานที่ควรพิจารณาทำต่อ (เรียงตามความสำคัญโดยประมาณ)
 
-1. **แก้ปัญหาคลาสขนาดเล็ก/แยกยาก (เช่น `defect`)** — เป็นข้อจำกัดที่วัดผลได้ชัดเจนที่สุดในตอนนี้ (F1 ~0.04–0.07) ทางเลือกที่ควรลอง: เพิ่มความละเอียดภาพ (imgsz เกิน 640), crop เฉพาะพื้นที่สนใจก่อนส่งเข้า SAVPE, หรือทดลอง NN-matching แทน mean-pooling สำหรับคลาสนี้โดยเฉพาะ
-2. **เพิ่ม authentication/authorization ระดับพื้นฐาน** — ก่อนเปิดให้ทีมมากกว่า 1 คนใช้งานพร้อมกัน หรือ deploy นอกเครือข่ายที่เชื่อถือได้เต็มที่
-3. **ย้าย job tracker ออกจากหน่วยความจำ process เดียว** — จำเป็นถ้าจะรองรับหลาย worker หรือผู้ใช้พร้อมกันจำนวนมาก (โค้ดมีคอมเมนต์ระบุแนวทางไว้แล้วว่าควรใช้ Redis/TTL eviction)
-4. **เพิ่ม `mode="update"` ให้ `/api/relabel`** — ปัจจุบันแก้ป้าย auto-label ต้องเขียนทับทั้งหมด ต่างจาก endpoint อื่นที่มี merge mode
-5. **ตั้ง CI พื้นฐาน** — อย่างน้อยรัน `_smoke_test.py` อัตโนมัติเมื่อมีการเปลี่ยนแปลงโค้ด backend เพื่อจับ regression ของ invariant สำคัญ (class-index stability, bank/test-set separation) ก่อนที่จะรู้ตัวจากการใช้งานจริง
-6. **ประเมิน NN-matching bank อย่างจริงจัง** — ถ้าข้อ 1 ยืนยันว่า mean-pooling คือคอขวดจริง ให้ทำตามแนวทางที่คอมเมนต์ในโค้ดชี้ไว้แล้ว (`bank.py`) เทียบผลกับ mean-pooling ปัจจุบันด้วยชุด test set เดียวกัน
-7. **ทบทวนสิทธิ์ root ของ container `api`** — ถ้าจะ deploy ในสภาพแวดล้อมที่ไม่ไว้ใจได้เต็มที่ ควรกำหนด UID คงที่แทนการรันเป็น root
-8. **พิจารณา active-learning selector ที่แท้จริง** — ถ้าปริมาณภาพที่ต้อง label ต่อโปรเจกต์ใหญ่ขึ้นมาก การเรียง "confidence ต่ำสุดก่อน" แบบปัจจุบันอาจไม่พอ ควรพิจารณาตัวชี้วัดที่คำนึงถึง diversity ของภาพด้วย ไม่ใช่แค่ confidence
+1. **แก้ปัญหาคลาสขนาดเล็ก/แยกยาก (เช่น `defect`)** — T-01 ยืนยันแล้วว่าสาเหตุหลักคือ threshold ไม่ใช่ไม่มีสัญญาณ (recall 0.00 → 0.26 เมื่อลด conf) `conf_by_class` แก้ไปครึ่งทาง (defect F1 0.248) แต่ยังห่างจาก `READY_F1 = 0.75` — ขั้นต่อไปคือ crop เฉพาะพื้นที่สนใจก่อนส่งเข้า SAVPE (T-08 ในเอกสาร requirements) ดู [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
+2. ~~เพิ่ม authentication/authorization ระดับพื้นฐาน~~ ✅ ทำแล้ว (`/api/auth/*` + middleware, ปิดอยู่จนกว่าจะตั้ง `LABEL_TOOL_USERS`) — เหลือหน้า login บน UI
+3. **ย้าย job tracker ออกจากหน่วยความจำ process เดียว** — จำเป็นถ้าจะรองรับหลาย worker หรือผู้ใช้พร้อมกันจำนวนมาก (โค้ดมีคอมเมนต์ระบุแนวทางไว้แล้วว่าควรใช้ Redis/TTL eviction) — ยังไม่เกิด ยังไม่ทำ
+4. ~~เพิ่ม `mode="update"` ให้ `/api/relabel`~~ ✅ ทำแล้ว
+5. ~~ตั้ง CI พื้นฐาน~~ ✅ ทำแล้ว — `.github/workflows/backend.yml` (`checks` + `smoke` job) ยืนยันแล้วว่าจับ regression จริง (ทดสอบด้วยการสลับ `Bank.classes` เป็น `sorted()`)
+6. **ประเมิน NN-matching bank อย่างจริงจัง** — ยังไม่ทำ รอ T-08 (crop) เสร็จก่อนตามลำดับใน requirements doc เพราะ T-01 ชี้ว่าปัญหาหลักคือ scale ไม่ใช่ diversity
+7. ~~ทบทวนสิทธิ์ root ของ container `api`~~ ✅ ทำแล้ว — `ARG APP_UID` + `USER app`, build ยืนยันสำเร็จแล้ว
+8. **พิจารณา active-learning selector ที่แท้จริง** — ถ้าปริมาณภาพที่ต้อง label ต่อโปรเจกต์ใหญ่ขึ้นมาก การเรียง "confidence ต่ำสุดก่อน" + thumbnail diversity แบบปัจจุบัน (FR-18) อาจไม่พอ ควรพิจารณา embedding distance จริงแทน thumbnail hash — ยังไม่ทำ
+9. **GPU support** ✅ ทำแล้ว — `backend/Dockerfile` ติดตั้ง CUDA torch (`cu126`) เป็นค่าเริ่มต้น, `docker-compose.yml` ขอ GPU ผ่าน `deploy.reservations`, override เป็น CPU ได้ด้วย build arg เดียว
+10. **เลือก YOLOE checkpoint ได้หลายเวอร์ชัน/ขนาด** ✅ ทำแล้ว — `services/models.py`, ล็อกต่อ output folder ผ่าน `Bank.lock_model()`, ดู FR-36 ใน [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md)
 
 ## ความเสี่ยง / คำถามที่ทีมควรตัดสินใจก่อนเริ่มงานต่อ
 

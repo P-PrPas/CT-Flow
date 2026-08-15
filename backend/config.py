@@ -12,9 +12,14 @@ import string
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parent          # label_tool/backend
-REPO_ROOT = BACKEND_ROOT.parent.parent                   # poc-visual-prompt
-# In Docker the weight is baked in at /models; outside it lives next to the POC.
-MODEL_PATH = os.getenv("MODEL_PATH", str(REPO_ROOT / "poc" / "yoloe-11s-seg.pt"))
+PKG_ROOT = BACKEND_ROOT.parent                            # label_tool -- this repo's root
+REPO_ROOT = PKG_ROOT.parent                                # poc-visual-prompt -- shared data/ lives here, see _experiment_conf.py
+# Where YOLOE checkpoints live -- ultralytics auto-downloads a missing one by
+# filename into here the first time it's selected (see services/models.py),
+# so nothing has to be pre-baked or pre-fetched. Repo-local, unlike data/:
+# unlike datasets there's no reason to share weights with the POC checkout.
+# In Docker this is a named volume so a restart doesn't re-download.
+MODELS_DIR = os.getenv("MODELS_DIR", str(PKG_ROOT / "models"))
 
 MODE = os.getenv("LABEL_TOOL_MODE", "local").lower()
 VM_DATA_ROOT = Path(os.getenv("LABEL_TOOL_VM_ROOT", "/data"))

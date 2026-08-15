@@ -37,7 +37,11 @@ def wait_job(job_id: str, timeout: float = 60) -> dict:
         assert time.time() - start < timeout, f"job {job_id} did not finish in {timeout}s"
         time.sleep(0.1)
 
-assert c.get("/api/config").json()["mode"] in ("local", "vm")
+cfg = c.get("/api/config").json()
+assert cfg["mode"] in ("local", "vm")
+assert cfg["default_model"] == "yoloe-11s-seg", cfg
+assert {"id", "family", "size"} <= cfg["models"][0].keys() and len(cfg["models"]) > 1, cfg["models"]
+assert all("file" not in m for m in cfg["models"]), cfg["models"]  # no local paths leak to the browser
 
 r = c.post("/api/session", json={"input_dir": POOL, "output_dir": str(OUT)})
 assert r.status_code == 200, r.text
@@ -53,6 +57,18 @@ r = c.post("/api/label", json={
 })
 assert r.status_code == 200, r.text
 assert r.json()["bank"]["classes"] == [{"name": "test_item", "count": 1}]
+# no model_id was sent -> the bank locks onto the default, not "unset"
+assert r.json()["bank"]["model"] == "yoloe-11s-seg", r.json()["bank"]
+
+# switching models on a bank that already has embeddings must be rejected --
+# rejected before any inference runs, so this costs no extra model load
+r = c.post("/api/label", json={
+    "output_dir": str(OUT), "image": target,
+    "boxes": [{"cls": "test_item", "box": [1, 1, 5, 5]}],
+    "model_id": "yoloe-11m-seg",
+})
+assert r.status_code == 409, r.text
+print("model lock: mismatched model_id on an existing bank rejected (409)")
 
 label_file = OUT / "labels" / (Path(target).stem + ".txt")
 assert label_file.exists() and label_file.read_text().startswith("0 "), label_file
@@ -286,6 +302,23 @@ print("conf_by_class: per-class thresholds honoured and echoed back")
 # --- FR-31: every bank instance records who taught it (None when auth is off)
 meta = json.loads((OUT / "_bank" / "metadata.json").read_text(encoding="utf-8"))
 assert all("labeled_by" in i for insts in meta["instances"].values() for i in insts), meta
+
+# --- model lock, exercised directly (no HTTP, no model load needed) ---
+LOCK = HERE / "_smoke_lock"
+if LOCK.exists():
+    shutil.rmtree(LOCK)
+b = Bank(str(LOCK))
+assert b.model is None
+assert b.lock_model("yoloe-11s-seg") == "yoloe-11s-seg"
+assert b.lock_model("yoloe-11s-seg") == "yoloe-11s-seg"  # same model again: no-op
+try:
+    b.lock_model("yoloe-11m-seg")
+    assert False, "a second model on the same bank should have been rejected"
+except ValueError:
+    pass
+assert Bank(str(LOCK)).model == "yoloe-11s-seg"  # persisted across a reload
+shutil.rmtree(LOCK)
+print("model lock: first embedding fixes the bank's model, survives reload, rejects mismatches")
 
 # --- §7: effort metrics outlive the browser tab ---
 for e in [{"kind": "session", "session": "s1"},

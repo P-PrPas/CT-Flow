@@ -1,7 +1,19 @@
 "use client";
 
 import type { Session } from "../lib/session";
-import { HelpDot, Icon, Soon } from "../lib/ui";
+import type { ModelInfo } from "../lib/types";
+import { HelpDot, Icon, Soon, Tip } from "../lib/ui";
+
+const groupByFamily = (models: ModelInfo[]) =>
+  models.reduce<Record<string, ModelInfo[]>>((by, m) => {
+    (by[m.family] ??= []).push(m);
+    return by;
+  }, {});
+
+const modelLabel = (models: ModelInfo[], id: string) => {
+  const m = models.find((x) => x.id === id);
+  return m ? `${m.family} · ${m.size}` : id;
+};
 
 /** Step 0: where the images are and where the work goes. Collapses out of the
  *  way once a session is open -- it is answered once per session, so it should
@@ -59,6 +71,36 @@ export default function SetupCard({ s }: { s: Session }) {
             "Labels are written here as YOLO .txt files, alongside a _bank folder holding the examples the model has learned from.")}
           {field("test", "Test-set folder", s.testDir, s.setTestDir, "leave blank for <output>/_testset",
             "A small set you label by hand and hold back. It is the only way to measure whether the model is good enough — it never becomes a teaching example. Leave it blank and a _testset folder inside the output folder is used.")}
+        </div>
+
+        <div className="col" style={{ gap: 6, maxWidth: 360 }}>
+          <label className="row xs muted" style={{ gap: 6, fontWeight: 500 }}>
+            Model
+            <HelpDot text="Bigger sizes are slower but generally more accurate. Fixed the moment the first box is saved into an output folder — start a new one to try a different model." />
+          </label>
+          {s.bank?.model ? (
+            <Tip text="This project was already taught with this model — every embedding in its bank has to come out of the same one, so it can't be changed here. Start a new output folder to use a different model.">
+              <span className="chip" style={{ cursor: "help" }}>
+                <Icon name="lock" size={12} /> {modelLabel(s.models, s.bank.model)}
+              </span>
+            </Tip>
+          ) : (
+            <select
+              className="input-mono"
+              value={s.modelId}
+              onChange={(e) => s.setModelId(e.target.value)}
+            >
+              {Object.entries(groupByFamily(s.models)).map(([family, opts]) => (
+                <optgroup key={family} label={family}>
+                  {opts.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.size}{m.note ? ` — ${m.note}` : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="row wrap between" style={{ gap: 12 }}>

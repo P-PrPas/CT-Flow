@@ -24,6 +24,8 @@
 8. **พิจารณา active-learning selector ที่แท้จริง** — ถ้าปริมาณภาพที่ต้อง label ต่อโปรเจกต์ใหญ่ขึ้นมาก การเรียง "confidence ต่ำสุดก่อน" + thumbnail diversity แบบปัจจุบัน (FR-18) อาจไม่พอ ควรพิจารณา embedding distance จริงแทน thumbnail hash — ยังไม่ทำ
 9. **GPU support** ✅ ทำแล้ว — `backend/Dockerfile` ติดตั้ง CUDA torch (`cu126`) เป็นค่าเริ่มต้น, `docker-compose.yml` ขอ GPU ผ่าน `deploy.reservations`, override เป็น CPU ได้ด้วย build arg เดียว
 10. **เลือก YOLOE checkpoint ได้หลายเวอร์ชัน/ขนาด** ✅ ทำแล้ว — `services/models.py`, ล็อกต่อ output folder ผ่าน `Bank.lock_model()`, ดู FR-36 ใน [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md)
+11. **ลบกล่อง pre-annotation ที่โมเดลทำนายเกินได้ทีละกล่อง** ✅ ทำแล้ว — `BoxCanvas.tsx` (`onRemoveDraft`), ดู FR-37 ใน [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md)
+12. **เลือกโมเดลได้ทุกที่ที่ตัวเลือกปรากฏ ไม่ใช่แค่ตอนตั้งค่าก่อนเปิด session + จุดบอกสถานะ weight พร้อมใช้** ✅ ทำแล้ว — แยก `ModelPicker.tsx` ออกมาใช้ร่วมกันระหว่าง Setup card กับการ์ด "Model" ในหน้า label · เพิ่ม `available: bool` ต่อโมเดลใน `GET /api/config` (`services/models.py::is_available()`) พร้อมจุด 🟢/🔴 ใน UI · pre-cache `yoloe-26s-seg` และ `yoloe-26x-seg` ไว้ใน `label_tool/models/` ควบคู่กับ default แล้ว (ก่อนหน้านี้มีแค่ default ทำให้เลือก v26 แล้ว predict เงียบล้มเหลวเพราะ auto-download ไปไม่ถึงปลายทาง) ดู FR-36/FR-38
 
 ## ความเสี่ยง / คำถามที่ทีมควรตัดสินใจก่อนเริ่มงานต่อ
 

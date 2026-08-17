@@ -218,11 +218,14 @@ older files silently decode under the wrong class.
 
 ## Model selection
 
-The **Model** dropdown in the session setup card picks which YOLOE checkpoint
-a new project teaches — from `yoloe-v8s-seg` (the oldest, smallest generation)
-up through `yoloe-26x-seg` (the newest generation's largest, most accurate
-size). The full catalog is in [`backend/services/models.py`](backend/services/models.py)
-and served at `GET /api/config`.
+The **Model** picker (`ModelPicker.tsx`, shared by the session setup card and
+the "Model" card in the main labeling screen — pick or change it from
+wherever you're already looking, not just before opening a session) chooses
+which YOLOE checkpoint a project teaches — from `yoloe-v8s-seg` (the oldest,
+smallest generation) up through `yoloe-26x-seg` (the newest generation's
+largest, most accurate size). The full catalog is in
+[`backend/services/models.py`](backend/services/models.py) and served at
+`GET /api/config`.
 
 **The choice is locked in the moment the first box is saved.** Embeddings
 from two different checkpoints don't share a vector space — mixing them into
@@ -230,8 +233,16 @@ one prompt bank would feed `set_classes()` vectors that don't mean the same
 thing, silently or with a shape error. `Bank.lock_model()` enforces this the
 same way class-index order is locked: the first embedding decides, and a
 `model_id` that doesn't match what's already there gets a `409`, not a
-silent switch. Once a project has a model, the dropdown becomes a read-only
+silent switch. Once a project has a model, every picker becomes a read-only
 chip — start a new output folder to try a different one.
+
+Each option carries a 🟢/🔴 dot: whether the checkpoint's weight file is
+already on the server (`GET /api/config`'s `available` field, backed by
+`services/models.py::is_available()` checking `MODELS_DIR` on disk) or still
+needs an auto-download from GitHub the first time it's used — which can be
+slow or fail outright with no route to `github.com`. `yoloe-11s-seg` (the
+default), `yoloe-26s-seg`, and `yoloe-26x-seg` ship pre-cached in
+`label_tool/models/`; the rest download on first use like before.
 
 Bigger sizes are slower per image but generally more accurate; there's no
 rule of thumb better than trying one on your own dataset's held-out test set

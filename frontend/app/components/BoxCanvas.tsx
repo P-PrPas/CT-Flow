@@ -30,6 +30,7 @@ export default function BoxCanvas({
   onUpdate,
   savedBoxes = [],
   draftBoxes = [],
+  onRemoveDraft,
   selected,
   onSelect,
 }: {
@@ -48,6 +49,9 @@ export default function BoxCanvas({
    *  drawn unlike anything the user drew -- an unconfirmed guess must never be
    *  mistaken for a decision someone made. */
   draftBoxes?: Box[];
+  /** Drop draftBoxes[index] -- a false positive the user prunes before
+   *  accepting the rest. Omit to make drafts un-selectable (old behavior). */
+  onRemoveDraft?: (index: number) => void;
   selected?: number | null;
   onSelect?: (i: number | null) => void;
 }) {
@@ -58,12 +62,23 @@ export default function BoxCanvas({
   const [live, setLive] = useState<{ i: number; box: Rect; grab: [number, number] | null; from: { x: number; y: number } } | null>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
   const [ownSelected, setOwnSelected] = useState<number | null>(null);
+  /** Drafts have their own selection -- they live in a separate array from
+   *  `boxes`, so one index space can't cover both. */
+  const [draftSel, setDraftSel] = useState<number | null>(null);
 
   const sel = selected !== undefined ? selected : ownSelected;
   const setSel = (i: number | null) => (onSelect ? onSelect(i) : setOwnSelected(i));
 
   // A new image loaded -> the old index would point at the wrong box.
-  useEffect(() => { setSel(null); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [src]);
+  useEffect(() => { setSel(null); setDraftSel(null); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [src]);
+
+  const hitTestDrafts = (x: number, y: number) => {
+    for (let i = draftBoxes.length - 1; i >= 0; i--) {
+      const [x1, y1, x2, y2] = draftBoxes[i].box;
+      if (x >= x1 && x <= x2 && y >= y1 && y <= y2) return i;
+    }
+    return -1;
+  };
 
   /** Source-image pixels per displayed pixel -- the grab radius has to be
    *  constant on screen, not in the image's coordinate space. */
@@ -146,9 +161,14 @@ export default function BoxCanvas({
           }
         } else if (onRemove) {
           const hit = hitTest(p.x, p.y);
-          if (hit >= 0) { setSel(hit); return; }
+          if (hit >= 0) { setSel(hit); setDraftSel(null); return; }
+        }
+        if (onRemoveDraft) {
+          const hit = hitTestDrafts(p.x, p.y);
+          if (hit >= 0) { setDraftSel(hit); setSel(null); return; }
         }
         setSel(null);
+        setDraftSel(null);
         setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
         capture(e);
       }}
@@ -208,13 +228,31 @@ export default function BoxCanvas({
           style={{
             position: "absolute", ...rect(b.box),
             border: `2px dotted ${color(b.cls)}`,
-            background: `${color(b.cls)}14`,
+            background: i === draftSel ? `${color(b.cls)}30` : `${color(b.cls)}14`,
+            boxShadow: i === draftSel ? `0 0 0 2px ${color(b.cls)}55` : undefined,
             opacity: .75, pointerEvents: "none", borderRadius: 2,
           }}
         >
           <span className="box-label" style={{ top: -18, color: "#04262e", background: color(b.cls) }}>
             {b.cls} · suggested
           </span>
+          {onRemoveDraft && i === draftSel && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onRemoveDraft(i); setDraftSel(null); }}
+              title="Discard this suggestion (Delete)"
+              aria-label="Discard this suggested box"
+              style={{
+                position: "absolute", top: -28, right: -8, width: 22, height: 22,
+                borderRadius: "50%", background: "var(--bad)", color: "#fff",
+                border: "2px solid #0b1120", cursor: "pointer", fontSize: 13,
+                lineHeight: "16px", padding: 0, pointerEvents: "auto",
+                display: "grid", placeItems: "center",
+              }}
+            >
+              ×
+            </button>
+          )}
         </div>
       ))}
 

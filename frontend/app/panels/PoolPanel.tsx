@@ -3,6 +3,7 @@
 import { useState } from "react";
 import BoxCanvas from "../components/BoxCanvas";
 import Confirm from "../components/Confirm";
+import ModelPicker from "../components/ModelPicker";
 import { imgUrl } from "../lib/api";
 import { VERDICT_STYLE } from "../lib/history";
 import type { Session } from "../lib/session";
@@ -124,7 +125,8 @@ export default function PoolPanel({ s }: { s: Session }) {
                       <>
                         <span className="grow">
                           <strong>The model suggests {s.drafts.length} box{s.drafts.length === 1 ? "" : "es"}</strong>
-                          {" "}— dotted outlines. Nothing is saved until you take them.
+                          {" "}— dotted outlines. Click one to select it and hit × to drop a bad guess.
+                          Nothing is saved until you take the rest.
                         </span>
                         <div className="row" style={{ gap: 6 }}>
                           <button className="btn sm" onClick={() => s.setDrafts([])}>Ignore</button>
@@ -142,6 +144,7 @@ export default function PoolPanel({ s }: { s: Session }) {
                   boxes={s.pool.boxes}
                   savedBoxes={s.savedBoxes}
                   draftBoxes={s.drafts}
+                  onRemoveDraft={(i) => s.setDrafts((cur) => cur.filter((_, idx) => idx !== i))}
                   color={s.color}
                   selected={s.selected}
                   onSelect={s.setSelected}
@@ -265,6 +268,20 @@ export default function PoolPanel({ s }: { s: Session }) {
                 <span className="dot" style={{ color: "var(--line)" }} /> {s.remaining.length} left
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* FR-37/T-05 follow-up — the model picker used to live only in Setup,
+            which collapses out of view once a session opens. It's reachable
+            here too now, not just before "Open session" -- still read-only
+            once the bank has locked a model (see ModelPicker). */}
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title"><Icon name="brain" size={13} /> Model</span>
+            <HelpDot text="Bigger sizes are slower but generally more accurate. Fixed the moment the first box is saved into an output folder — start a new one to try a different model. The dot shows whether the weight is already on the server (green) or has to be fetched on first use (red)." />
+          </div>
+          <div className="card-body">
+            <ModelPicker s={s} label={false} />
           </div>
         </div>
 

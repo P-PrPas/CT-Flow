@@ -50,7 +50,7 @@
 รายงานโหมดการทำงานปัจจุบัน + root ที่ browse ได้ + สีที่ใช้แสดงกล่องแต่ละคลาส + รายการโมเดลที่เลือกได้
 
 - **Response:** `{"mode": "local"|"vm", "roots": [str...], "colors": [str...], "models": [ModelInfo...], "default_model": str}`
-- `ModelInfo` = `{"id": str, "family": str, "size": str, "note": str}` — ดู [`services/models.py`](../backend/services/models.py), `id` คือค่าที่ส่งเป็น `model_id` ใน `POST /api/label`
+- `ModelInfo` = `{"id": str, "family": str, "size": str, "note": str, "available": bool}` — ดู [`services/models.py`](../backend/services/models.py), `id` คือค่าที่ส่งเป็น `model_id` ใน `POST /api/label` · `available` เช็คสดจากดิสก์ทุกครั้งที่เรียก (มีไฟล์ `.pt` อยู่ใน `MODELS_DIR` จริงหรือไม่) — `false` ไม่ได้แปลว่าใช้ไม่ได้ แค่แปลว่า predict/label ครั้งแรกด้วยโมเดลนั้นจะไป auto-download จาก GitHub ก่อน (อาจช้าหรือเงียบล้มเหลวถ้าเน็ตไปไม่ถึง)
 - ใช้เป็น healthcheck endpoint ของ container `api` ด้วย (`docker-compose.yml`)
 
 ### `GET /api/browse`

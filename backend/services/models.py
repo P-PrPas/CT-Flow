@@ -31,11 +31,6 @@ BY_ID = {m["id"]: m for m in CATALOG}
 DEFAULT_MODEL_ID = "yoloe-11s-seg"
 
 
-def public_catalog() -> list[dict]:
-    """What the frontend gets -- no local file path leaks out."""
-    return [{k: v for k, v in m.items() if k != "file"} for m in CATALOG]
-
-
 def checkpoint_path(model_id: str) -> str:
     """Where this checkpoint lives (or lands once ultralytics auto-downloads
     it -- see config.MODELS_DIR)."""
@@ -45,9 +40,25 @@ def checkpoint_path(model_id: str) -> str:
     return str(Path(config.MODELS_DIR) / m["file"])
 
 
+def is_available(model_id: str) -> bool:
+    """Whether the checkpoint is already on disk -- picking one that isn't
+    means the first predict/label call pays an (auto-download) tax, or fails
+    outright with no local internet path to github."""
+    return Path(checkpoint_path(model_id)).is_file()
+
+
+def public_catalog() -> list[dict]:
+    """What the frontend gets -- no local file path leaks out."""
+    return [
+        {**{k: v for k, v in m.items() if k != "file"}, "available": is_available(m["id"])}
+        for m in CATALOG
+    ]
+
+
 def demo():
     assert BY_ID[DEFAULT_MODEL_ID]["file"] == "yoloe-11s-seg.pt"
     assert all("file" not in m for m in public_catalog())
+    assert all(isinstance(m["available"], bool) for m in public_catalog())
     assert len(public_catalog()) == len(CATALOG)
     try:
         checkpoint_path("not-a-real-model")

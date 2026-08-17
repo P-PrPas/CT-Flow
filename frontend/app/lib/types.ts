@@ -8,8 +8,11 @@ export type BankSummary = {
   model: string | null;
 };
 
-/** One selectable YOLOE checkpoint, as reported by GET /api/config. */
-export type ModelInfo = { id: string; family: string; size: string; note: string };
+/** One selectable YOLOE checkpoint, as reported by GET /api/config.
+ *  `available` is whether the weight is already on disk on the server --
+ *  picking one that isn't means the first predict/label call pays an
+ *  auto-download tax, or fails outright with no local internet path. */
+export type ModelInfo = { id: string; family: string; size: string; note: string; available: boolean };
 
 /** `sig` is an 8x8 grayscale thumbnail of the image (FR-18): cheap enough to
  *  ship with every score, good enough to spot near-duplicate frames. */

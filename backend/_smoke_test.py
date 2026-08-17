@@ -40,8 +40,10 @@ def wait_job(job_id: str, timeout: float = 60) -> dict:
 cfg = c.get("/api/config").json()
 assert cfg["mode"] in ("local", "vm")
 assert cfg["default_model"] == "yoloe-11s-seg", cfg
-assert {"id", "family", "size"} <= cfg["models"][0].keys() and len(cfg["models"]) > 1, cfg["models"]
+assert {"id", "family", "size", "available"} <= cfg["models"][0].keys() and len(cfg["models"]) > 1, cfg["models"]
 assert all("file" not in m for m in cfg["models"]), cfg["models"]  # no local paths leak to the browser
+default_entry = next(m for m in cfg["models"] if m["id"] == cfg["default_model"])
+assert default_entry["available"] is True, default_entry  # CI/dev always has the default weight cached
 
 r = c.post("/api/session", json={"input_dir": POOL, "output_dir": str(OUT)})
 assert r.status_code == 200, r.text

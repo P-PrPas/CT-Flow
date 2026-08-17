@@ -53,7 +53,7 @@
 - ไม่มี HTTPS ในตัวแอป (certs mechanism มีไว้แค่ตอน build ผ่าน proxy องค์กรเท่านั้น)
 - Container `api` ไม่รันเป็น root แล้ว (`ARG APP_UID` + `USER app`)
 - ใช้ GPU (CUDA, `cu126`) เป็นค่าเริ่มต้นในการ build — override เป็น CPU ได้ด้วย build arg เดียวไม่ต้องแก้ไฟล์ (`--build-arg TORCH_INDEX_URL=.../whl/cpu`)
-- เลือกโมเดล YOLOE ได้หลายเวอร์ชัน/ขนาด (11 ตัวเลือก) ล็อกต่อ output folder — ไม่ต้อง redeploy เพื่อเปลี่ยนโมเดล
+- เลือกโมเดล YOLOE ได้หลายเวอร์ชัน/ขนาด (11 ตัวเลือก) จากทุกที่ที่ตัวเลือกปรากฏ (Setup card หรือการ์ด "Model" ระหว่าง label) ไม่ใช่แค่ก่อนเปิด session ล็อกต่อ output folder ตั้งแต่กล่องแรกที่บันทึก — ไม่ต้อง redeploy เพื่อเปลี่ยนโมเดล · แต่ละตัวเลือกมีจุด 🟢/🔴 บอกว่ามี weight บนเครื่องพร้อมใช้แล้วหรือยังต้อง auto-download ตอนใช้ครั้งแรก (`services/models.py::is_available()`) — ปัจจุบัน pre-cache ไว้ 3 ตัว: `yoloe-11s-seg` (default), `yoloe-26s-seg`, `yoloe-26x-seg` ที่เหลือ auto-download จาก GitHub เมื่อถูกเลือกใช้ครั้งแรก
 
 ข้อจำกัดเหล่านี้ล้วนเป็นงานวิศวกรรมที่ระบุสาเหตุและทางแก้ชัดเจนแล้ว (ดู [NEXT_STEPS.md](./NEXT_STEPS.md)) ไม่ใช่ความไม่แน่นอนเชิงสถาปัตยกรรม — เหมาะสำหรับขยายต่อเมื่อมีความต้องการรองรับผู้ใช้/traffic มากขึ้น
 

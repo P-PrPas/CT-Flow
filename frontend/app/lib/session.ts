@@ -491,6 +491,23 @@ export function useSession() {
 
   const resetHistory = () => clearHistory(outputDir).then(setHistory);
 
+  /** The only sanctioned way to change a locked project's model -- re-runs
+   *  the new checkpoint over every taught instance and swaps the bank's
+   *  vectors + lock atomically (Bank.reembed). Everything downstream of the
+   *  old model is now stale: cached confidence scores, any measured F1, and
+   *  whatever drafts are on screen for the current image. */
+  const reembedModel = (newModelId: string) =>
+    guard(`Switching to ${newModelId}…`, async () => {
+      const d = await api.reembedBank(outputDir, newModelId, setProgress);
+      setBank(d.bank);
+      setModelId(newModelId);
+      setDrafts([]);
+      setScores({});
+      setStaleScores(0);
+      setEvalResult(null);
+      setStatus(`Switched to ${newModelId} — re-check the pool and re-evaluate when ready`);
+    });
+
   // --- test-set actions --------------------------------------------------
   const openTestset = () =>
     guard("Opening test set…", async () => {
@@ -561,7 +578,7 @@ export function useSession() {
     showSetup, setShowSetup, showShortcuts, setShowShortcuts,
     // config
     inputDir, setInputDir, outputDir, setOutputDir, testDir, setTestDir, conf, setConf,
-    models, modelId, setModelId,
+    models, modelId, setModelId, reembedModel,
     // pool
     images, bank, scores, current, savedBoxes, cls, setCls, updateMode, setUpdateMode, selected, setSelected,
     pool, clipboard, setClipboard, classNames, labeled, auto, remaining, bankTotal,

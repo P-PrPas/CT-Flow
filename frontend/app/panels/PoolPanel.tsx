@@ -160,7 +160,7 @@ export default function PoolPanel({ s }: { s: Session }) {
 
                 <div className="row wrap between" style={{ gap: 10 }}>
                   <span className="xs faint">
-                    Drag to draw · click a box to select it, then drag it to move or grab a corner to resize
+                    Drag to draw (works inside another box too) · click a box&rsquo;s edge to select it, then drag to move or grab a corner to resize
                   </span>
                   <div className="row wrap" style={{ gap: 8 }}>
                     <button

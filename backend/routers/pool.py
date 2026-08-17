@@ -119,7 +119,7 @@ def predict(req: PredictReq):
     if mean is None:
         return {"boxes": []}
     names, combined = mean
-    model = arm(names, combined, bank.model)
+    model = arm(names, combined, bank.model_or_default)
     dets = predict_one(model, names, str(checked_path(req.image)), req.conf, req.conf_by_class)
     return {"boxes": dets}
 

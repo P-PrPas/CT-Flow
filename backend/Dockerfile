@@ -55,6 +55,19 @@ ARG APP_UID=1000
 RUN mkdir -p /models \
     && useradd --create-home --uid ${APP_UID} app \
     && chown -R app /app /models
+
+# Bake the smallest/default and the two newest-generation checkpoints into the
+# image so a *fresh* named volume auto-seeds from them on first mount (Docker
+# copies a mount point's image content into an empty volume the first time it
+# attaches) -- this is what makes them survive `docker compose down -v`,
+# unlike a checkpoint that only ever landed in the volume via a runtime
+# download or a manual `docker cp`. The rest of the catalog still
+# auto-downloads into the volume on first use, same as before.
+# ponytail: these three .pt files have to already exist under label_tool/models/
+# on whoever's machine runs this build (see README.md#model-selection for the
+# curl commands) -- COPY can't skip a source file that isn't there.
+COPY models/yoloe-11s-seg.pt models/yoloe-26s-seg.pt models/yoloe-26x-seg.pt /models/
+RUN chown app /models/*.pt
 USER app
 
 EXPOSE 8000

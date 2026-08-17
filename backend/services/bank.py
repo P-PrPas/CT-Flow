@@ -17,6 +17,7 @@ from pathlib import Path
 import torch
 from filelock import FileLock
 
+from . import models as model_registry
 from . import yolo_labels
 
 HISTORY_MAX = 200
@@ -59,6 +60,39 @@ class Bank:
         self.meta_path = self.bank_dir / "metadata.json"
         self.lock = FileLock(str(self.bank_dir / ".lock"))
         self._load()
+        self._migrate_missing_model()
+
+    def _migrate_missing_model(self):
+        """Backfill `model` for a bank written before FR-36 (model selection):
+        it already has embeddings but metadata.json predates the `model` key
+        entirely, so `self.model` reads as None even though the bank is very
+        much locked in practice -- those embeddings only ever came from
+        DEFAULT_MODEL_ID, the one checkpoint that existed back then. Without
+        this, `bank.summary()["model"]` stays null forever, the frontend keeps
+        rendering an editable model picker for an already-taught project, and
+        picking a different model there does nothing (evaluate/predict never
+        read it) or -- worse -- silently locks the bank to a model that
+        doesn't match its actual embeddings the next time a label is saved,
+        since lock_model() only rejects a *mismatch*, not a *None*.
+
+        Runs on every construction of an old bank until it succeeds, so it's
+        wrapped defensively: a read-only request (open a session, predict)
+        must not 500 just because this particular write failed (seen for
+        real: an output dir whose _bank/ predates the container's non-root
+        user ends up root-owned and unwritable by `app` -- fix the
+        underlying permissions, don't let a nice-to-have migration take
+        unrelated reads down while that's unfixed). `model_or_default`
+        remains the safety net for inference either way."""
+        if self.model is not None or not self.classes:
+            return
+        try:
+            with self.lock:
+                self._load()
+                if self.model is None and self.classes:
+                    self.model = model_registry.DEFAULT_MODEL_ID
+                    self._save()
+        except OSError:
+            pass
 
     def _load(self):
         self.embeddings: dict[str, list[torch.Tensor]] = (
@@ -103,6 +137,50 @@ class Bank:
                     "start a new output folder to use a different model"
                 )
             return self.model
+
+    def reembed(self, model_id: str, new_embeddings: dict[str, list[torch.Tensor]]):
+        """Swap every embedding in this bank for ones computed under a
+        different checkpoint, and re-point the lock at it -- the only
+        sanctioned way to change a project's model after its first label
+        (see lock_model()). The caller (routers/jobs.py) does the actual
+        re-extraction against every stored instance's (source_image, bbox);
+        this only commits the result, atomically under the bank's lock, so a
+        concurrent read never sees a half-swapped bank (old model id paired
+        with new vectors, or vice versa).
+
+        new_embeddings must cover exactly the bank's current classes with the
+        same per-class instance count as what's on disk right now -- the
+        caller reprocessed every existing instance, not some subset, and
+        nothing here silently drops or invents one. Label files, instances
+        (provenance), and class order are untouched; only the vectors and
+        `model` change."""
+        with self.lock:
+            self._load()
+            if set(new_embeddings) != set(self.classes):
+                raise ValueError(
+                    f"reembed must cover exactly {self.classes!r}, got {sorted(new_embeddings)!r}"
+                )
+            for name in self.classes:
+                want, got = len(self.embeddings[name]), len(new_embeddings[name])
+                if want != got:
+                    raise ValueError(f"reembed count mismatch for {name!r}: had {want}, got {got}")
+            # Rebuild through self.classes (not new_embeddings' own key order)
+            # so insertion order -- what a label file's class index means --
+            # survives even if the caller built its dict differently.
+            self.embeddings = {name: new_embeddings[name] for name in self.classes}
+            self.model = model_id
+            self._save()
+
+    @property
+    def model_or_default(self) -> str:
+        """`model` for anything that's about to run inference (predict/score/
+        evaluate/autolabel). A bank that predates FR-36 (model selection) has
+        embeddings but no recorded `model` -- there was only ever one
+        checkpoint back then, so DEFAULT_MODEL_ID is what actually extracted
+        them. Passing `None` straight to arm()/get_model() instead raises
+        ValueError("unknown model None") the moment any of those run, which is
+        exactly what happened to every pre-FR-36 project until this existed."""
+        return self.model or model_registry.DEFAULT_MODEL_ID
 
     @property
     def classes(self) -> list[str]:

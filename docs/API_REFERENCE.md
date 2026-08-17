@@ -198,4 +198,14 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 - **พฤติกรรม:** arm โมเดลครั้งเดียว → predict ทีละภาพ → เขียนไฟล์ label เฉพาะภาพที่มี detection (ไม่งั้นนับเป็น `no_detection`) → `bank.mark_auto()` เฉพาะภาพที่เขียนป้ายจริง
 - **ผลลัพธ์ (`result`):** `{"written": int, "no_detection": int, "no_detection_images": [path...], "bank": BankSummary}` — คืนรายชื่อภาพที่ไม่เจออะไรเลย ไม่ใช่แค่จำนวน (FR-28)
 
-**สัญญาร่วมของ background job ทั้งสามตัว:** สร้างผ่าน `job_tracker.create(total)` → tick progress ทีละภาพ → `finish(result)` เมื่อสำเร็จ หรือ `fail(error)` เมื่อ exception — ฝั่ง frontend ใช้ `lib/api.ts`'s `runJob()` POST ไปเริ่ม job แล้ว poll `/api/jobs/{id}` ทุก 400ms จนกว่า `finished` · "arm โมเดล" ทั้งสามที่นี่หมายถึง `vpe.arm(names, combined, bank.model)` เสมอ — ไม่มี body ตัวไหนรับ `model_id` จาก client
+### `POST /api/reembed`
+เปลี่ยนโมเดลของ bank ที่ล็อกไปแล้ว โดย re-extract embedding ทุก instance ใหม่ด้วยโมเดลเป้าหมาย (background) — ดู FR-39
+
+- **Body:** `{"output_dir": str, "model_id": str}`
+- **Response:** `{"job_id": str, "total": int}` — `total` คือจำนวน instance รวมทุกคลาส (ไม่ใช่จำนวนภาพ)
+- **400** ถ้า bank ยังไม่มีโมเดล (`bank.model is None` — ยังไม่เคยบันทึกกล่องแรกเลย ไม่มีอะไรให้ reembed), ถ้า `model_id` เท่ากับโมเดลปัจจุบันอยู่แล้ว, หรือ `model_id` ไม่อยู่ใน catalog
+- **พฤติกรรม:** วน `bank.instances` ทุกคลาสทุก instance → อ่าน `source_image` ใหม่จากดิสก์ → `extract_embedding(img, [bbox], model_id)` ทีละตัว → เมื่อครบทุก instance แล้วค่อยเรียก `bank.reembed(model_id, new_embeddings)` ครั้งเดียวเพื่อ commit แบบ atomic (แทนที่ embedding ทั้งหมด + สลับ `bank.model` พร้อมกัน) — ถ้า job ล้มเหลวกลางทาง (เช่นภาพต้นทางถูกย้าย/ลบ) bank เดิมจะไม่ถูกแตะเลย เพราะ commit เกิดครั้งเดียวตอนจบเท่านั้น
+- **ไม่แตะ:** `labels/*.txt`, `classes.txt`, `bank.instances` (provenance), `bank.labeled`/`bank.auto` — เปลี่ยนแค่เวกเตอร์ใน `embeddings.pt` กับ `bank.model`
+- **ผลลัพธ์ (`result`):** `{"bank": BankSummary}`
+
+**สัญญาร่วมของ background job ทั้งสี่ตัว:** สร้างผ่าน `job_tracker.create(total)` → tick progress ทีละหน่วยงาน → `finish(result)` เมื่อสำเร็จ หรือ `fail(error)` เมื่อ exception — ฝั่ง frontend ใช้ `lib/api.ts`'s `runJob()` POST ไปเริ่ม job แล้ว poll `/api/jobs/{id}` ทุก 400ms จนกว่า `finished` · "arm โมเดล" ใน predict/score/evaluate/autolabel หมายถึง `vpe.arm(names, combined, bank.model_or_default)` เสมอ ไม่มี body ตัวไหนรับ `model_id` จาก client ไปกำหนดว่าจะ arm ด้วยโมเดลไหน — **ยกเว้น `/api/reembed`** ที่ `model_id` ใน body คือเป้าหมายที่ตั้งใจจะเปลี่ยนไปโดยตรง (ตรวจสอบแล้วว่าไม่ใช่ค่าเดิมและอยู่ใน catalog ก่อนเริ่ม job)

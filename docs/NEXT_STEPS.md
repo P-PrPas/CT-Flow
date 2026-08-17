@@ -26,6 +26,7 @@
 10. **เลือก YOLOE checkpoint ได้หลายเวอร์ชัน/ขนาด** ✅ ทำแล้ว — `services/models.py`, ล็อกต่อ output folder ผ่าน `Bank.lock_model()`, ดู FR-36 ใน [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md)
 11. **ลบกล่อง pre-annotation ที่โมเดลทำนายเกินได้ทีละกล่อง** ✅ ทำแล้ว — `BoxCanvas.tsx` (`onRemoveDraft`), ดู FR-37 ใน [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md)
 12. **เลือกโมเดลได้ทุกที่ที่ตัวเลือกปรากฏ ไม่ใช่แค่ตอนตั้งค่าก่อนเปิด session + จุดบอกสถานะ weight พร้อมใช้** ✅ ทำแล้ว — แยก `ModelPicker.tsx` ออกมาใช้ร่วมกันระหว่าง Setup card กับการ์ด "Model" ในหน้า label · เพิ่ม `available: bool` ต่อโมเดลใน `GET /api/config` (`services/models.py::is_available()`) พร้อมจุด 🟢/🔴 ใน UI · pre-cache `yoloe-26s-seg` และ `yoloe-26x-seg` ไว้ใน `label_tool/models/` ควบคู่กับ default แล้ว (ก่อนหน้านี้มีแค่ default ทำให้เลือก v26 แล้ว predict เงียบล้มเหลวเพราะ auto-download ไปไม่ถึงปลายทาง) ดู FR-36/FR-38
+13. **เปลี่ยนโมเดลของโปรเจกต์ที่ล็อกไปแล้วได้จริง (re-embed) โดยไม่ต้องเริ่ม output folder ใหม่** ✅ ทำแล้ว — `Bank.reembed()` + `POST /api/reembed` (background job) วนอ่าน `bank.instances` ทุกตัวย้อนกลับไปที่ภาพต้นทางเดิม รัน embedding ใหม่ด้วยโมเดลเป้าหมาย แล้ว commit แทนที่ทั้งชุดพร้อมสลับ `bank.model` แบบ atomic · ไม่แตะ `labels/*.txt` เลย (ยืนยันด้วย md5sum ตรงกันก่อน/หลังในการทดสอบจริง) · ปุ่ม "Switch model…" ใน `ModelPicker.tsx` ดู FR-39
 
 ## ความเสี่ยง / คำถามที่ทีมควรตัดสินใจก่อนเริ่มงานต่อ
 

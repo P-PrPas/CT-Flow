@@ -159,3 +159,12 @@ export function autoLabelRemaining(
     written: number; no_detection: number; no_detection_images: string[]; bank: BankSummary;
   }>;
 }
+
+/** The only sanctioned way to change a project's model after its first label
+ *  -- re-extracts every taught instance's embedding under the new checkpoint.
+ *  Label files are untouched; only the prompt bank's vectors change. */
+export function reembedBank(
+  output_dir: string, model_id: string, onProgress: (p: JobProgress) => void
+) {
+  return runJob("/api/reembed", { output_dir, model_id }, onProgress) as Promise<{ bank: BankSummary }>;
+}

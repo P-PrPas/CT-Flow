@@ -1,5 +1,11 @@
 .venv
 __pycache__
-models
+# Keep the local weight cache out of the build context EXCEPT the checkpoints
+# baked into the image (see backend/Dockerfile) -- those need to survive
+# `docker compose down -v`, which a runtime-only named volume cannot.
+models/*
+!models/yoloe-11s-seg.pt
+!models/yoloe-26s-seg.pt
+!models/yoloe-26x-seg.pt
 frontend/node_modules
 frontend/.next

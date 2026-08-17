@@ -16,9 +16,11 @@ const capture = (e: React.PointerEvent) => {
   try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* no-op */ }
 };
 
-/** Drag on empty space to draw a box. Click a box to select it, then drag it to
- *  move or drag a corner to resize -- a model's guess is usually nearly right,
- *  and "delete it and draw it again" throws that away. Delete removes the
+/** Drag on empty space -- including inside another box's interior, so a small
+ *  box nested in a bigger one is still drawable -- to draw a box. Click a
+ *  box's outline (not its interior) to select it, then drag it to move or
+ *  drag a corner to resize -- a model's guess is usually nearly right, and
+ *  "delete it and draw it again" throws that away. Delete removes the
  *  selection (or hit the ×). Coordinates live in the source image's pixel
  *  space, so they survive any display scaling. */
 export default function BoxCanvas({
@@ -72,14 +74,6 @@ export default function BoxCanvas({
   // A new image loaded -> the old index would point at the wrong box.
   useEffect(() => { setSel(null); setDraftSel(null); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [src]);
 
-  const hitTestDrafts = (x: number, y: number) => {
-    for (let i = draftBoxes.length - 1; i >= 0; i--) {
-      const [x1, y1, x2, y2] = draftBoxes[i].box;
-      if (x >= x1 && x <= x2 && y >= y1 && y <= y2) return i;
-    }
-    return -1;
-  };
-
   /** Source-image pixels per displayed pixel -- the grab radius has to be
    *  constant on screen, not in the image's coordinate space. */
   const scale = () => {
@@ -95,10 +89,28 @@ export default function BoxCanvas({
     };
   };
 
+  /** Within `near` of the box's outline -- inside an *expanded* rect but
+   *  outside a *shrunken* one. Deliberately not "anywhere inside the box":
+   *  a small box drawn inside a bigger one would be unreachable if the whole
+   *  interior of the big box counted as a hit, since the big box is checked
+   *  first below. Clicking dead center of a box now starts a new box, same
+   *  as empty canvas -- grab the outline to select/move the existing one. */
+  const onOutline = (x: number, y: number, [x1, y1, x2, y2]: Rect, near: number) =>
+    x >= x1 - near && x <= x2 + near && y >= y1 - near && y <= y2 + near &&
+    !(x >= x1 + near && x <= x2 - near && y >= y1 + near && y <= y2 - near);
+
   const hitTest = (x: number, y: number) => {
+    const near = GRAB * scale();
     for (let i = boxes.length - 1; i >= 0; i--) {
-      const [x1, y1, x2, y2] = boxes[i].box;
-      if (x >= x1 && x <= x2 && y >= y1 && y <= y2) return i;
+      if (onOutline(x, y, boxes[i].box, near)) return i;
+    }
+    return -1;
+  };
+
+  const hitTestDrafts = (x: number, y: number) => {
+    const near = GRAB * scale();
+    for (let i = draftBoxes.length - 1; i >= 0; i--) {
+      if (onOutline(x, y, draftBoxes[i].box, near)) return i;
     }
     return -1;
   };
@@ -115,6 +127,30 @@ export default function BoxCanvas({
     }
     return null;
   };
+
+  /** [0,0]/[1,1] is the top-left<->bottom-right diagonal, [1,0]/[0,1] is the
+   *  other one -- matches the resize-handle cursor to which way it drags. */
+  const cornerCursor = ([gx, gy]: [number, number]) => (gx === gy ? "nwse-resize" : "nesw-resize");
+
+  /** What the pointer should look like at (x, y) when nothing is being
+   *  dragged yet -- a hand over anything selectable, crosshair over empty
+   *  space, so "click to select" vs "drag to draw" is visible before the
+   *  click, not just after. */
+  const cursorAt = (x: number, y: number): string => {
+    if (onUpdate) {
+      const corner = grabbedCorner(x, y);
+      if (corner) return cornerCursor(corner);
+      if (hitTest(x, y) >= 0) return "grab";
+    } else if (onRemove && hitTest(x, y) >= 0) {
+      return "pointer";
+    }
+    if (onRemoveDraft && hitTestDrafts(x, y) >= 0) return "pointer";
+    return "crosshair";
+  };
+  const [hoverCursor, setHoverCursor] = useState("crosshair");
+  const cursor = live
+    ? (live.grab ? cornerCursor(live.grab) : "grabbing")
+    : drag ? "crosshair" : hoverCursor;
 
   /** Normalized so a corner dragged past its opposite still gives x1<x2. */
   const norm = (b: Rect): Rect =>
@@ -145,7 +181,7 @@ export default function BoxCanvas({
   return (
     <div
       className="canvas-wrap"
-      style={{ userSelect: "none", touchAction: "none", cursor: "crosshair" }}
+      style={{ userSelect: "none", touchAction: "none", cursor }}
       onPointerDown={(e) => {
         const p = at(e);
         if (onUpdate) {
@@ -175,8 +211,8 @@ export default function BoxCanvas({
       onPointerMove={(e) => {
         const p = at(e);
         if (live) { setLive({ ...live, box: dragged(live, p) }); return; }
-        if (!drag) return;
-        setDrag({ ...drag, x1: p.x, y1: p.y });
+        if (drag) { setDrag({ ...drag, x1: p.x, y1: p.y }); return; }
+        setHoverCursor(cursorAt(p.x, p.y));
       }}
       onPointerUp={(e) => {
         // Both branches recompute from THIS event rather than trusting the last

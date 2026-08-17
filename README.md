@@ -148,10 +148,12 @@ docker compose up --build # http://localhost:3000
 
 Everything under `DATA_DIR` is mounted at `/data` in the api container, and
 `/data` is the only thing the folder picker can reach — paths outside it are
-rejected server-side (the browser can send any string). Model weights are
-*not* baked into the image or copied from anywhere outside this repo — the
-selected checkpoint auto-downloads into a named volume (`models`) the first
-time it's actually used, and persists there across restarts.
+rejected server-side (the browser can send any string). Model weights land
+in a named volume (`models`) so they persist across restarts; the default
+checkpoint plus the two newest/largest ones are baked into the image so a
+brand-new volume starts pre-seeded (see [Model
+selection](#model-selection)), everything else in the catalog auto-downloads
+into the volume the first time it's actually selected.
 
 > **GPU by default.** The build installs a CUDA build of PyTorch and
 > `docker-compose.yml` requests a GPU for the `api` service. This needs an
@@ -234,15 +236,36 @@ thing, silently or with a shape error. `Bank.lock_model()` enforces this the
 same way class-index order is locked: the first embedding decides, and a
 `model_id` that doesn't match what's already there gets a `409`, not a
 silent switch. Once a project has a model, every picker becomes a read-only
-chip — start a new output folder to try a different one.
+chip — but it's not a dead end: a **"Switch model…"** button next to the
+chip re-extracts every already-taught example under a new checkpoint and
+swaps the lock (`Bank.reembed()`, `POST /api/reembed`, a background job
+like Evaluate/Auto-label). Saved label files are never touched — only the
+prompt bank's vectors and everything downstream of them (predict/evaluate/
+auto-label from that point on) change, so cached confidence scores and any
+measured F1 need re-checking afterward. Starting a new output folder is
+still the way to keep two models' work side by side instead of overwriting
+one with the other.
 
 Each option carries a 🟢/🔴 dot: whether the checkpoint's weight file is
 already on the server (`GET /api/config`'s `available` field, backed by
 `services/models.py::is_available()` checking `MODELS_DIR` on disk) or still
 needs an auto-download from GitHub the first time it's used — which can be
 slow or fail outright with no route to `github.com`. `yoloe-11s-seg` (the
-default), `yoloe-26s-seg`, and `yoloe-26x-seg` ship pre-cached in
-`label_tool/models/`; the rest download on first use like before.
+default), `yoloe-26s-seg`, and `yoloe-26x-seg` are pre-cached.
+
+Outside Docker that's just the repo-local `label_tool/models/` folder. In
+Docker, `/models` inside the `api` container is the `models` *named volume*
+(`docker-compose.yml`), not the repo folder of the same name on the host —
+those are two different filesystems. A **named volume that has never been
+mounted before seeds itself from whatever's at that path in the image**
+(standard Docker behavior), so `backend/Dockerfile` bakes the same three
+`.pt` files into the image at `/models/` — a fresh volume (first
+`docker compose up`, or after `docker compose down -v`) comes up already
+populated with no manual step. `docker cp`-ing a file into a *running*
+container only patches that one volume instance and gets lost the next time
+the volume is recreated — bake it into the image instead if it needs to
+survive that. The rest of the catalog still downloads into the volume on
+first use, same as before.
 
 Bigger sizes are slower per image but generally more accurate; there's no
 rule of thumb better than trying one on your own dataset's held-out test set

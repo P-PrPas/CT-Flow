@@ -22,7 +22,7 @@ REPO_ROOT = PKG_ROOT.parent                                # poc-visual-prompt -
 MODELS_DIR = os.getenv("MODELS_DIR", str(PKG_ROOT / "models"))
 
 MODE = os.getenv("LABEL_TOOL_MODE", "local").lower()
-VM_DATA_ROOT = Path(os.getenv("LABEL_TOOL_VM_ROOT", "/data"))
+VM_DATA_ROOT = Path(os.getenv("LABEL_TOOL_VM_ROOT", "/opt/mount/project"))
 
 
 def browse_roots() -> list[str]:

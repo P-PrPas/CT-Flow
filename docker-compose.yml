@@ -23,7 +23,7 @@ services:
     image: ct-flow-api
     environment:
       LABEL_TOOL_MODE: vm              # in a container the FS is always "the vm"
-      LABEL_TOOL_VM_ROOT: /data
+      LABEL_TOOL_VM_ROOT: /opt/mount/project
       # Empty = no login and no upload (single trusted user). Fill both in to
       # turn the tool multi-user -- see .env.example.
       LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
@@ -39,8 +39,8 @@ services:
     volumes:
       # Everything the tool can see. Each project's labels/bank/test-set data
       # live in a .ctflow/ subfolder next to its own images, all still under
-      # here -- the browser can only ever pick paths inside /data.
-      - ${DATA_DIR:-../data}:/data
+      # here -- the browser can only ever pick paths inside /opt/mount/project.
+      - ${DATA_DIR:-../data}:/opt/mount/project
       # YOLOE checkpoints, auto-downloaded on first use per selected model
       # (see backend/services/models.py) -- named so a restart doesn't
       # re-fetch every weight from scratch.

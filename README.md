@@ -143,13 +143,15 @@ prop instead of forty.
 ## Quick start (Docker)
 
 ```bash
-cp .env.example .env      # point DATA_DIR at the folder holding your datasets
+cp .env.example .env      # point DATA_DIR at the folder holding your datasets,
+                           # and set POSTGRES_PASSWORD (required -- compose won't start without it)
 docker compose up --build # http://localhost:3000
 ```
 
-Everything under `DATA_DIR` is mounted at `/data` in the api container, and
-`/data` is the only thing the folder picker can reach — paths outside it are
-rejected server-side (the browser can send any string). Model weights land
+Everything under `DATA_DIR` is mounted at `/opt/mount/project` in the api
+container, and `/opt/mount/project` is the only thing the folder picker can
+reach — paths outside it are rejected server-side (the browser can send any
+string). Model weights land
 in a named volume (`models`) so they persist across restarts; the default
 checkpoint plus the two newest/largest ones are baked into the image so a
 brand-new volume starts pre-seeded (see [Model
@@ -178,10 +180,10 @@ back is measuring memorization, not generalization.
    class, save. That save extracts a SAVPE embedding into the prompt bank at
    `<dataset>/pool/.ctflow/_bank/`.
 2. **Test set** — pull 10–20 images in with **Import from pool** ("Add
-   random" or tick specific ones). This flags them in a manifest, no file
-   copy — a test image *is* the pool image, so there's nothing to duplicate
-   on disk. Draw ground-truth boxes the same way — Save here writes straight
-   to `.ctflow/testset/labels/*.txt`, never into a prompt bank; the backend
+   random" or tick specific ones). This flags them as a separate row in
+   PostgreSQL, no file copy — a test image *is* the pool image, so there's
+   nothing to duplicate on disk. Draw ground-truth boxes the same way — Save
+   here writes straight to PostgreSQL, never into a prompt bank; the backend
    rejects any attempt to teach the bank from a flagged image with a `400`.
 3. Hit **Evaluate on test set** (from either tab) — YOLOE runs against the
    held-out images with the current bank and reports precision / recall / F1
@@ -194,12 +196,12 @@ back is measuring memorization, not generalization.
    plus plain-language advice: keep labeling this class, or it's plateaued
    and more hand-labeling has little left to buy (bar is F1 ≥ 0.75).
 6. F1 good enough? **Auto-label remaining** writes labels for the rest of the
-   pool, tracked separately (`auto`) in `_bank/metadata.json` so you can tell
+   pool, tracked separately (`auto` status in PostgreSQL) so you can tell
    them from human-drawn ones.
 7. Click into any auto-labeled image ("reviewing auto-label") to enter
    **review mode** — every predicted box is editable: click to select, × to
    delete an over-prediction, drag to add a box the model missed. **Save
-   review** rewrites just that image's label file with no embedding
+   review** rewrites just that image's label in PostgreSQL with no embedding
    extraction, since fixing a prediction isn't the same as teaching the model
    a new prompt.
 
@@ -320,11 +322,13 @@ dependency.
 
 | env | default | meaning |
 |---|---|---|
-| `DATA_DIR` | `../data` | host folder mounted at `/data` — datasets and outputs must live under it (default is the sibling `data/` folder shared with the original POC) |
+| `DATA_DIR` | `../data` | host folder mounted at `/opt/mount/project` — datasets and outputs must live under it (default is the sibling `data/` folder shared with the original POC) |
 | `WEB_PORT` | `3000` | port the UI is served on |
 | `LABEL_TOOL_MODE` | `vm` in Docker | `vm` = confined to `LABEL_TOOL_VM_ROOT`; `local` = browse every drive |
-| `LABEL_TOOL_VM_ROOT` | `/data` | the confinement root in `vm` mode |
+| `LABEL_TOOL_VM_ROOT` | `/opt/mount/project` | the confinement root in `vm` mode |
 | `MODELS_DIR` | `/models` in Docker | where YOLOE checkpoints are cached after auto-download — a named volume in Docker, a plain repo-local folder otherwise |
+| `POSTGRES_PASSWORD` | *(none — required)* | password for the `db` service; `docker compose up` refuses to start without it |
+| `DATABASE_URL` | set automatically in compose | where label/box storage lives (PostgreSQL, see [docs/DB_MIGRATION_PLAN.md](docs/DB_MIGRATION_PLAN.md)) — override to point at a different Postgres when running outside Docker |
 | `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — empty means no login and no upload |
 | `LABEL_TOOL_SECRET` | *(random per restart)* | signs the session cookie; unset = everyone signed out on every restart |
 | `LABEL_TOOL_MAX_UPLOAD_MB` | `25` | per-file upload cap |
@@ -398,7 +402,7 @@ touches `backend/**` — a `checks` job with no model weight (seconds), and a
 ## Datasets & measured accuracy
 
 All datasets live outside this repo (see `../data/README.md`) and mount at
-`/data` in the container. `/data/conveyor_pvc` — PVC fittings from
+`/opt/mount/project` in the container. `/opt/mount/project/conveyor_pvc` — PVC fittings from
 [Roboflow's conveyor-belt v3](https://universe.roboflow.com/onkar/conveyor-belt)
 (CC BY 4.0) — is the one with a documented accuracy ceiling worth knowing
 before you rely on this tool for a similar dataset:
@@ -417,7 +421,7 @@ classes their own threshold in one evaluation pass instead of trading one off
 against the other. Full methodology and every intermediate number:
 [`docs/EXPERIMENT_T01_CONF.md`](docs/EXPERIMENT_T01_CONF.md).
 
-`/data/iron_ore` (235 frames of rock/ore on a moving belt) is the dataset
+`/opt/mount/project/iron_ore` (235 frames of rock/ore on a moving belt) is the dataset
 that matches the real production use case; label ~15 images into `test/`
 first to get a readiness number for it.
 

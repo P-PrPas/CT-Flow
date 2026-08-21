@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from .. import deps
 from ..deps import checked_path
-from ..services import job_tracker, metrics
+from ..services import annotations_db, job_tracker, metrics
 from ..services import models as model_registry
 from ..services.bank import Bank
 from ..services.vpe import arm, extract_embedding, predict_one
@@ -94,7 +94,7 @@ def evaluate(req: dict, background_tasks: BackgroundTasks):
     if mean is None:
         raise HTTPException(400, "prompt bank is empty -- label something first")
     try:
-        gt = metrics.load_ground_truth(str(deps.test_dir(inp)))
+        gt = metrics.load_ground_truth_db(str(inp))
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc))
     names, combined = mean
@@ -138,13 +138,13 @@ def autolabel(req: dict, background_tasks: BackgroundTasks):
     conf = req.get("conf", 0.25)
     conf_by_class = req.get("conf_by_class", {})
     job_id = job_tracker.create(len(paths))
-    background_tasks.add_task(_run_autolabel, job_id, state_dir,
+    background_tasks.add_task(_run_autolabel, job_id, str(inp), state_dir,
                               names, combined, paths, conf, conf_by_class, bank.model_or_default)
     return {"job_id": job_id, "total": len(paths)}
 
 
-def _run_autolabel(job_id: str, output_dir: str, names: list[str], combined, paths: list[str],
-                   conf: float, conf_by_class: dict[str, float], model_id: str):
+def _run_autolabel(job_id: str, input_dir: str, output_dir: str, names: list[str], combined,
+                   paths: list[str], conf: float, conf_by_class: dict[str, float], model_id: str):
     try:
         bank = Bank(output_dir)
         model = arm(names, combined, model_id)
@@ -156,13 +156,11 @@ def _run_autolabel(job_id: str, output_dir: str, names: list[str], combined, pat
                 # found" is a number, a list is something a person can act on.
                 empty.append(path)
             else:
-                img = cv2.imread(path)
-                h, w = img.shape[:2]
-                bank.write_yolo_labels(path, dets, w, h)
+                annotations_db.write_boxes(input_dir, "pool", path, dets)
                 written += 1
                 auto_paths.append(path)
             job_tracker.tick(job_id, i + 1)
-        bank.mark_auto(auto_paths)
+        annotations_db.mark_auto(input_dir, auto_paths)
         job_tracker.finish(job_id, {"written": written, "no_detection": len(empty),
                                     "no_detection_images": empty, "bank": bank.summary()})
     except Exception as exc:

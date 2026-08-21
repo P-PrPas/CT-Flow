@@ -1,4 +1,19 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: labeltool
+      POSTGRES_USER: labeltool
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labeltool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build:
       context: .                       # this repo's root
@@ -14,6 +29,13 @@ services:
       LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
       LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      # T-21: label/box storage. The prompt bank (embeddings) is unaffected --
+      # still the file under each project's .ctflow/_bank/. See
+      # docs/DB_MIGRATION_PLAN.md.
+      DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       # Everything the tool can see. Each project's labels/bank/test-set data
       # live in a .ctflow/ subfolder next to its own images, all still under
@@ -57,3 +79,4 @@ services:
 
 volumes:
   models:
+  pgdata:

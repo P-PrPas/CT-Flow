@@ -4,7 +4,7 @@
 
 ## เครื่องมือนี้ทำอะไรได้แล้วบ้าง (ทำงานจบ end-to-end)
 
-1. ผู้ใช้เปิด session โดยระบุโฟลเดอร์ภาพต้นทาง (`input_dir`) เพียงโฟลเดอร์เดียว — prompt bank, ป้าย, และ test set ทั้งหมดถูกจัดการให้อัตโนมัติในโฟลเดอร์ซ่อน `.ctflow/` ใต้โฟลเดอร์นั้น ไม่ต้องเลือกโฟลเดอร์ผลลัพธ์แยกอีกต่อไป
+1. ผู้ใช้เปิด session โดยระบุโฟลเดอร์ภาพต้นทาง (`input_dir`) เพียงโฟลเดอร์เดียว — prompt bank ถูกจัดการอัตโนมัติในโฟลเดอร์ซ่อน `.ctflow/` ใต้โฟลเดอร์นั้น ส่วนป้ายและ test set ถูกจัดการอัตโนมัติใน PostgreSQL (คีย์ด้วย `input_dir` เดียวกัน) ไม่ต้องเลือกโฟลเดอร์ผลลัพธ์หรือตั้งค่าฐานข้อมูลเองแยกอีกต่อไป
 2. ผู้ใช้วาดกล่อง (bounding box) รอบวัตถุที่ต้องการสอนบนภาพหนึ่งภาพ แล้วกด Save
 3. ระบบ crop ภาพตามกล่อง แล้วส่งผ่าน YOLOE's `get_vpe()` (YOLOEVPSegPredictor) เพื่อสร้าง **SAVPE embedding** ของวัตถุชิ้นนั้น
 4. embedding จะถูกสะสมเข้า **prompt bank** แยกตามชื่อคลาส และ mean-pooled เป็น embedding ตัวแทนหนึ่งตัวต่อคลาส
@@ -15,19 +15,22 @@
 9. เมื่อ F1 เป็นที่พอใจ ผู้ใช้กด **Auto-label remaining** เพื่อให้โมเดลเขียน label ให้ภาพที่เหลือทั้งหมดในพูลจาก bank ปัจจุบัน โดยระบบจะแยกบันทึกว่าภาพไหน label ด้วยมือ (`labeled`) และภาพไหน label โดยโมเดล (`auto`)
 10. ภาพที่ auto-label แล้วสามารถเปิดใน **review mode** เพื่อแก้กล่องที่โมเดลทำนายผิด (ผ่าน `/api/relabel`) — การแก้ไขนี้ไม่สร้าง embedding ใหม่เข้า bank เพราะถือเป็นการแก้ ไม่ใช่การสอนคลาสใหม่
 
-เครื่องมือนี้ **ไม่มีแนวคิด "workspace" หรือโฟลเดอร์ผลลัพธ์แยก** — โฟลเดอร์ภาพ (`input_dir`) *คือ* ตัวโปรเจกต์เอง ทุกอย่างที่ระบบเขียนอยู่ใต้ subfolder ซ่อน `.ctflow/` ของมันเอง:
+เครื่องมือนี้ **ไม่มีแนวคิด "workspace" หรือโฟลเดอร์ผลลัพธ์แยก** — โฟลเดอร์ภาพ (`input_dir`) *คือ* ตัวโปรเจกต์เอง สิ่งที่ระบบเขียนแบ่งเป็นสองที่: prompt bank อยู่ใต้ subfolder ซ่อน `.ctflow/` ของโฟลเดอร์นั้นเอง ส่วนป้าย/กล่อง/สถานะ label อยู่ใน PostgreSQL (T-21, ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md)) คีย์ด้วย `input_dir` เดียวกัน:
 
 ```
 <input_dir>/
     img1.jpg, img2.jpg, ...   ภาพต้นฉบับ ไม่เคยถูกย้ายหรือคัดลอก
     .ctflow/
-        labels/<stem>.txt     ป้าย YOLO format ของพูล (สิ่งที่ส่งมอบจริง)
-        classes.txt            index ของคลาส -> ชื่อคลาส
         _bank/embeddings.pt     embedding ต่อคลาส (สิ่งที่ทำให้ label ต่อได้)
-        _bank/metadata.json     ที่มาของแต่ละ embedding + ภาพไหน labeled/auto แล้ว
-        testset/testset.json    รายชื่อภาพในพูลที่ถูกแปะป้ายเป็น test set (ไม่คัดลอกไฟล์ภาพ)
-        testset/labels/, classes.txt   ground truth ของ test set
+        _bank/metadata.json     ที่มาของแต่ละ embedding + โมเดลที่ล็อกไว้
+
+PostgreSQL (services/annotations_db.py):
+    classes    index ของคลาส -> ชื่อคลาส (พูล/test set คนละชุด)
+    images     พาธภาพ + สถานะ labeled/auto + ธงว่าเป็น test set หรือไม่
+    annotations  กล่องแต่ละกล่อง (พิกัดพิกเซล)
 ```
+
+ต้องการไฟล์ YOLO/COCO/VOC กลับมา (เช่นเพื่อส่งมอบหรือเทรนต่อ) ใช้ `GET /api/export` (T-24) — อ่านจาก PostgreSQL แล้วแปลงให้ตามที่เลือก
 
 ## สิ่งที่ยังไม่เสร็จ (work-in-progress)
 
@@ -36,7 +39,7 @@
 - **ไม่มีระบบ authentication/login** ใด ๆ ในแอปทั้งหมด
 - **ไม่มีปุ่มอัปโหลดไฟล์** การนำภาพเข้าโฟลเดอร์ `/data` เป็นเรื่อง filesystem หรือ network share ที่อยู่นอกขอบเขตของแอป (ออกแบบมาให้รันบนเซิร์ฟเวอร์ที่แชร์ ไม่ใช่เครื่องส่วนตัว)
 - **การ retrain closed-set detector จากป้ายที่สะสมได้ยังไม่ implement** เป็นเป้าหมายระยะยาวตามเอกสารออกแบบเดิม (เมื่อมีข้อมูล label สะสมมากพอ) แต่ยังไม่มีส่วนใดของโค้ดที่ทำสิ่งนี้
-- **แผนย้าย label/box storage ไป PostgreSQL + export หลาย format ยังไม่ implement** ตกลง scope กับทีมแล้ว (2026-08-21) เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกัน (เตรียมทางสำหรับ workspace ในอนาคต — ตอนนี้ยังไม่มีแนวคิด workspace ตามที่ระบุด้านบน) — ดูแผนที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md)
+- **ระบบ login/workspace เต็มรูปแบบ (หลายคน/หลายทีมแชร์ instance เดียวกัน) ยังไม่มี** — สิ่งที่ทำไปแล้ว (2026-08-21) คือย้าย label/box storage ไป PostgreSQL (T-21) เพื่อให้หลายคนแก้ project (`input_dir`) เดียวกัน**พร้อมกัน**ได้จริงโดยไม่ชนกัน และเพิ่ม export หลาย format (YOLO/COCO/VOC, `GET /api/export`) — แนวคิด "โฟลเดอร์ = โปรเจกต์" ตามที่ระบุด้านบนยังไม่เปลี่ยน แค่ที่เก็บ label เปลี่ยนจากไฟล์เป็น DB เท่านั้น ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md)
 
 ## Use case หลัก
 

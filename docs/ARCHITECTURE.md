@@ -85,6 +85,10 @@ Environment variables หลัก:
 
 **ปัญหา TLS ตอน build:** ทั้งสอง Dockerfile มีขั้นตอน copy root certificate จาก `label_tool/certs/*.crt` เข้า system CA bundle ก่อน `pip install`/`npm ci` — เป็นทางแก้สำหรับเครื่องพัฒนาที่อยู่หลัง proxy ตรวจสอบ TLS ขององค์กร (พบไฟล์ `avg-web-shield.crt` จริงในโฟลเดอร์ `certs/`) ไม่เกี่ยวกับการเสิร์ฟแอปผ่าน HTTPS ตอนรันจริงแต่อย่างใด — **แอปนี้ไม่มี HTTPS ในตัวเอง**
 
+## แผนงานที่วางไว้ (ยังไม่ implement)
+
+**ย้าย label/box storage จากไฟล์ YOLO txt ไป PostgreSQL** — ตกลงกับทีมแล้ว (2026-08-21) เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกันจริง (เตรียมทางสำหรับ login + workspace แบบ Label Studio ในอนาคต) พร้อมเพิ่ม export ที่เลือก format ได้ (YOLO/COCO/VOC) — **scope เฉพาะ `labels/*.txt`, `classes.txt`, `testset.json`, และสถานะ `labeled`/`auto`** เท่านั้น `_bank/embeddings.pt` และ `_bank/metadata.json`'s `instances`/`model` ยังเป็นไฟล์เหมือนเดิม (ไม่มี pain point ที่ DB จะแก้ให้ตรงนั้น) ยังไม่มีโค้ดไหนถูกแก้ — ดูแผนแบบละเอียด (schema, concurrency, migration, ผลกระทบต่อ `bank.py`/`yolo_labels.py`/`groundtruth.py`) ที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md)
+
 ## ข้อจำกัดด้าน scalability ปัจจุบัน
 
 - **Job tracker อยู่ในหน่วยความจำของ process เดียว.** `job_tracker.py` เก็บ progress เป็น dict เดียวไม่มีการลบทิ้ง (TTL) และไม่ persist ข้าม restart — ใช้ได้ดีกับ uvicorn worker เดียวและผู้ใช้จำนวนน้อย แต่ไม่รองรับหลาย worker หรือการ scale แนวนอน (โค้ดมีคอมเมนต์ `ponytail:` ระบุไว้ตรงนี้ว่าต้องเปลี่ยนเป็น Redis/TTL eviction ถ้าจะรองรับ traffic จริง)

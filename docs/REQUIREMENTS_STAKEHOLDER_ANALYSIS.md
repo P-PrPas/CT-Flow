@@ -192,6 +192,16 @@
 | FR-38 | **บอกว่า weight ของแต่ละโมเดลพร้อมใช้จริงหรือยัง** (เลือกโมเดลที่ยังไม่มี weight บนเครื่อง = predict ครั้งแรกอาจช้ามากหรือเงียบล้มเหลวถ้าเน็ตไปโหลดจาก GitHub ไม่ได้) | ✅ | `services/models.py::is_available()` เช็คว่าไฟล์ `.pt` อยู่ใน `MODELS_DIR` จริงหรือไม่ ต่อโมเดล → ส่งเป็น `available: bool` ใน `GET /api/config` · UI แสดงจุดกลม 🟢/🔴 หน้าตัวเลือกแต่ละอันใน dropdown และหน้าโมเดลที่เลือกอยู่ (`ModelPicker.tsx`) · pre-cache แล้วสามตัว: `yoloe-11s-seg` (default), `yoloe-26s-seg`, `yoloe-26x-seg` — ใน `label_tool/models/` ที่เหลือยัง auto-download ตอนใช้ครั้งแรกตามปกติ (FR-36) |
 | FR-39 | **เปลี่ยนโมเดลของโปรเจกต์ที่ล็อกไปแล้วได้จริง โดยไม่ต้องเริ่ม output folder ใหม่ (re-embed)** | ✅ | `Bank.reembed(model_id, new_embeddings)` (`bank.py`) — commit แบบ atomic ภายใต้ lock เดียวกับ `lock_model()`: แทนที่ embedding ทุกตัวพร้อมกัน + สลับ `bank.model` ในจังหวะเดียว ไม่มีสถานะครึ่ง ๆ กลาง ๆ ที่ concurrent read จะเห็น · `POST /api/reembed` (background job แบบเดียวกับ evaluate/autolabel, poll ผ่าน `/api/jobs/{id}`) วนอ่าน `bank.instances` ทุก class ทุก instance กลับไปที่ `source_image`+`bbox` เดิม รัน `extract_embedding()` ใหม่ด้วยโมเดลเป้าหมาย แล้วค่อย commit ทีเดียวตอนจบ · UI: ปุ่ม "Switch model…" ใต้ chip ที่ล็อกอยู่ใน `ModelPicker.tsx` เปิด dropdown เลือกโมเดลใหม่ + ต้องผ่าน `Confirm` dialog (บอกจำนวน instance ที่จะประมวลผลใหม่) ก่อนเริ่มจริง · **ไฟล์ label (`labels/*.txt`, `classes.txt`) และ `instances` (provenance) ไม่ถูกแตะเลย** — ยืนยันด้วย md5sum ของไฟล์ label ก่อน/หลังตรงกันทุกตัวอักษรในการทดสอบจริงกับ `iron_ore` (สลับ `yoloe-11s-seg` → `yoloe-26s-seg` → กลับมา `yoloe-11s-seg` ครบรอบ) · หลัง reembed สำเร็จ frontend ล้าง `scores`/`evalResult`/drafts ที่ยังค้างของโมเดลเก่าทิ้งอัตโนมัติ (`session.ts::reembedModel`) เพราะเป็นตัวเลขที่วัดด้วยโมเดลเก่าไปแล้ว **ข้อจำกัดที่รู้: instance ที่สอนจากหลายกล่องคลาสเดียวกันในการ save ครั้งเดียว** (`by_class` ใน `save_label()`) จะถูกเก็บ bbox ตัวแทนไว้แค่กล่องแรก — reembed เลย replay ได้แค่กล่องนั้นกล่องเดียว ไม่ใช่ค่าเฉลี่ยเดิมทั้งชุด (มี `ponytail:` comment กำกับไว้ใน `jobs.py::_run_reembed`) — เกิดขึ้นเฉพาะกรณี label หลายกล่องคลาสเดียวกันในภาพเดียวก่อน save ซึ่งไม่ใช่ flow หลัก |
 
+### 5.7 กลุ่ม: Multi-user & DB-backed storage (ยังไม่ทำ — ตกลง scope กับทีมแล้ว 2026-08-21)
+
+| ID | Requirement | สถานะ | หมายเหตุ |
+|---|---|---|---|
+| FR-40 | ย้าย label/box metadata (`labels/*.txt`, `classes.txt`, `testset.json`, สถานะ `labeled`/`auto`) จากไฟล์ไปตาราง PostgreSQL | ❌ | แผนเต็มที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) · `_bank/embeddings.pt` ไม่อยู่ใน scope นี้ ยังเป็นไฟล์เหมือนเดิม |
+| FR-41 | รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันจริง (ไม่ใช่แค่กันเขียนชนกันแบบ `filelock`) | ❌ | ต้องการ DB transaction ล็อกระดับแถวตอนสร้างคลาสใหม่ (race condition เดิมที่ file lock แก้ได้ไม่ดีพอ) ดู DB_MIGRATION_PLAN.md หัวข้อ 4.1 |
+| FR-42 | Export annotation เลือก format ได้ (YOLO/COCO/Pascal VOC) แทนที่จะได้แค่ YOLO txt | ❌ | `GET /api/export` — ดู DB_MIGRATION_PLAN.md หัวข้อ 6 |
+
+**แรงจูงใจ:** ทีมมีแผนทำระบบ login + workspace แบบ Label Studio ในอนาคต และทีม infra ต้องการวาง PostgreSQL เป็นรากฐาน — งานกลุ่มนี้เตรียมทางไว้ (เช่น `annotations.created_by`, `projects.id` ที่ future user/workspace table จะอ้างอิง) แต่**ไม่ได้สร้างระบบ login/workspace จริงในรอบนี้**
+
 ---
 
 ## 6. Non-Functional Requirements
@@ -344,6 +354,13 @@
 | T-19 · Retrain closed-set detector | FR-35 | หลังพิสูจน์ว่า label สะสมพอและคุ้มกว่าใช้ prompt bank ต่อ |
 | T-20 · ✅ เลือกโมเดล YOLOE ได้หลายเวอร์ชัน/ขนาด | FR-36 | ทำแล้ว — รายละเอียดที่ FR-36 · เอาการพึ่งพา `poc/yoloe-11s-seg.pt` นอก repo ออกไปพร้อมกัน (checkpoint ทุกตัว auto-download เข้า `MODELS_DIR` แทน) |
 
+### Phase 6 — Multi-user & DB-backed annotation storage (ตกลง scope กับทีมแล้ว 2026-08-21, ยังไม่เริ่ม)
+
+งานแทรกที่ตัดสินใจแล้วว่าจะทำ — ย้าย label/box metadata จากไฟล์ YOLO txt ไปตาราง PostgreSQL เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกันจริง (เตรียมทางสำหรับ login + workspace แบบ Label Studio ในอนาคต) พร้อมเพิ่ม export ที่เลือก format ได้ — แผนแบบละเอียด (schema, concurrency, migration script, ผลกระทบต่อ `bank.py`/`yolo_labels.py`/`groundtruth.py`, คำถามเปิดที่ต้องตัดสินใจก่อนเริ่ม) อยู่ที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) — สรุปงานย่อย T-21 ถึง T-25 อยู่ในเอกสารนั้น (ต่อเลขจาก T-20 ด้านบน)
+
+- **เชื่อมโยง:** FR-40, FR-41, FR-42
+- **เงื่อนไขเริ่มงาน:** รอคำสั่งเริ่ม implement — เอกสารนี้เป็นแผนเท่านั้น
+
 ---
 
 ## 9. สมมติฐานที่ต้องตรวจสอบ
@@ -357,11 +374,11 @@
 | A3 | Pre-annotation (T-05) จะลดเวลา label จริง | วัด median time per label ก่อน/หลัง | เสีย effort ไปกับฟีเจอร์ที่ไม่ช่วย |
 | A4 | ผู้ใช้ยอมเสียเวลาเตรียม test set ถ้าเห็นประโยชน์ชัด | สังเกตว่ามีกี่ session ที่ข้ามขั้น evaluate | ต้องออกแบบวิธีวัดผลที่ไม่ต้องพึ่ง test set |
 | A5 | ภาพบนสายพานมีความต่อเนื่องพอที่ copy กล่องจากภาพก่อนหน้า (T-10) จะช่วยได้ | ดูตัวอย่างภาพจริงจาก dataset | T-10 ไม่คุ้มทำ |
-| A6 | จำนวนผู้ใช้พร้อมกันยังน้อย (1 คนต่อโปรเจกต์/`input_dir`) | ถามทีม | Phase 5 ต้องเลื่อนขึ้นมาก่อน |
+| A6 | ~~จำนวนผู้ใช้พร้อมกันยังน้อย (1 คนต่อโปรเจกต์/`input_dir`)~~ | ~~ถามทีม~~ | **ตัดสินใจแล้ว (2026-08-21): ผิด — ทีมต้องการรองรับหลายคนพร้อมกันจริง** พร้อมแผน login + workspace ในอนาคต → Phase 6 ([DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md)) ถูกเลื่อนขึ้นมาแล้ว |
 
 ### คำถามที่ทีมต้องตัดสินใจก่อนเริ่ม Phase 4
 
-1. **จะเปิดให้หลายคนใช้โปรเจกต์ (`input_dir`) เดียวกันพร้อมกันหรือไม่** — ถ้าใช่ ต้องออกแบบ conflict resolution ของ bank ใหม่ทั้งหมด (ปัจจุบันมีแค่ file lock ที่กันเขียนชนกัน ไม่ใช่ระบบ merge หลายคน) ถ้าไม่ใช่ แค่เพิ่ม auth ชั้นนอกก็พอ
+1. ~~จะเปิดให้หลายคนใช้โปรเจกต์ (`input_dir`) เดียวกันพร้อมกันหรือไม่~~ **ตัดสินใจแล้ว (2026-08-21): ใช่** — แก้ด้วยการย้าย label metadata ไป PostgreSQL (DB transaction ล็อกระดับแถวแทน file lock) ไม่ใช่ระบบ merge หลายคนแบบ real-time — ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 4.1 · ระบบ login/workspace เต็มรูปแบบยังเป็นงานแยกในอนาคต ไม่ใช่รอบนี้
 2. **จะรองรับ QC Operator จริงหรือจะให้ ML Engineer เป็นตัวกลางต่อไป** — ตัดสินใจข้อนี้ก่อนลงทุน T-13/T-14
 3. **เกณฑ์ F1 เท่าไหร่ถึงถือว่า "พอ" สำหรับ auto-label** — ต้องมีตัวเลขที่ตกลงกันไว้ ไม่งั้น FR-27 (คำเตือน) ตั้ง threshold ไม่ได้
 

@@ -369,8 +369,8 @@ export default function PoolPanel({ s }: { s: Session }) {
               <button
                 className="btn grow"
                 onClick={s.runEval}
-                disabled={!s.testDir || !s.bank?.classes.length || s.busy}
-                title={s.testDir ? "" : "Set a test-set folder first"}
+                disabled={!s.tsLabeled.length || !s.bank?.classes.length || s.busy}
+                title={s.tsLabeled.length ? "" : "Label at least one test image first"}
               >
                 <Icon name="target" size={14} /> {s.simple ? "Check accuracy" : "Evaluate"}
               </button>

@@ -15,13 +15,19 @@ services:
       LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
     volumes:
-      # Everything the tool can see. Input folders and output folders both live
-      # under here -- the browser can only ever pick paths inside /data.
+      # Everything the tool can see. Each project's labels/bank/test-set data
+      # live in a .ctflow/ subfolder next to its own images, all still under
+      # here -- the browser can only ever pick paths inside /data.
       - ${DATA_DIR:-../data}:/data
       # YOLOE checkpoints, auto-downloaded on first use per selected model
       # (see backend/services/models.py) -- named so a restart doesn't
       # re-fetch every weight from scratch.
       - models:/models
+    # Swagger UI (/docs), ReDoc (/redoc), and the raw spec (/openapi.json) --
+    # not proxied through `web` (its catch-all only forwards /api/*), so this
+    # is the only way to reach them against the Dockerized backend.
+    ports:
+      - "${API_PORT:-8000}:8000"
     # Requires an NVIDIA GPU + driver + the NVIDIA Container Toolkit on the
     # host (`docker info` should list an `nvidia` runtime). No GPU available?
     # Delete this block and rebuild with TORCH_INDEX_URL=.../whl/cpu instead

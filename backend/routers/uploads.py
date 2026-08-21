@@ -41,7 +41,9 @@ async def _read_capped(f: UploadFile, limit: int) -> bytes | None:
 async def upload(dir: str = Form(...), files: list[UploadFile] = File(...)):
     """Save images into `dir`. Existing names are skipped rather than
     overwritten -- an upload must never be able to replace an image someone
-    has already labeled."""
+    has already labeled. `multipart/form-data`, not JSON: `dir` is a form
+    field, `files` are the attached parts. `403` on a `vm`-mode deployment
+    that hasn't turned auth on (see T-13's precondition below)."""
     if config.MODE == "vm" and not auth.enabled():
         # T-13's precondition, enforced in code rather than left in a doc:
         # a shared deployment that accepts files from anyone who knows the URL

@@ -10,6 +10,10 @@ from pathlib import Path
 
 from .. import config
 
+# One selectable checkpoint, as returned by GET /api/config -- `id` is what a
+# client sends back as `model_id` (POST /api/label, /api/reembed): {id, family,
+# size, note, available} where `available` (bool) means the weight is already
+# on MODELS_DIR, vs. auto-downloading on first use.
 CATALOG = [
     {"id": "yoloe-v8s-seg", "family": "YOLOE v8", "size": "S", "file": "yoloe-v8s-seg.pt",
      "note": "oldest generation, smallest"},

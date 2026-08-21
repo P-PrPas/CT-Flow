@@ -63,22 +63,20 @@ function useBoxStack(limit = 40) {
   };
 }
 
-/** The three folder paths, remembered between visits. Typing a server path is
+/** The one folder path, remembered between visits. Typing a server path is
  *  the single most annoying step in the tool and it almost never changes from
- *  one day to the next. */
+ *  one day to the next. Labels, the prompt bank, and the test-set manifest
+ *  all live in a fixed subfolder of it server-side -- nothing else to ask for. */
 const DIRS_KEY = "labeltool.dirs.v1";
 
-const readDirs = (): { input?: string; output?: string; test?: string } => {
+const readDirs = (): { input?: string } => {
   if (typeof window === "undefined") return {};
   try { return JSON.parse(window.localStorage.getItem(DIRS_KEY) ?? "{}"); } catch { return {}; }
 };
 
-const saveDirs = (d: { input: string; output: string; test: string }) => {
+const saveDirs = (d: { input: string }) => {
   try { window.localStorage.setItem(DIRS_KEY, JSON.stringify(d)); } catch { /* private mode */ }
 };
-
-/** `<dir>/_testset`, in whichever slash style the dir already uses. */
-const testsetUnder = (dir: string) => `${dir}${dir.includes("\\") ? "\\" : "/"}_testset`;
 
 /** Sum of absolute differences between two 8x8 thumbnails (FR-18). */
 const distance = (a: number[], b: number[]) =>
@@ -105,14 +103,12 @@ export function useSession() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<JobProgress | null>(null);
-  const [picking, setPicking] = useState<null | "input" | "output" | "test">(null);
+  const [picking, setPicking] = useState<null | "input">(null);
   const [showSetup, setShowSetup] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   // --- session config ---------------------------------------------------
   const [inputDir, setInputDir] = useState("");
-  const [outputDir, setOutputDir] = useState("");
-  const [testDir, setTestDir] = useState("");
   const [conf, setConf] = useState(0.25);
   // Read by the pre-annotation effect without being a dependency of it --
   // dragging the threshold slider must not fire a predict per step.
@@ -198,23 +194,25 @@ export function useSession() {
   useEffect(() => {
     const d = readDirs();
     if (d.input) setInputDir(d.input);
-    if (d.output) setOutputDir(d.output);
-    if (d.test) setTestDir(d.test);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    loadHistory(outputDir).then((h) => { if (!cancelled) setHistory(h); });
+    loadHistory(inputDir).then((h) => { if (!cancelled) setHistory(h); });
     return () => { cancelled = true; };
-  }, [outputDir]);
+  }, [inputDir]);
 
   // --- derived ----------------------------------------------------------
   const classNames = useMemo(() => bank?.classes.map((c) => c.name) ?? [], [bank]);
   const labeled = useMemo(() => new Set(bank?.labeled ?? []), [bank]);
   const auto = useMemo(() => new Set(bank?.auto ?? []), [bank]);
+  /** Test-flagged images never enter the pool queue -- they're the same file
+   *  as a pool image, so offering them here would let a "Save" silently
+   *  break the held-out invariant the backend otherwise enforces. */
+  const testFlagged = useMemo(() => new Set(tsImages), [tsImages]);
   const remaining = useMemo(
-    () => images.filter((p) => !labeled.has(p) && !auto.has(p)),
-    [images, labeled, auto]
+    () => images.filter((p) => !labeled.has(p) && !auto.has(p) && !testFlagged.has(p)),
+    [images, labeled, auto, testFlagged]
   );
   const bankTotal = useMemo(
     () => bank?.classes.reduce((n, c) => n + c.count, 0) ?? 0,
@@ -242,13 +240,11 @@ export function useSession() {
   }, [tsClasses, colors]);
 
   const tsLabeledSet = useMemo(() => new Set(tsLabeled), [tsLabeled]);
-  const tsFilenames = useMemo(
-    () => new Set(tsImages.map((p) => p.split(/[\\/]/).pop())),
-    [tsImages]
-  );
+  /** Test images are pool images by path now (no copy, no filename dance) --
+   *  a pool image already flagged is not a candidate to flag again. */
   const poolCandidates = useMemo(
-    () => images.filter((p) => !tsFilenames.has(p.split(/[\\/]/).pop())),
-    [images, tsFilenames]
+    () => images.filter((p) => !testFlagged.has(p)),
+    [images, testFlagged]
   );
 
   /** Least-confident-first: the pool order is the tool's opinion about which
@@ -256,9 +252,9 @@ export function useSession() {
   const sortedPool = useMemo(() => {
     const isDone = (p: string) => labeled.has(p) || auto.has(p);
     const todo = images
-      .filter((p) => !isDone(p))
+      .filter((p) => !isDone(p) && !testFlagged.has(p))
       .sort((a, b) => (scores[a]?.conf ?? -1) - (scores[b]?.conf ?? -1));
-    const done = images.filter(isDone);
+    const done = images.filter((p) => isDone(p) && !testFlagged.has(p));
     if (!spread || todo.length < 3) return [...todo, ...done];
 
     // FR-18 — greedy: out of the few least-confident images still queued, take
@@ -280,7 +276,7 @@ export function useSession() {
       out.push(left.splice(pick, 1)[0]);
     }
     return [...out, ...done];
-  }, [images, scores, labeled, auto, spread]);
+  }, [images, scores, labeled, auto, spread, testFlagged]);
 
   /** The next image worth opening, in the order the queue is showing. `done`
    *  is passed in rather than read from state so callers can use the bank they
@@ -295,13 +291,13 @@ export function useSession() {
 
   // --- saved-box loading -------------------------------------------------
   useEffect(() => {
-    if (!current || !outputDir || !(labeled.has(current) || auto.has(current))) {
+    if (!current || !inputDir || !(labeled.has(current) || auto.has(current))) {
       setSavedBoxes(EMPTY.boxes);
       return;
     }
     const reviewing = auto.has(current);
     let cancelled = false;
-    api.getBoxes(outputDir, current)
+    api.getBoxes(inputDir, current)
       .then((d) => {
         if (cancelled) return;
         // Auto-labeled images open *in* review mode: the model's boxes land in
@@ -311,7 +307,7 @@ export function useSession() {
       })
       .catch(() => { if (!cancelled) setSavedBoxes([]); });
     return () => { cancelled = true; };
-  }, [current, outputDir, labeled, auto, poolReset]);
+  }, [current, inputDir, labeled, auto, poolReset]);
 
   /** FR-19 / T-05 — ask the model what it thinks is in this image while the
    *  user is still looking at it. Fired only for images nobody has labeled and
@@ -320,28 +316,28 @@ export function useSession() {
    *  just means drawing by hand, which is what the tool did yesterday. */
   useEffect(() => {
     setDrafts([]);
-    if (!preAnnotate || !current || !outputDir || !classNames.length) return;
+    if (!preAnnotate || !current || !inputDir || !classNames.length) return;
     if (doneSet.has(current)) return;
     let cancelled = false;
     setDrafting(true);
-    api.predict(outputDir, current, confRef.current)
+    api.predict(inputDir, current, confRef.current)
       .then((d) => { if (!cancelled) setDrafts(d.boxes.map((b) => ({ cls: b.cls, box: b.box }))); })
       .catch(() => { /* silent by design */ })
       .finally(() => { if (!cancelled) setDrafting(false); });
     return () => { cancelled = true; };
-  }, [current, outputDir, preAnnotate, classNames, doneSet]);
+  }, [current, inputDir, preAnnotate, classNames, doneSet]);
 
   useEffect(() => {
-    if (!tsCurrent || !testDir || !tsLabeledSet.has(stemOf(tsCurrent))) {
+    if (!tsCurrent || !inputDir || !tsLabeledSet.has(stemOf(tsCurrent))) {
       setTsSavedBoxes(EMPTY.boxes);
       return;
     }
     let cancelled = false;
-    api.getBoxes(testDir, tsCurrent)
+    api.getBoxes(inputDir, tsCurrent, "test")
       .then((d) => { if (!cancelled) setTsSavedBoxes(d.boxes ?? []); })
       .catch(() => { if (!cancelled) setTsSavedBoxes([]); });
     return () => { cancelled = true; };
-  }, [tsCurrent, testDir, tsLabeledSet]);
+  }, [tsCurrent, inputDir, tsLabeledSet]);
 
   // --- actions ----------------------------------------------------------
   const guard = useCallback(async (label: string, fn: () => Promise<void>) => {
@@ -358,7 +354,11 @@ export function useSession() {
 
   const openSession = () =>
     guard("Opening session…", async () => {
-      const d = await api.openSession(inputDir, outputDir);
+      // One folder in, everything back in one shot -- the bank and the
+      // test-set manifest both live under it server-side (see
+      // backend/deps.py), so there's no second "did you forget the test set"
+      // request to make and nothing here can go stale relative to the other.
+      const d = await api.openSession(inputDir);
       setImages(d.images);
       setBank(d.bank);
       // A project that already has embeddings is already locked to a model --
@@ -374,28 +374,18 @@ export function useSession() {
       setLabelSecs([]);
       setReviewed(0);
       setFirstAutoSecs(null);
-      // Nobody should have to invent a folder for the test set: default it to
-      // one inside the output dir, which is the step people skip (F7).
-      const test = testDir || testsetUnder(outputDir);
-      setTestDir(test);
-      saveDirs({ input: inputDir, output: outputDir, test });
+      saveDirs({ input: inputDir });
       const done = new Set<string>([...d.bank.labeled, ...d.bank.auto]);
       setCurrent(d.images.find((p) => !done.has(p)) ?? d.images[0] ?? null);
       setShowSetup(false);
       setPanel("pool");
       setStatus(`${d.images.length} image(s) · ${d.bank.labeled.length} labeled by hand`);
 
-      // Load the test set in the same breath. It is a separate flow, not a
-      // separate errand -- making people click "Open test set" is half the
-      // reason the measuring step gets skipped (F7).
-      const t = await api.openTestset(test).catch(() => null);
-      if (t) {
-        setTsImages(t.images);
-        setTsLabeled(t.labeled);
-        setTsClasses(t.classes);
-        const tsDone = new Set<string>(t.labeled);
-        setTsCurrent(t.images.find((p) => !tsDone.has(stemOf(p))) ?? t.images[0] ?? null);
-      }
+      setTsImages(d.testset.images);
+      setTsLabeled(d.testset.labeled);
+      setTsClasses(d.testset.classes);
+      const tsDone = new Set<string>(d.testset.labeled);
+      setTsCurrent(d.testset.images.find((p) => !tsDone.has(stemOf(p))) ?? d.testset.images[0] ?? null);
     });
 
   /** FR-19 — take the model's guesses into the editable set. Nothing reaches a
@@ -415,7 +405,7 @@ export function useSession() {
     guard("Extracting visual prompt…", async () => {
       if (!current || !pool.boxes.length) return;
       const saved = pool.boxes;
-      const d = await api.saveLabel(outputDir, current, saved, updateMode ? "update" : "replace", modelId);
+      const d = await api.saveLabel(inputDir, current, saved, updateMode ? "update" : "replace", modelId);
       setBank(d.bank);
       if (d.bank.model) setModelId(d.bank.model);
       setClipboard({ from: current, boxes: saved });
@@ -432,7 +422,7 @@ export function useSession() {
     guard("Saving corrections…", async () => {
       if (!current) return;
       const kept = pool.boxes.length;
-      const d = await api.relabel(outputDir, current, pool.boxes, updateMode ? "update" : "replace");
+      const d = await api.relabel(inputDir, current, pool.boxes, updateMode ? "update" : "replace");
       setBank(d.bank);
       poolReset([]);
       setReviewed((n) => n + 1);
@@ -449,7 +439,7 @@ export function useSession() {
     guard("Teaching the model from your corrections…", async () => {
       if (!current || !pool.boxes.length) return;
       const saved = pool.boxes;
-      const d = await api.saveLabel(outputDir, current, saved, "replace", modelId);
+      const d = await api.saveLabel(inputDir, current, saved, "replace", modelId);
       setBank(d.bank);
       setClipboard({ from: current, boxes: saved });
       poolReset([]);
@@ -463,7 +453,7 @@ export function useSession() {
 
   const rescore = () =>
     guard("Re-checking the remaining images…", async () => {
-      const r = await api.rescorePool(outputDir, remaining, setProgress);
+      const r = await api.rescorePool(inputDir, remaining, setProgress);
       setScores((cur) => ({ ...cur, ...r.scores }));
       setStaleScores(0);
       setStatus(`Re-checked ${Object.keys(r.scores).length} image(s)`);
@@ -471,16 +461,16 @@ export function useSession() {
 
   const runEval = () =>
     guard("Measuring accuracy on the test set…", async () => {
-      const r = await api.evaluateTestSet(outputDir, testDir, conf, setProgress);
+      const r = await api.evaluateTestSet(inputDir, conf, setProgress);
       setEvalResult(r);
       setZoomed(null);
-      setHistory(await appendHistory(outputDir, r, promptCounts));
+      setHistory(await appendHistory(inputDir, r, promptCounts));
       setStatus(`Test set: F1 ${(r.overall.f1 * 100).toFixed(1)}% over ${r.images} image(s)`);
     });
 
   const runAuto = () =>
     guard("Labeling the rest…", async () => {
-      const d = await api.autoLabelRemaining(outputDir, remaining, conf, setProgress);
+      const d = await api.autoLabelRemaining(inputDir, remaining, conf, setProgress);
       setBank(d.bank);
       setNoDetection(d.no_detection_images ?? []);
       if (firstAutoSecs === null && openedAt.current) {
@@ -489,7 +479,7 @@ export function useSession() {
       setStatus(`Auto-labeled ${d.written} image(s) · ${d.no_detection} with nothing found`);
     });
 
-  const resetHistory = () => clearHistory(outputDir).then(setHistory);
+  const resetHistory = () => clearHistory(inputDir).then(setHistory);
 
   /** The only sanctioned way to change a locked project's model -- re-runs
    *  the new checkpoint over every taught instance and swaps the bank's
@@ -498,7 +488,7 @@ export function useSession() {
    *  whatever drafts are on screen for the current image. */
   const reembedModel = (newModelId: string) =>
     guard(`Switching to ${newModelId}…`, async () => {
-      const d = await api.reembedBank(outputDir, newModelId, setProgress);
+      const d = await api.reembedBank(inputDir, newModelId, setProgress);
       setBank(d.bank);
       setModelId(newModelId);
       setDrafts([]);
@@ -508,32 +498,19 @@ export function useSession() {
       setStatus(`Switched to ${newModelId} — re-check the pool and re-evaluate when ready`);
     });
 
-  // --- test-set actions --------------------------------------------------
-  const openTestset = () =>
-    guard("Opening test set…", async () => {
-      const d = await api.openTestset(testDir);
-      setTsImages(d.images);
-      setTsLabeled(d.labeled);
-      setTsClasses(d.classes);
-      tsReset([]);
-      setTsPick(new Set());
-      saveDirs({ input: inputDir, output: outputDir, test: testDir });
-      const done = new Set<string>(d.labeled);
-      setTsCurrent(d.images.find((p) => !done.has(stemOf(p))) ?? d.images[0] ?? null);
-      setPanel("testset");
-      setStatus(`${d.images.length} test image(s) · ${d.labeled.length} already labeled`);
-    });
-
+  // --- test-set actions ---------------------------------------------------
+  // No separate "open" -- openSession above already bundled this state, and
+  // every action below returns its own fresh copy of it.
   const importToTestset = (paths: string[]) =>
-    guard("Copying into the test set…", async () => {
-      if (!testDir || !paths.length) return;
-      const d = await api.importTestset(testDir, paths);
+    guard("Flagging as test images…", async () => {
+      if (!inputDir || !paths.length) return;
+      const d = await api.importTestset(inputDir, paths);
       setTsImages(d.images);
       setTsLabeled(d.labeled);
       setTsClasses(d.classes);
       setPoolPick(new Set());
       if (!tsCurrent) setTsCurrent(d.images[0] ?? null);
-      setStatus(`Imported ${d.imported.length} image(s)`);
+      setStatus(`Flagged ${d.imported.length} image(s) as test set`);
     });
 
   const addRandomFromPool = () =>
@@ -542,7 +519,7 @@ export function useSession() {
   const saveTestset = () =>
     guard("Writing ground truth…", async () => {
       if (!tsCurrent || !ts.boxes.length) return;
-      const d = await api.labelTestset(testDir, tsCurrent, ts.boxes, tsUpdateMode ? "update" : "replace");
+      const d = await api.labelTestset(inputDir, tsCurrent, ts.boxes, tsUpdateMode ? "update" : "replace");
       setTsClasses(d.classes);
       setTsLabeled(d.labeled);
       tsReset([]);
@@ -553,8 +530,8 @@ export function useSession() {
 
   const removeFromTestset = (paths: string[]) =>
     guard("Removing from the test set…", async () => {
-      if (!testDir || !paths.length) return;
-      const d = await api.removeTestset(testDir, paths);
+      if (!inputDir || !paths.length) return;
+      const d = await api.removeTestset(inputDir, paths);
       setTsImages(d.images);
       setTsLabeled(d.labeled);
       setTsClasses(d.classes);
@@ -577,7 +554,7 @@ export function useSession() {
     status, setStatus, busy, progress, picking, setPicking,
     showSetup, setShowSetup, showShortcuts, setShowShortcuts,
     // config
-    inputDir, setInputDir, outputDir, setOutputDir, testDir, setTestDir, conf, setConf,
+    inputDir, setInputDir, conf, setConf,
     models, modelId, setModelId, reembedModel,
     // pool
     images, bank, scores, current, savedBoxes, cls, setCls, updateMode, setUpdateMode, selected, setSelected,
@@ -593,7 +570,7 @@ export function useSession() {
     tsImages, tsLabeled, tsClasses, tsCurrent, tsSavedBoxes, tsCls, setTsCls,
     tsUpdateMode, setTsUpdateMode, ts, tsSet, tsColor, tsLabeledSet, poolCandidates,
     poolPick, setPoolPick, tsPick, setTsPick, sampleN, setSampleN,
-    openTestset, importToTestset, addRandomFromPool, saveTestset, removeFromTestset, goToTsImage,
+    importToTestset, addRandomFromPool, saveTestset, removeFromTestset, goToTsImage,
   };
 }
 

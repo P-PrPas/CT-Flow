@@ -5,7 +5,8 @@
 ## Convention ที่ใช้ร่วมกัน
 
 - **รูปแบบ error:** ทุก endpoint คืน `HTTPException` ของ FastAPI เมื่อผิดพลาด → body เป็น `{"detail": "<ข้อความ>"}` ฝั่ง frontend (`lib/api.ts`) จับคู่กับสิ่งนี้โดยตรงใน `request()`: โยน `Error(data.detail)` เมื่อ response ไม่ ok
-- **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, `output_dir`, `test_dir`, รูปภาพ) ต้องผ่าน `deps.checked_path()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.path_allowed()` (นอกขอบเขต `vm` mode) จะได้ `403`
+- **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, รูปภาพ) ต้องผ่าน `deps.checked_path()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.path_allowed()` (นอกขอบเขต `vm` mode) จะได้ `403`
+- **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank, ป้าย YOLO, และ test-set manifest ทั้งหมดอยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()` / `deps.test_dir()`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
 - **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
 - **Auth:** ถ้าตั้ง `LABEL_TOOL_USERS` ไว้ ทุก endpoint **ยกเว้น** `GET /api/config` และ `/api/auth/*` ต้องมี session cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้ง ระบบไม่มี login เลยและทุก endpoint เปิดเหมือนเดิม (ดู `services/auth.py`)
@@ -69,10 +70,10 @@
 วงจร label หลักของพูลภาพ
 
 ### `POST /api/session`
-เปิด session label: ตรวจสอบ input dir, สร้าง/เปิด output dir, list ภาพ, โหลดหรือสร้าง bank
+เปิด session label: ตรวจสอบ input dir, list ภาพ, โหลดหรือสร้าง bank ใต้ `<input_dir>/.ctflow/` — คืน state ของ test set มาในคำตอบเดียวกันเลย ไม่ต้องเรียกแยก
 
-- **Body:** `{"input_dir": str, "output_dir": str}`
-- **Response:** `{"images": [str...], "bank": BankSummary}`
+- **Body:** `{"input_dir": str}`
+- **Response:** `{"images": [str...], "bank": BankSummary, "testset": {"images": [str...], "labeled": [stem...], "classes": [str...]}}`
 - **400** ถ้า input dir ไม่มีอยู่จริงหรือไม่มีภาพเลย
 
 ### `GET /api/image`
@@ -83,17 +84,17 @@
 - **404** ถ้าไม่ใช่ไฟล์
 
 ### `GET /api/boxes`
-คืนกล่องที่บันทึกไว้แล้วของภาพหนึ่งภาพ (ใช้ได้ทั้งกับ output_dir ของพูลและ test_dir เพราะ layout เหมือนกัน)
+คืนกล่องที่บันทึกไว้แล้วของภาพหนึ่งภาพ
 
-- **Query:** `dir`, `image`
+- **Query:** `input_dir`, `image`, `kind` (`"pool"` default หรือ `"test"`)
 - **Response:** `{"boxes": [Box...]}`
 
 ### `POST /api/label`
 บันทึกป้าย: สกัด SAVPE embedding เข้า bank ต่อคลาส, mark ภาพว่า labeled, เขียนไฟล์ label YOLO format
 
-- **Body:** `{"output_dir": str, "image": str, "boxes": [Box...], "model_id": str, "mode": "replace"|"update"}` (`mode` default `"replace"`, `model_id` default คือ `default_model` จาก `GET /api/config`)
+- **Body:** `{"input_dir": str, "image": str, "boxes": [Box...], "model_id": str, "mode": "replace"|"update"}` (`mode` default `"replace"`, `model_id` default คือ `default_model` จาก `GET /api/config`)
 - **Response:** `{"bank": BankSummary}`
-- **400** ถ้าอ่านภาพไม่ได้ หรือ `boxes` ว่างเปล่า
+- **400** ถ้าอ่านภาพไม่ได้, `boxes` ว่างเปล่า, หรือ `image` ถูกตั้งเป็น test set ไว้ (ข้อความ: `this image is in the test set -- it can never be taught to the model`) — กันไว้ตั้งแต่ endpoint เลยไม่ใช่แค่ฝั่ง UI เพราะ image ทดสอบกับ image ในพูลตอนนี้คือไฟล์เดียวกัน
 - **409** ถ้า `model_id` ไม่ตรงกับโมเดลที่ bank นี้ล็อกไว้แล้ว (bank มี embedding อยู่ก่อนจาก checkpoint อื่น) — เกิดก่อนเรียก `extract_embedding()` เสมอ ไม่เสียเวลาโหลดโมเดลผิดตัว
 - **พฤติกรรม:** `bank.lock_model(model_id)` ก่อน (ตั้งค่าให้ถ้า bank ยังไม่มีโมเดลเลย, ปฏิเสธถ้าไม่ตรง) → กล่องถูกจัดกลุ่มตามคลาสก่อน แล้วเรียก `extract_embedding()` **หนึ่งครั้งต่อคลาสต่อการบันทึก** (เฉลี่ยจากทุกกล่องของคลาสนั้นในภาพเดียวกัน) → `bank.add()` ต่อคลาส → `bank.mark_labeled()` → `bank.write_yolo_labels()` โดย `merge=True` เมื่อ `mode="update"`
 - แต่ละ instance ใน bank บันทึก `labeled_by` = ผู้ใช้ที่ login อยู่ (FR-31) หรือ `null` เมื่อไม่มีระบบ login
@@ -101,64 +102,58 @@
 ### `POST /api/relabel`
 เขียนไฟล์ label ของภาพใหม่โดยตรง **ไม่มีการสกัด embedding** — ใช้แก้ป้ายที่ auto-label/review
 
-- **Body:** `{"output_dir": str, "image": str, "boxes": [Box...], "mode": "replace"|"update"}`
+- **Body:** `{"input_dir": str, "image": str, "boxes": [Box...], "mode": "replace"|"update"}`
 - **Response:** `{"bank": BankSummary}`
-- **400** ถ้ามี `cls` ใดที่ยังไม่เคยเป็นคลาสใน bank เลย (ข้อความ: `unknown class(es) ... use Save to bank to teach a new class`)
+- **400** ถ้ามี `cls` ใดที่ยังไม่เคยเป็นคลาสใน bank เลย, หรือ `image` ถูกตั้งเป็น test set ไว้ (เหตุผลเดียวกับ `/api/label`)
 - `boxes` เป็น list ว่างได้ (กรณี "โมเดลทำนายผิดทุกกล่อง" ก็ถือว่าถูกต้อง)
 
 ### `POST /api/predict`
 กล่องที่โมเดลทำนายไว้สำหรับ **ภาพเดียว** ใช้เป็นกล่องร่างให้ผู้ใช้แก้แทนการวาดใหม่ (FR-19)
 
-- **Body:** `{"output_dir": str, "image": str, "conf": float, "conf_by_class": {cls: float}}`
+- **Body:** `{"input_dir": str, "image": str, "conf": float, "conf_by_class": {cls: float}}`
 - **Response:** `{"boxes": [{"cls": str, "box": [...], "conf": float}]}`
 - bank ว่าง → `{"boxes": []}` ทันที ไม่มี forward pass
 - ไม่แตะ bank และไม่เขียนไฟล์ใด ๆ — กล่องที่คืนมาเป็นข้อเสนอ ยังไม่ใช่ป้าย
 - ใช้โมเดลที่ล็อกไว้กับ bank เสมอ (`bank.model`) — **ไม่รับ `model_id` จาก client**, เหมือน `/api/score`, `/api/evaluate`, `/api/autolabel` ทั้งหมด
 
 ### `GET` / `POST` / `DELETE /api/history`
-ประวัติผล evaluate เก็บที่ `<output_dir>/_bank/eval_history.json` (T-07) เก็บสูงสุด 200 จุด
+ประวัติผล evaluate เก็บที่ `<input_dir>/.ctflow/_bank/eval_history.json` (T-07) เก็บสูงสุด 200 จุด
 
-- **GET/DELETE query:** `output_dir` · **POST body:** `{"output_dir": str, "point": {...}}`
+- **GET/DELETE query:** `input_dir` · **POST body:** `{"input_dir": str, "point": {...}}`
 - **Response:** `{"history": [point...]}` (ทุก method)
 
 ### `GET` / `POST /api/events`
-สถิติความพยายามของผู้ใช้ (§7) เก็บที่ `<output_dir>/_bank/events.jsonl` แบบ append-only
+สถิติความพยายามของผู้ใช้ (§7) เก็บที่ `<input_dir>/.ctflow/_bank/events.jsonl` แบบ append-only
 
-- **POST body:** `{"output_dir": str, "kind": "session"|"label"|"fix"|"auto", "session": str, "secs": float|null, "written": int}` → `{"ok": true}`
-- **GET query:** `output_dir` → `{"summary": {...}}` มี `sessions`, `sessions_reaching_autolabel`, `abandonment`, `manual_labels`, `median_label_secs`, `median_time_to_first_auto_secs`, `auto_written`, `corrections`, `correction_rate`
+- **POST body:** `{"input_dir": str, "kind": "session"|"label"|"fix"|"auto", "session": str, "secs": float|null, "written": int}` → `{"ok": true}`
+- **GET query:** `input_dir` → `{"summary": {...}}` มี `sessions`, `sessions_reaching_autolabel`, `abandonment`, `manual_labels`, `median_label_secs`, `median_time_to_first_auto_secs`, `auto_written`, `corrections`, `correction_rate`
 - ค่าที่ยังไม่มีข้อมูลเป็น `null` ไม่ใช่ `0` — "ยังไม่ได้วัด" กับ "วัดแล้วได้ศูนย์" ต่างกัน
 
 ---
 
 ## Test set (`routers/testset.py`, prefix `/api/testset`)
 
-Ground truth สำหรับวัดผล ตั้งใจให้แยกขาดจาก prompt bank โดยสิ้นเชิง
-
-### `POST /api/testset/session`
-เปิด/สร้างโฟลเดอร์ test set
-
-- **Body:** `{"test_dir": str}`
-- **Response:** `{"images": [...], "labeled": [stem...], "classes": [...]}`
+Ground truth สำหรับวัดผล ตั้งใจให้แยกขาดจาก prompt bank โดยสิ้นเชิง — **ไม่มีการคัดลอกไฟล์ภาพ**: test set คือภาพในพูลที่ถูก "แปะป้าย" ไว้ใน manifest (`<input_dir>/.ctflow/testset/testset.json`, ดู `services/groundtruth.py`) ดังนั้น path ของภาพ test set กับภาพในพูลคือ path เดียวกันเป๊ะ ๆ ไม่มี `/api/testset/session` แยกอีกต่อไป — `POST /api/session` (`routers/pool.py`) คืน state ของ test set มาให้พร้อมกันแล้ว
 
 ### `POST /api/testset/import`
-คัดลอกภาพจากพูลเข้าโฟลเดอร์ test set (คัดลอกไฟล์จริง ไม่ย้าย, ข้ามภาพที่ชื่อไฟล์มีอยู่แล้ว)
+แปะป้ายภาพจากพูลว่าเป็น test set (ไม่คัดลอกไฟล์ — ข้ามภาพที่แปะป้ายอยู่แล้ว)
 
-- **Body:** `{"test_dir": str, "images": [path...]}`
-- **Response:** `{"images": [...], "labeled": [...], "classes": [...], "imported": [path ที่คัดลอกจริง]}`
-- นำเข้าซ้ำภาพเดิมจะได้ `imported: []` (idempotent)
+- **Body:** `{"input_dir": str, "images": [path...]}`
+- **Response:** `{"images": [...], "labeled": [...], "classes": [...], "imported": [path ที่แปะป้ายจริง]}`
+- แปะป้ายซ้ำภาพเดิมจะได้ `imported: []` (idempotent)
 
 ### `POST /api/testset/remove`
-ลบภาพ + ป้าย ground truth ออกจาก test set (ไฟล์ต้นทางในพูลไม่ถูกแตะต้อง; แตะได้แค่ path ที่ resolve อยู่ใน `test_dir` เท่านั้น)
+ถอดป้าย test set ออก + ลบ ground truth ของภาพนั้น (ไฟล์ภาพต้นฉบับในพูลไม่ถูกแตะต้องเลย — ไม่มีสำเนาให้ลบ)
 
-- **Body:** `{"test_dir": str, "images": [path...]}`
-- **Response:** `{"images": [...], "labeled": [...], "classes": [...], "removed": [stem...]}`
+- **Body:** `{"input_dir": str, "images": [path...]}`
+- **Response:** `{"images": [...], "labeled": [...], "classes": [...], "removed": [path ที่ถอดป้ายจริง]}`
 
 ### `POST /api/testset/label`
-เขียนป้าย ground truth ของภาพใน test set
+เขียนป้าย ground truth ของภาพที่แปะป้ายเป็น test set ไว้แล้ว
 
-- **Body:** `{"test_dir": str, "image": str, "boxes": [Box...], "mode": "replace"|"update"}`
+- **Body:** `{"input_dir": str, "image": str, "boxes": [Box...], "mode": "replace"|"update"}`
 - **Response:** `{"classes": [...], "labeled": [...]}`
-- **400** ถ้าอ่านภาพไม่ได้ หรือ `boxes` ว่างเปล่า
+- **400** ถ้าอ่านภาพไม่ได้, `boxes` ว่างเปล่า, หรือ `image` ยังไม่ได้แปะป้ายเป็น test set (ต้อง `/api/testset/import` ก่อน)
 
 ---
 
@@ -176,7 +171,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 ### `POST /api/score`
 รีสกอร์ภาพในพูลเทียบกับ bank ปัจจุบัน (background)
 
-- **Body:** `{"output_dir": str, "images": [path...]}`
+- **Body:** `{"input_dir": str, "images": [path...]}`
 - **Response:** `{"job_id": str, "total": int}`
 - ถ้า bank ว่างเปล่าหรือไม่มี path เลย job จะจบทันทีด้วย `result = {"scores": {}}`
 - **ผลลัพธ์ (`result`):** `{"scores": {path: {"conf": float, "cls": str, "sig": [int × 64]}}}` — arm โมเดลครั้งเดียว แล้วรัน `predict_one(conf=0.05)` ต่อภาพ เก็บ detection ที่ confidence สูงสุด · `sig` คือ thumbnail 8×8 เทา ที่ UI ใช้กระจายลำดับภาพไม่ให้เสนอภาพคล้ายกันติดกัน (FR-18)
@@ -184,7 +179,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 ### `POST /api/evaluate`
 ประเมิน bank ปัจจุบันเทียบ test set ที่มีป้ายแล้ว (background)
 
-- **Body:** `{"output_dir": str, "test_dir": str, "conf": float, "conf_by_class": {cls: float}}` (`conf` default `0.25`)
+- **Body:** `{"input_dir": str, "conf": float, "conf_by_class": {cls: float}}` (`conf` default `0.25`)
 - **Response:** `{"job_id": str, "total": int}`
 - **400** ถ้า bank ว่างเปล่า หรือ test set ยังไม่มีป้าย (`metrics.load_ground_truth` โยน `FileNotFoundError`)
 - **ผลลัพธ์ (`result`):** `metrics.evaluate(gt, pred)` รวมกับ `{"conf": conf, "conf_by_class": {...}}` — ดูรูปแบบเต็มในหัวข้อ `services/metrics.py` ของ [ARCHITECTURE.md](./ARCHITECTURE.md)
@@ -192,7 +187,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 ### `POST /api/autolabel`
 เขียนป้าย YOLO ให้ภาพที่ระบุโดยตรงจาก bank (background)
 
-- **Body:** `{"output_dir": str, "images": [path...], "conf": float, "conf_by_class": {cls: float}}` (`conf` default `0.25`)
+- **Body:** `{"input_dir": str, "images": [path...], "conf": float, "conf_by_class": {cls: float}}` (`conf` default `0.25`)
 - **Response:** `{"job_id": str, "total": int}`
 - **400** ถ้า bank ว่างเปล่า
 - **พฤติกรรม:** arm โมเดลครั้งเดียว → predict ทีละภาพ → เขียนไฟล์ label เฉพาะภาพที่มี detection (ไม่งั้นนับเป็น `no_detection`) → `bank.mark_auto()` เฉพาะภาพที่เขียนป้ายจริง
@@ -201,7 +196,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 ### `POST /api/reembed`
 เปลี่ยนโมเดลของ bank ที่ล็อกไปแล้ว โดย re-extract embedding ทุก instance ใหม่ด้วยโมเดลเป้าหมาย (background) — ดู FR-39
 
-- **Body:** `{"output_dir": str, "model_id": str}`
+- **Body:** `{"input_dir": str, "model_id": str}`
 - **Response:** `{"job_id": str, "total": int}` — `total` คือจำนวน instance รวมทุกคลาส (ไม่ใช่จำนวนภาพ)
 - **400** ถ้า bank ยังไม่มีโมเดล (`bank.model is None` — ยังไม่เคยบันทึกกล่องแรกเลย ไม่มีอะไรให้ reembed), ถ้า `model_id` เท่ากับโมเดลปัจจุบันอยู่แล้ว, หรือ `model_id` ไม่อยู่ใน catalog
 - **พฤติกรรม:** วน `bank.instances` ทุกคลาสทุก instance → อ่าน `source_image` ใหม่จากดิสก์ → `extract_embedding(img, [bbox], model_id)` ทีละตัว → เมื่อครบทุก instance แล้วค่อยเรียก `bank.reembed(model_id, new_embeddings)` ครั้งเดียวเพื่อ commit แบบ atomic (แทนที่ embedding ทั้งหมด + สลับ `bank.model` พร้อมกัน) — ถ้า job ล้มเหลวกลางทาง (เช่นภาพต้นทางถูกย้าย/ลบ) bank เดิมจะไม่ถูกแตะเลย เพราะ commit เกิดครั้งเดียวตอนจบเท่านั้น

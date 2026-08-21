@@ -12,6 +12,8 @@ router = APIRouter(prefix="/api", tags=["system"])
 
 @router.get("/config")
 def get_config():
+    """Always reachable, even signed out -- the UI needs this before it can
+    even draw a login box (see app.py's PUBLIC allowlist)."""
     return {"mode": config.MODE, "roots": config.browse_roots(),
             "colors": config.LABEL_COLORS,
             "models": model_registry.public_catalog(),
@@ -22,7 +24,8 @@ def get_config():
 def browse(path: str = ""):
     """Directory picker backing store. Lists subdirectories of `path` plus how
     many images each level holds, so you can tell a dataset folder from a
-    container folder."""
+    container folder. `path=""` (the initial call) returns just `roots`,
+    without touching the filesystem."""
     if not path:
         return {"path": "", "parent": None, "dirs": [], "images": 0,
                 "roots": config.browse_roots()}

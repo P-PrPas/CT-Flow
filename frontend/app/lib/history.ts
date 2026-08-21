@@ -2,12 +2,12 @@
 
 /** FR-13/14/15 — "do I need to label more, or is this class done?"
  *
- *  Every Evaluate run is appended to a per-output-dir history, which is what
+ *  Every Evaluate run is appended to a per-project history, which is what
  *  turns a bare F1 number into a trend: the learning curve, the plateau
  *  warning, and the next-action advice all read from here.
  *
- *  Stored server-side in <output_dir>/_bank/eval_history.json, so the curve
- *  belongs to the dataset rather than to one person's browser.
+ *  Stored server-side in <input_dir>/.ctflow/_bank/eval_history.json, so the
+ *  curve belongs to the dataset rather than to one person's browser.
  */
 
 import * as api from "./api";
@@ -34,11 +34,11 @@ const safely = async (p: Promise<{ history: unknown[] }>): Promise<EvalPoint[]> 
   }
 };
 
-export const loadHistory = (outputDir: string): Promise<EvalPoint[]> =>
-  outputDir ? safely(api.getHistory(outputDir)) : Promise.resolve([]);
+export const loadHistory = (inputDir: string): Promise<EvalPoint[]> =>
+  inputDir ? safely(api.getHistory(inputDir)) : Promise.resolve([]);
 
 export function appendHistory(
-  outputDir: string,
+  inputDir: string,
   result: EvalResult,
   prompts: Record<string, number>
 ): Promise<EvalPoint[]> {
@@ -50,11 +50,11 @@ export function appendHistory(
     overall: result.overall,
     perClass: result.per_class,
   };
-  return safely(api.addHistory(outputDir, point));
+  return safely(api.addHistory(inputDir, point));
 }
 
-export const clearHistory = (outputDir: string): Promise<EvalPoint[]> =>
-  safely(api.dropHistory(outputDir));
+export const clearHistory = (inputDir: string): Promise<EvalPoint[]> =>
+  safely(api.dropHistory(inputDir));
 
 // ------------------------------------------------------------------ advice
 

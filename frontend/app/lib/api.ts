@@ -33,79 +33,83 @@ export function browse(path: string) {
   return request(`/api/browse?path=${encodeURIComponent(path)}`);
 }
 
-export function getBoxes(dir: string, image: string): Promise<{ boxes: Box[] }> {
-  return request(`/api/boxes?dir=${encodeURIComponent(dir)}&image=${encodeURIComponent(image)}`);
+export function getBoxes(
+  input_dir: string, image: string, kind: "pool" | "test" = "pool"
+): Promise<{ boxes: Box[] }> {
+  return request(
+    `/api/boxes?input_dir=${encodeURIComponent(input_dir)}&image=${encodeURIComponent(image)}&kind=${kind}`
+  );
 }
 
 // --- pool -------------------------------------------------------------
 
-export function openSession(
-  input_dir: string,
-  output_dir: string
-): Promise<{ images: string[]; bank: BankSummary }> {
-  return post("/api/session", { input_dir, output_dir });
+/** One folder in, everything else comes back in one shot: the prompt bank
+ *  (labels + taught examples) and the test-set manifest both live in a fixed
+ *  subfolder of input_dir server-side (see backend/deps.py), so there is
+ *  nothing else to pick and no second request to make. */
+export function openSession(input_dir: string): Promise<{
+  images: string[]; bank: BankSummary;
+  testset: { images: string[]; labeled: string[]; classes: string[] };
+}> {
+  return post("/api/session", { input_dir });
 }
 
 export function saveLabel(
-  output_dir: string, image: string, boxes: Box[], mode: "replace" | "update", model_id: string
+  input_dir: string, image: string, boxes: Box[], mode: "replace" | "update", model_id: string
 ): Promise<{ bank: BankSummary }> {
-  return post("/api/label", { output_dir, image, boxes, mode, model_id });
+  return post("/api/label", { input_dir, image, boxes, mode, model_id });
 }
 
 /** Rewrites the image's label file directly -- no embedding extraction, for
  *  fixing an auto-generated label without treating the edit as a new prompt. */
 export function relabel(
-  output_dir: string, image: string, boxes: Box[], mode: "replace" | "update" = "replace"
+  input_dir: string, image: string, boxes: Box[], mode: "replace" | "update" = "replace"
 ): Promise<{ bank: BankSummary }> {
-  return post("/api/relabel", { output_dir, image, boxes, mode });
+  return post("/api/relabel", { input_dir, image, boxes, mode });
 }
 
 /** FR-19 — the model's guesses for one image, drawn as drafts the user accepts
  *  or ignores. Returns [] instantly when the bank is empty. */
 export function predict(
-  output_dir: string, image: string, conf: number
+  input_dir: string, image: string, conf: number
 ): Promise<{ boxes: (Box & { conf: number })[] }> {
-  return post("/api/predict", { output_dir, image, conf });
+  return post("/api/predict", { input_dir, image, conf });
 }
 
 // --- evaluate history (T-07) -------------------------------------------
 
-export function getHistory(output_dir: string): Promise<{ history: unknown[] }> {
-  return request(`/api/history?output_dir=${encodeURIComponent(output_dir)}`);
+export function getHistory(input_dir: string): Promise<{ history: unknown[] }> {
+  return request(`/api/history?input_dir=${encodeURIComponent(input_dir)}`);
 }
 
-export function addHistory(output_dir: string, point: unknown): Promise<{ history: unknown[] }> {
-  return post("/api/history", { output_dir, point });
+export function addHistory(input_dir: string, point: unknown): Promise<{ history: unknown[] }> {
+  return post("/api/history", { input_dir, point });
 }
 
-export function dropHistory(output_dir: string): Promise<{ history: unknown[] }> {
-  return request(`/api/history?output_dir=${encodeURIComponent(output_dir)}`, { method: "DELETE" });
+export function dropHistory(input_dir: string): Promise<{ history: unknown[] }> {
+  return request(`/api/history?input_dir=${encodeURIComponent(input_dir)}`, { method: "DELETE" });
 }
 
-// --- test set -----------------------------------------------------------
+// --- test set -------------------------------------------------------------
+// Flags pool images as held out -- no copy, no second folder. See
+// backend/services/groundtruth.py's manifest.
 
-export function openTestset(
-  test_dir: string
-): Promise<{ images: string[]; labeled: string[]; classes: string[] }> {
-  return post("/api/testset/session", { test_dir });
-}
-
-export function importTestset(test_dir: string, images: string[]) {
-  return post("/api/testset/import", { test_dir, images }) as Promise<{
+export function importTestset(input_dir: string, images: string[]) {
+  return post("/api/testset/import", { input_dir, images }) as Promise<{
     images: string[]; labeled: string[]; classes: string[]; imported: string[];
   }>;
 }
 
-export function removeTestset(test_dir: string, images: string[]) {
-  return post("/api/testset/remove", { test_dir, images }) as Promise<{
+export function removeTestset(input_dir: string, images: string[]) {
+  return post("/api/testset/remove", { input_dir, images }) as Promise<{
     images: string[]; labeled: string[]; classes: string[]; removed: string[];
   }>;
 }
 
 export function labelTestset(
-  test_dir: string, image: string, boxes: Box[], mode: "replace" | "update"
+  input_dir: string, image: string, boxes: Box[], mode: "replace" | "update"
 ): Promise<{ classes: string[]; labeled: string[] }> {
-  return post("/api/testset/label", { test_dir, image, boxes, mode });
+  return post("/api/testset/label", { input_dir, image, boxes, mode });
 }
 
 // --- background jobs: evaluate / autolabel / rescore --------------------
@@ -140,22 +144,22 @@ export function runJob(url: string, body: unknown, onProgress: (p: JobProgress) 
   );
 }
 
-export function rescorePool(output_dir: string, images: string[], onProgress: (p: JobProgress) => void) {
-  return runJob("/api/score", { output_dir, images }, onProgress) as Promise<{
+export function rescorePool(input_dir: string, images: string[], onProgress: (p: JobProgress) => void) {
+  return runJob("/api/score", { input_dir, images }, onProgress) as Promise<{
     scores: Record<string, Score>;
   }>;
 }
 
 export function evaluateTestSet(
-  output_dir: string, test_dir: string, conf: number, onProgress: (p: JobProgress) => void
+  input_dir: string, conf: number, onProgress: (p: JobProgress) => void
 ): Promise<EvalResult> {
-  return runJob("/api/evaluate", { output_dir, test_dir, conf }, onProgress);
+  return runJob("/api/evaluate", { input_dir, conf }, onProgress);
 }
 
 export function autoLabelRemaining(
-  output_dir: string, images: string[], conf: number, onProgress: (p: JobProgress) => void
+  input_dir: string, images: string[], conf: number, onProgress: (p: JobProgress) => void
 ) {
-  return runJob("/api/autolabel", { output_dir, images, conf }, onProgress) as Promise<{
+  return runJob("/api/autolabel", { input_dir, images, conf }, onProgress) as Promise<{
     written: number; no_detection: number; no_detection_images: string[]; bank: BankSummary;
   }>;
 }
@@ -164,7 +168,7 @@ export function autoLabelRemaining(
  *  -- re-extracts every taught instance's embedding under the new checkpoint.
  *  Label files are untouched; only the prompt bank's vectors change. */
 export function reembedBank(
-  output_dir: string, model_id: string, onProgress: (p: JobProgress) => void
+  input_dir: string, model_id: string, onProgress: (p: JobProgress) => void
 ) {
-  return runJob("/api/reembed", { output_dir, model_id }, onProgress) as Promise<{ bank: BankSummary }>;
+  return runJob("/api/reembed", { input_dir, model_id }, onProgress) as Promise<{ bank: BankSummary }>;
 }

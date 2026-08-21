@@ -21,6 +21,7 @@ jobs:
       - run: pip install numpy opencv-python-headless
       - run: python -m backend.services.auth
       - run: python -m backend.services.events
+      - run: python -m backend.services.groundtruth
       - run: python -m backend.services.metrics
       - run: python -m backend.services.models
 

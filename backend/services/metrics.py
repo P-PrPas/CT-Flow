@@ -1,10 +1,11 @@
 """Accuracy of the current prompt bank against a hand-labeled test set.
 
-The test set is just a folder in the same shape this tool writes:
+The test set is whichever pool images are flagged in <test_dir>/testset.json
+(see services/groundtruth.py) -- ground truth is written in the same shape
+this tool always uses:
 
-    <test_dir>/*.jpg            the 10-20 held-out images
-    <test_dir>/labels/*.txt     YOLO ground truth (label them with this tool:
-    <test_dir>/classes.txt      point input AND output at <test_dir>)
+    <test_dir>/labels/*.txt     YOLO ground truth
+    <test_dir>/classes.txt
 
 Metric is precision / recall / F1 at IoU 0.5 with greedy one-to-one matching.
 ponytail: no mAP -- P/R/F1 at a fixed threshold is what you actually decide
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import cv2
 
-from ..config import IMAGE_EXTS
+from . import groundtruth
 
 
 def iou(a: list[float], b: list[float]) -> float:
@@ -38,10 +39,12 @@ def load_ground_truth(test_dir: str) -> dict[str, list[dict]]:
     names = [n for n in classes_file.read_text(encoding="utf-8").splitlines() if n.strip()]
 
     gt: dict[str, list[dict]] = {}
-    for img_path in sorted(p for p in d.iterdir() if p.suffix.lower() in IMAGE_EXTS):
+    for img_path in (Path(p) for p in groundtruth.list_test_images(test_dir)):
         txt = d / "labels" / (img_path.stem + ".txt")
         if not txt.exists():
-            continue  # unlabeled image -> not part of the test set
+            continue  # flagged but not yet labeled -> not part of the test set
+        if not img_path.is_file():
+            continue  # the pool image this manifest entry pointed at moved or was deleted
         img = cv2.imread(str(img_path))
         if img is None:
             continue

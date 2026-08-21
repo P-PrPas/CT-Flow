@@ -1,6 +1,6 @@
 """One runnable check: open a session, label a box, verify the bank + YOLO
-labels land in the output dir and survive a reload, then rescore the pool.
-Run from label_tool/: .venv\\Scripts\\python.exe -m backend._smoke_test"""
+labels land in the project's state dir and survive a reload, then rescore
+the pool. Run from label_tool/: .venv\\Scripts\\python.exe -m backend._smoke_test"""
 import json
 import os
 import shutil
@@ -17,7 +17,11 @@ from .services.bank import Bank
 
 HERE = Path(__file__).parent
 POOL = str(HERE / "test_pool")
-OUT = HERE / "_smoke_out"
+# input_dir is now the only path a client ever sends -- the bank and the
+# test-set manifest both live in a fixed .ctflow subfolder of it (see
+# backend/deps.py), nested inside the fixture pool itself rather than beside it.
+OUT = Path(POOL) / ".ctflow"
+TEST = OUT / "testset"
 if OUT.exists():
     shutil.rmtree(OUT)
 
@@ -46,15 +50,16 @@ assert all("file" not in m for m in cfg["models"]), cfg["models"]  # no local pa
 default_entry = next(m for m in cfg["models"] if m["id"] == cfg["default_model"])
 assert default_entry["available"] is True, default_entry  # CI/dev always has the default weight cached
 
-r = c.post("/api/session", json={"input_dir": POOL, "output_dir": str(OUT)})
+r = c.post("/api/session", json={"input_dir": POOL})
 assert r.status_code == 200, r.text
 images = r.json()["images"]
 assert len(images) == 3, images
+assert r.json()["testset"] == {"images": [], "labeled": [], "classes": []}
 print("pool:", len(images), "images")
 
 target = images[0]
 r = c.post("/api/label", json={
-    "output_dir": str(OUT),
+    "input_dir": POOL,
     "image": target,
     "boxes": [{"cls": "test_item", "box": [30, 30, 120, 120]}],
 })
@@ -66,7 +71,7 @@ assert r.json()["bank"]["model"] == "yoloe-11s-seg", r.json()["bank"]
 # switching models on a bank that already has embeddings must be rejected --
 # rejected before any inference runs, so this costs no extra model load
 r = c.post("/api/label", json={
-    "output_dir": str(OUT), "image": target,
+    "input_dir": POOL, "image": target,
     "boxes": [{"cls": "test_item", "box": [1, 1, 5, 5]}],
     "model_id": "yoloe-11m-seg",
 })
@@ -81,7 +86,7 @@ print("yolo label:", label_file.read_text())
 reloaded = Bank(str(OUT))
 assert reloaded.classes == ["test_item"] and reloaded.labeled == [target]
 
-r = c.post("/api/score", json={"output_dir": str(OUT), "images": images[1:]})
+r = c.post("/api/score", json={"input_dir": POOL, "images": images[1:]})
 assert r.status_code == 200, r.text
 scores = wait_job(r.json()["job_id"])["scores"]
 assert set(scores) == set(images[1:]), scores
@@ -90,7 +95,7 @@ assert all(len(s["sig"]) == 64 for s in scores.values()), scores
 print("scores:", {p: (s["conf"], s["cls"]) for p, s in scores.items()})
 
 # a saved image should hand back its own boxes on request
-r = c.get("/api/boxes", params={"dir": str(OUT), "image": target})
+r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 assert r.status_code == 200, r.text
 saved = r.json()["boxes"]
 assert saved and saved[0]["cls"] == "test_item", saved
@@ -98,23 +103,23 @@ print("saved boxes:", saved)
 
 # mode="update": add a box without losing the one already there
 r = c.post("/api/label", json={
-    "output_dir": str(OUT), "image": target,
+    "input_dir": POOL, "image": target,
     "boxes": [{"cls": "test_item", "box": [200, 200, 260, 260]}],
     "mode": "update",
 })
 assert r.status_code == 200, r.text
-r = c.get("/api/boxes", params={"dir": str(OUT), "image": target})
+r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 merged = r.json()["boxes"]
 assert len(merged) == 2, merged  # original box survived, new one added
 print("after update:", merged)
 
 # mode="replace" (default) must still fully overwrite
 r = c.post("/api/label", json={
-    "output_dir": str(OUT), "image": target,
+    "input_dir": POOL, "image": target,
     "boxes": [{"cls": "test_item", "box": [5, 5, 15, 15]}],
 })
 assert r.status_code == 200, r.text
-r = c.get("/api/boxes", params={"dir": str(OUT), "image": target})
+r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 replaced = r.json()["boxes"]
 assert len(replaced) == 1, replaced
 print("after replace:", replaced)
@@ -122,11 +127,11 @@ print("after replace:", replaced)
 # class-order stability: a new class name that sorts before "test_item"
 # must not shift the index test_item was already written under
 r = c.post("/api/label", json={
-    "output_dir": str(OUT), "image": images[1],
+    "input_dir": POOL, "image": images[1],
     "boxes": [{"cls": "aaa_new_class", "box": [1, 1, 20, 20]}],
 })
 assert r.status_code == 200, r.text
-r = c.get("/api/boxes", params={"dir": str(OUT), "image": target})
+r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 still_correct = r.json()["boxes"]
 assert still_correct and still_correct[0]["cls"] == "test_item", still_correct
 print("class order stable after adding 'aaa_new_class':", still_correct)
@@ -134,23 +139,23 @@ print("class order stable after adding 'aaa_new_class':", still_correct)
 # /api/relabel: fix a generated label directly -- no new embeddings, unlike /api/label
 bank_before = Bank(str(OUT)).summary()
 r = c.post("/api/relabel", json={
-    "output_dir": str(OUT), "image": target,
+    "input_dir": POOL, "image": target,
     "boxes": [{"cls": "test_item", "box": [1, 1, 9, 9]}],
 })
 assert r.status_code == 200, r.text
 assert r.json()["bank"]["classes"] == bank_before["classes"], r.json()["bank"]  # no embeddings added
-r = c.get("/api/boxes", params={"dir": str(OUT), "image": target})
+r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 assert [b["cls"] for b in r.json()["boxes"]] == ["test_item"], r.json()
 
 # deleting every box (boxes=[]) is a legitimate "model was wrong here"
-r = c.post("/api/relabel", json={"output_dir": str(OUT), "image": target, "boxes": []})
+r = c.post("/api/relabel", json={"input_dir": POOL, "image": target, "boxes": []})
 assert r.status_code == 200, r.text
-r = c.get("/api/boxes", params={"dir": str(OUT), "image": target})
+r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 assert r.json()["boxes"] == [], r.json()
 
 # a class never taught to the bank must be rejected, not silently mis-indexed
 r = c.post("/api/relabel", json={
-    "output_dir": str(OUT), "image": target,
+    "input_dir": POOL, "image": target,
     "boxes": [{"cls": "never_seen_before", "box": [1, 1, 9, 9]}],
 })
 assert r.status_code == 400, r.text
@@ -158,28 +163,38 @@ print("relabel: bank untouched by review edits, empty boxes allowed, unknown cla
 
 
 # --- readiness loop: prepare a test set (ground truth only, no prompt bank) ---
-TEST = HERE / "_smoke_test_set"
-if TEST.exists():
-    shutil.rmtree(TEST)
-TEST.mkdir()
-
-r = c.post("/api/testset/import", json={"test_dir": str(TEST), "images": [images[1]]})
+# No file copy and no second folder: a test image is a pool image flagged in
+# a manifest (see services/groundtruth.py) -- images[1] IS the test image.
+r = c.post("/api/testset/import", json={"input_dir": POOL, "images": [images[1]]})
 assert r.status_code == 200, r.text
 test_img = r.json()["images"][0]
 assert r.json()["imported"] == [test_img]
-assert Path(test_img).read_bytes() == Path(images[1]).read_bytes()  # copy, not a move
-assert Path(images[1]).exists()  # pool untouched
+assert test_img == images[1]  # no copy -- the pool image itself is the test image
+assert Path(images[1]).exists()  # pool untouched (there was never a second file)
 
 # re-importing the same source must not clobber anything
-r = c.post("/api/testset/import", json={"test_dir": str(TEST), "images": [images[1]]})
+r = c.post("/api/testset/import", json={"input_dir": POOL, "images": [images[1]]})
 assert r.json()["imported"] == []
 
-r = c.post("/api/testset/session", json={"test_dir": str(TEST)})
-assert r.status_code == 200, r.text
-assert r.json()["images"] == [test_img] and r.json()["labeled"] == []
+# the isolation invariant: a flagged image can never be taught to the bank
+r = c.post("/api/label", json={
+    "input_dir": POOL, "image": test_img,
+    "boxes": [{"cls": "test_item", "box": [1, 1, 9, 9]}],
+})
+assert r.status_code == 400, r.text
+r = c.post("/api/relabel", json={"input_dir": POOL, "image": test_img, "boxes": []})
+assert r.status_code == 400, r.text
+print("isolation: a test-flagged image is rejected by /api/label and /api/relabel")
+
+# and the mirror invariant: ground truth can't be written for an unflagged image
+r = c.post("/api/testset/label", json={
+    "input_dir": POOL, "image": images[2],
+    "boxes": [{"cls": "test_item", "box": [1, 1, 9, 9]}],
+})
+assert r.status_code == 400, r.text
 
 r = c.post("/api/testset/label", json={
-    "test_dir": str(TEST),
+    "input_dir": POOL,
     "image": test_img,
     "boxes": [{"cls": "test_item", "box": [40, 40, 150, 150]}],
 })
@@ -189,43 +204,43 @@ print("ground truth:", r.json())
 
 # mode="update" on ground truth too: add without losing what's there
 r = c.post("/api/testset/label", json={
-    "test_dir": str(TEST), "image": test_img,
+    "input_dir": POOL, "image": test_img,
     "boxes": [{"cls": "test_item", "box": [5, 5, 30, 30]}],
     "mode": "update",
 })
 assert r.status_code == 200, r.text
-r = c.get("/api/boxes", params={"dir": str(TEST), "image": test_img})
+r = c.get("/api/boxes", params={"input_dir": POOL, "image": test_img, "kind": "test"})
 gt_merged = r.json()["boxes"]
 assert len(gt_merged) == 2, gt_merged
 print("ground truth after update:", gt_merged)
 
 # must not touch the prompt bank -- test images are held out, not prompts
 assert not (TEST / "_bank").exists()
+assert Bank(str(OUT)).summary()["classes"] == bank_before["classes"]  # unaffected by testset writes
 
-r = c.post("/api/testset/session", json={"test_dir": str(TEST)})
+r = c.post("/api/testset/import", json={"input_dir": POOL, "images": []})  # cheap way to re-read state
 assert r.json()["labeled"] == [Path(test_img).stem]
 
-# test-set manager: import a second image, then remove it -- file + label gone,
-# the first image and the pool source untouched
-r = c.post("/api/testset/import", json={"test_dir": str(TEST), "images": [images[2]]})
+# test-set manager: flag a second image, then unflag it -- manifest entry +
+# label gone, the first image and both pool sources untouched
+r = c.post("/api/testset/import", json={"input_dir": POOL, "images": [images[2]]})
 assert r.status_code == 200, r.text
-second_img = [p for p in r.json()["imported"]][0]
+second_img = r.json()["imported"][0]
 r = c.post("/api/testset/label", json={
-    "test_dir": str(TEST), "image": second_img,
+    "input_dir": POOL, "image": second_img,
     "boxes": [{"cls": "test_item", "box": [10, 10, 50, 50]}],
 })
 assert r.status_code == 200, r.text
 
-r = c.post("/api/testset/remove", json={"test_dir": str(TEST), "images": [second_img]})
+r = c.post("/api/testset/remove", json={"input_dir": POOL, "images": [second_img]})
 assert r.status_code == 200, r.text
-assert r.json()["removed"] == [Path(second_img).stem]
+assert r.json()["removed"] == [second_img]
 assert r.json()["images"] == [test_img]
-assert not Path(second_img).exists()
+assert Path(second_img).exists()  # unflagging never deletes -- there was no copy to delete
 assert not (TEST / "labels" / f"{Path(second_img).stem}.txt").exists()
-assert Path(images[2]).exists()  # pool source untouched
 print("removed from test set:", r.json()["removed"])
 
-r = c.post("/api/evaluate", json={"output_dir": str(OUT), "test_dir": str(TEST), "conf": 0.1})
+r = c.post("/api/evaluate", json={"input_dir": POOL, "conf": 0.1})
 assert r.status_code == 200, r.text
 assert r.json()["total"] == 1
 ev = wait_job(r.json()["job_id"])
@@ -235,7 +250,7 @@ assert set(img0) >= {"image", "gt", "pred", "tp", "fp", "fn"}, img0
 assert all("matched" in g for g in img0["gt"]), img0
 print("eval:", ev["overall"], "| per-image gt/pred:", len(img0["gt"]), len(img0["pred"]))
 
-r = c.post("/api/autolabel", json={"output_dir": str(OUT), "images": images[1:], "conf": 0.1})
+r = c.post("/api/autolabel", json={"input_dir": POOL, "images": images[1:], "conf": 0.1})
 assert r.status_code == 200, r.text
 auto = wait_job(r.json()["job_id"])
 assert auto["written"] + auto["no_detection"] == 2, auto
@@ -245,45 +260,47 @@ assert len(auto["no_detection_images"]) == auto["no_detection"], auto
 print("autolabel:", auto["written"], "written,", auto["no_detection"], "empty")
 
 # FR-19: pre-annotation for a single image, straight from the bank
-r = c.post("/api/predict", json={"output_dir": str(OUT), "image": target, "conf": 0.05})
+r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.05})
 assert r.status_code == 200, r.text
 drafts = r.json()["boxes"]
 assert all(d["cls"] in Bank(str(OUT)).classes and len(d["box"]) == 4 for d in drafts), drafts
 print("predict:", len(drafts), "draft box(es)")
 
 # an empty bank must cost nothing rather than error
-EMPTY_OUT = HERE / "_smoke_empty"
-r = c.post("/api/predict", json={"output_dir": str(EMPTY_OUT), "image": target})
+EMPTY_POOL = HERE / "_smoke_empty"
+if EMPTY_POOL.exists():
+    shutil.rmtree(EMPTY_POOL)
+r = c.post("/api/predict", json={"input_dir": str(EMPTY_POOL), "image": target})
 assert r.status_code == 200 and r.json()["boxes"] == [], r.text
-shutil.rmtree(EMPTY_OUT)
+shutil.rmtree(EMPTY_POOL)
 
 # FR-09 / T-17: relabel mode="update" merges instead of replacing
-c.post("/api/relabel", json={"output_dir": str(OUT), "image": target, "boxes": []})
+c.post("/api/relabel", json={"input_dir": POOL, "image": target, "boxes": []})
 for box in ([1, 1, 9, 9], [20, 20, 40, 40]):
     r = c.post("/api/relabel", json={
-        "output_dir": str(OUT), "image": target,
+        "input_dir": POOL, "image": target,
         "boxes": [{"cls": "test_item", "box": box}], "mode": "update",
     })
     assert r.status_code == 200, r.text
-merged_review = c.get("/api/boxes", params={"dir": str(OUT), "image": target}).json()["boxes"]
+merged_review = c.get("/api/boxes", params={"input_dir": POOL, "image": target}).json()["boxes"]
 assert len(merged_review) == 2, merged_review
 print("relabel update:", len(merged_review), "boxes kept")
 
-# T-07: evaluate history round-trips through <output_dir>/_bank/eval_history.json
+# T-07: evaluate history round-trips through <input_dir>/.ctflow/_bank/eval_history.json
 point = {"ts": 1, "conf": 0.1, "prompts": {"test_item": 3}, "totalPrompts": 3,
          "overall": ev["overall"], "perClass": ev["per_class"]}
-assert c.post("/api/history", json={"output_dir": str(OUT), "point": point}).json()["history"] == [point]
-assert c.get("/api/history", params={"output_dir": str(OUT)}).json()["history"] == [point]
+assert c.post("/api/history", json={"input_dir": POOL, "point": point}).json()["history"] == [point]
+assert c.get("/api/history", params={"input_dir": POOL}).json()["history"] == [point]
 assert (OUT / "_bank" / "eval_history.json").exists()
-assert c.request("DELETE", "/api/history", params={"output_dir": str(OUT)}).json()["history"] == []
-assert c.get("/api/history", params={"output_dir": str(OUT)}).json()["history"] == []
+assert c.request("DELETE", "/api/history", params={"input_dir": POOL}).json()["history"] == []
+assert c.get("/api/history", params={"input_dir": POOL}).json()["history"] == []
 print("eval history: persisted, read back, cleared")
 
 
 # Inference has to survive the bank gaining a class mid-process (it grew from
 # 1 to 2 above). A threshold this low guarantees detections, which is what it
 # takes to reach the mask head where a stale class count blows up -- see arm().
-r = c.post("/api/predict", json={"output_dir": str(OUT), "image": target, "conf": 0.001})
+r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.001})
 assert r.status_code == 200 and r.json()["boxes"], r.text[:200]
 assert {b["cls"] for b in r.json()["boxes"]} <= set(Bank(str(OUT)).classes), r.json()
 print("predict after a class was added:", len(r.json()["boxes"]), "boxes, no shape error")
@@ -291,12 +308,12 @@ print("predict after a class was added:", len(r.json()["boxes"]), "boxes, no sha
 # FR-33: a per-class threshold above 1.0 can never be met, so naming every
 # class in conf_by_class must empty the result even at conf=0.0
 r = c.post("/api/predict", json={
-    "output_dir": str(OUT), "image": target, "conf": 0.0,
+    "input_dir": POOL, "image": target, "conf": 0.0,
     "conf_by_class": {n: 1.01 for n in Bank(str(OUT)).classes},
 })
 assert r.status_code == 200 and r.json()["boxes"] == [], r.text
 r = c.post("/api/evaluate", json={
-    "output_dir": str(OUT), "test_dir": str(TEST), "conf": 0.1,
+    "input_dir": POOL, "conf": 0.1,
     "conf_by_class": {"test_item": 0.9},
 })
 assert wait_job(r.json()["job_id"])["conf_by_class"] == {"test_item": 0.9}
@@ -391,8 +408,8 @@ for e in [{"kind": "session", "session": "s1"},
           {"kind": "label", "session": "s1", "secs": 12},
           {"kind": "auto", "session": "s1", "secs": 300, "written": 4},
           {"kind": "fix", "session": "s1"}]:
-    assert c.post("/api/events", json={"output_dir": str(OUT)} | e).status_code == 200
-stats = c.get("/api/events", params={"output_dir": str(OUT)}).json()["summary"]
+    assert c.post("/api/events", json={"input_dir": POOL} | e).status_code == 200
+stats = c.get("/api/events", params={"input_dir": POOL}).json()["summary"]
 assert stats["sessions"] == 1 and stats["abandonment"] == 0.0, stats
 assert stats["median_label_secs"] == 12 and stats["correction_rate"] == 0.25, stats
 assert (OUT / "_bank" / "events.jsonl").exists()
@@ -441,7 +458,7 @@ os.environ["LABEL_TOOL_USERS"] = f"alice:{auth.hash_password('hunter2')}"
 try:
     locked = TestClient(app)
     assert locked.get("/api/config").status_code == 200          # public: UI needs it to boot
-    assert locked.post("/api/session", json={"input_dir": POOL, "output_dir": str(OUT)}).status_code == 401
+    assert locked.post("/api/session", json={"input_dir": POOL}).status_code == 401
     assert locked.get("/api/auth/me").json() == {"enabled": True, "user": None}
     assert locked.post("/api/auth/login",
                        json={"username": "alice", "password": "wrong"}).status_code == 401
@@ -450,27 +467,24 @@ try:
     assert locked.post("/api/auth/login",
                        json={"username": "alice", "password": "hunter2"}).status_code == 200
     assert locked.get("/api/auth/me").json() == {"enabled": True, "user": "alice"}
-    assert locked.post("/api/session",
-                       json={"input_dir": POOL, "output_dir": str(OUT)}).status_code == 200
+    assert locked.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
     # FR-31: the signed-in name lands on the instance this call creates
     assert locked.post("/api/label", json={
-        "output_dir": str(OUT), "image": images[2],
+        "input_dir": POOL, "image": images[2],
         "boxes": [{"cls": "test_item", "box": [10, 10, 60, 60]}],
     }).status_code == 200
     meta = json.loads((OUT / "_bank" / "metadata.json").read_text(encoding="utf-8"))
     assert meta["instances"]["test_item"][-1]["labeled_by"] == "alice", meta["instances"]["test_item"][-1]
 
     locked.post("/api/auth/logout")
-    assert locked.post("/api/session",
-                       json={"input_dir": POOL, "output_dir": str(OUT)}).status_code == 401
+    assert locked.post("/api/session", json={"input_dir": POOL}).status_code == 401
     print("auth: gated, logged in as alice, labeled_by recorded, logged out")
 finally:
     del os.environ["LABEL_TOOL_USERS"]
 
 assert c.get("/api/auth/me").json() == {"enabled": False, "user": None}
-assert c.post("/api/session", json={"input_dir": POOL, "output_dir": str(OUT)}).status_code == 200
+assert c.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
 shutil.rmtree(OUT)
-shutil.rmtree(TEST)
 print("SMOKE TEST OK")

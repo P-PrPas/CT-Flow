@@ -183,8 +183,6 @@ export default function Page() {
             </span>
             <div className="row wrap xs faint" style={{ gap: 10 }}>
               {s.inputDir && <span className="mono truncate" title={s.inputDir} style={{ maxWidth: 240 }}>in: {fileOf(s.inputDir)}</span>}
-              {s.outputDir && <span className="mono truncate" title={s.outputDir} style={{ maxWidth: 240 }}>out: {fileOf(s.outputDir)}</span>}
-              {s.testDir && <span className="mono truncate" title={s.testDir} style={{ maxWidth: 240 }}>test: {fileOf(s.testDir)}</span>}
             </div>
           </div>
         )}
@@ -199,19 +197,9 @@ export default function Page() {
 
       {s.picking && (
         <DirPicker
-          title={
-            s.picking === "input" ? "Choose the image folder"
-              : s.picking === "output" ? "Choose the output folder"
-                : "Choose the test-set folder"
-          }
-          hint={
-            s.picking === "input" ? "Every image in here goes into the labeling queue."
-              : s.picking === "output" ? "Labels and taught examples are written here."
-                : "Hand-checked images used only for measuring accuracy."
-          }
-          onPick={(p) =>
-            s.picking === "input" ? s.setInputDir(p) : s.picking === "output" ? s.setOutputDir(p) : s.setTestDir(p)
-          }
+          title="Choose the image folder"
+          hint="Every image in here goes into the labeling queue."
+          onPick={s.setInputDir}
           onClose={() => s.setPicking(null)}
         />
       )}

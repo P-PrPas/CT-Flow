@@ -15,7 +15,8 @@ precision/recall/F1 number, not a guess — when the model is ready to
 auto-label the rest.
 
 No project workspaces, no training run, no label taxonomy to pre-declare.
-**An input folder and an output folder is the whole config.**
+**One image folder is the whole config** — labels, the prompt bank, and the
+test set you hold back all live in a hidden `.ctflow/` subfolder inside it.
 
 ---
 
@@ -172,14 +173,16 @@ The UI has four tabs. **Label** and **Test set** write to different places
 and never share data — test images must stay held out, or the F1 you read
 back is measuring memorization, not generalization.
 
-1. **Label** — set input (`<dataset>/pool`) and output folders once in the
-   session setup card. Draw a box, name the class, save. That save extracts a
-   SAVPE embedding into the prompt bank at `<output>/_bank/`.
-2. **Test set** — point it at `<dataset>/test`, then pull 10–20 images in
-   with **Import from pool** ("Add random" or tick specific ones). This
-   copies files; the pool's own copy is untouched. Draw ground-truth boxes
-   the same way — Save here writes straight to `test/labels/*.txt`, never
-   into a prompt bank.
+1. **Label** — set the image folder (`<dataset>/pool`) once in the session
+   setup card; that's the only folder there is to pick. Draw a box, name the
+   class, save. That save extracts a SAVPE embedding into the prompt bank at
+   `<dataset>/pool/.ctflow/_bank/`.
+2. **Test set** — pull 10–20 images in with **Import from pool** ("Add
+   random" or tick specific ones). This flags them in a manifest, no file
+   copy — a test image *is* the pool image, so there's nothing to duplicate
+   on disk. Draw ground-truth boxes the same way — Save here writes straight
+   to `.ctflow/testset/labels/*.txt`, never into a prompt bank; the backend
+   rejects any attempt to teach the bank from a flagged image with a `400`.
 3. Hit **Evaluate on test set** (from either tab) — YOLOE runs against the
    held-out images with the current bank and reports precision / recall / F1
    at IoU 0.5, overall and per class. This is the readiness signal, not pool
@@ -242,9 +245,9 @@ swaps the lock (`Bank.reembed()`, `POST /api/reembed`, a background job
 like Evaluate/Auto-label). Saved label files are never touched — only the
 prompt bank's vectors and everything downstream of them (predict/evaluate/
 auto-label from that point on) change, so cached confidence scores and any
-measured F1 need re-checking afterward. Starting a new output folder is
-still the way to keep two models' work side by side instead of overwriting
-one with the other.
+measured F1 need re-checking afterward. Starting a new image folder is still
+the way to keep two models' work side by side instead of overwriting one
+with the other.
 
 Each option carries a 🟢/🔴 dot: whether the checkpoint's weight file is
 already on the server (`GET /api/config`'s `available` field, backed by
@@ -341,17 +344,20 @@ Full request/response shapes: [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
 |---|---|---|
 | `system` | `/api` | `GET /config`, `GET /browse` |
 | `pool` | `/api` | `POST /session`, `GET /image`, `GET /boxes`, `POST /label`, `POST /predict`, `POST /relabel`, `GET`/`POST`/`DELETE /history`, `GET`/`POST /events` |
-| `testset` | `/api/testset` | `POST /session`, `POST /import`, `POST /remove`, `POST /label` |
-| `jobs` | `/api` | `GET /jobs/{id}`, `POST /score`, `POST /evaluate`, `POST /autolabel` |
+| `testset` | `/api/testset` | `POST /import`, `POST /remove`, `POST /label` |
+| `jobs` | `/api` | `GET /jobs/{id}`, `POST /score`, `POST /evaluate`, `POST /autolabel`, `POST /reembed` |
 | `auth` | `/api/auth` | `GET /me`, `POST /login`, `POST /logout` |
 | `uploads` | `/api` | `POST /upload` |
 
-Conventions worth knowing before calling any of these directly: errors are
-always `{"detail": "<message>"}`; any endpoint taking a path from the
-browser (`input_dir`, `output_dir`, `test_dir`, an image path) is validated
-by `deps.checked_path()` and returns `403` outside the allowed root; boxes
-are always `{"cls": str, "box": [x1, y1, x2, y2]}` in source-image pixels,
-never normalized.
+Every one of these operates on a single `input_dir` a client sends — the
+prompt bank, labels, and test-set manifest all live in a fixed `.ctflow/`
+subfolder of it (see `backend/deps.py`), so there's no separate output or
+test-set folder to pass. Conventions worth knowing before calling any of
+these directly: errors are always `{"detail": "<message>"}`; any endpoint
+taking a path from the browser (`input_dir`, an image path) is validated by
+`deps.checked_path()` and returns `403` outside the allowed root; boxes are
+always `{"cls": str, "box": [x1, y1, x2, y2]}` in source-image pixels, never
+normalized.
 
 ## Local development (without Docker)
 

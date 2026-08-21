@@ -119,9 +119,9 @@ export default function TestsetPanel({ s }: { s: Session }) {
                 icon="target"
                 title={total ? "All test images are labeled" : "No test images yet"}
                 action={
-                  !s.testDir ? (
+                  !s.inputDir ? (
                     <button className="btn primary" onClick={() => s.setShowSetup(true)}>
-                      <Icon name="folder" size={14} /> Choose a test-set folder
+                      <Icon name="folder" size={14} /> Open a session first
                     </button>
                   ) : !total && s.poolCandidates.length ? (
                     /* The sidebar can do this too, but an empty screen should
@@ -167,8 +167,8 @@ export default function TestsetPanel({ s }: { s: Session }) {
             <span className="card-title"><Icon name="copy" size={13} /> Bring in from the pool</span>
           </div>
           <div className="card-body tight col" style={{ gap: 10 }}>
-            {!s.testDir ? (
-              <span className="xs muted">Set a test-set folder in Session setup first.</span>
+            {!s.inputDir ? (
+              <span className="xs muted">Open a session in Session setup first.</span>
             ) : !s.images.length ? (
               <span className="xs muted">Open an image folder on the Label tab — this list mirrors that pool.</span>
             ) : (

@@ -89,7 +89,7 @@
 ## 4. User Journey ปัจจุบัน + จุดที่เกิด Friction
 
 ```
-[1] เปิด session          → เลือก input_dir/output_dir ผ่าน DirPicker
+[1] เปิด session          → เลือก input_dir เดียวผ่าน DirPicker (output/test folder ถูกยกเลิกแล้ว — ระบบจัดการเองใต้ .ctflow/)
        ↓                     ⚠️ ต้องรู้ path บนเซิร์ฟเวอร์ล่วงหน้า / ไม่มี upload
 [2] วาดกล่อง + Save       → สร้าง SAVPE embedding เข้า bank
        ↓                     ⚠️ ต้องพิมพ์ชื่อคลาสเองทุกครั้ง? (ต้องยืนยันจาก UI จริง)
@@ -127,7 +127,7 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| FR-01 | เปิด session ด้วย input_dir + output_dir | ✅ | `POST /api/session` |
+| FR-01 | เปิด session ด้วย input_dir เดียว (output/test folder ไม่ต้องเลือกแยก, จัดการเองใต้ `.ctflow/`) | ✅ | `POST /api/session` |
 | FR-02 | วาด bounding box แล้วบันทึกเป็น SAVPE embedding เข้า bank | ✅ | `POST /api/label` |
 | FR-03 | บันทึก label เป็น YOLO txt format | ✅ | `labels/<stem>.txt` |
 | FR-04 | class index เสถียร ไม่เปลี่ยนเมื่อเพิ่มคลาสใหม่ | ✅ | append-only + smoke test ยืนยัน |
@@ -141,10 +141,10 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| FR-10 | Test set แยกขาดจาก prompt bank | ✅ | ไม่มี `_bank/` ใน test_dir + assertion |
+| FR-10 | Test set แยกขาดจาก prompt bank (ภาพในพูลที่ถูกแปะป้าย ไม่คัดลอกไฟล์) | ✅ | ไม่มี `_bank/` ใน `.ctflow/testset/` + `POST /api/label` ปฏิเสธภาพที่แปะป้ายไว้ + assertion |
 | FR-11 | วัด precision/recall/F1 ที่ IoU 0.5 | ✅ | `POST /api/evaluate` |
 | FR-12 | แสดง metric แยกรายคลาส | ✅ | `metrics.evaluate()` คืนทั้งรวมและต่อคลาส |
-| FR-13 | **แสดงกราฟ F1 ตามจำนวน prompt (learning curve)** | ✅ | แท็บ Progress · history เก็บที่ `<output_dir>/_bank/eval_history.json` (`GET/POST/DELETE /api/history`) |
+| FR-13 | **แสดงกราฟ F1 ตามจำนวน prompt (learning curve)** | ✅ | แท็บ Progress · history เก็บที่ `<input_dir>/.ctflow/_bank/eval_history.json` (`GET/POST/DELETE /api/history`) |
 | FR-14 | **แจ้งเตือนเมื่อคลาสใดเข้าสู่ plateau (label เพิ่มแล้ว F1 ไม่ขยับ)** | ✅ | `adviseClass()` — F1 ขยับ < 2% ติดกัน 2 รอบที่ prompt เพิ่ม = "Stalled" |
 | FR-15 | **แนะนำ action ถัดไปหลัง Evaluate** (เช่น "คลาส X ควร label เพิ่ม, คลาส Y พร้อม auto แล้ว") | ✅ | หัวข้อ "What to do next" + chip ต่อคลาสใน prompt bank |
 | FR-16 | ทดลอง conf threshold ได้จาก UI โดยไม่ต้องแก้โค้ด | ✅ | slider ในการ์ด Readiness |
@@ -214,7 +214,7 @@
 
 เพื่อตอบคำถาม "ง่ายและไม่น่าเบื่อจริงหรือยัง" ด้วยข้อมูล ไม่ใช่ความรู้สึก **ระบบต้องเก็บ metric เหล่านี้เอง**
 
-ที่เก็บคือ `<output_dir>/_bank/events.jsonl` (append-only, หนึ่ง event ต่อบรรทัด) อ่านสรุปผ่าน `GET /api/events` — ดู `services/events.py`
+ที่เก็บคือ `<input_dir>/.ctflow/_bank/events.jsonl` (append-only, หนึ่ง event ต่อบรรทัด) อ่านสรุปผ่าน `GET /api/events` — ดู `services/events.py`
 
 | Metric | นิยาม | เป้าหมายที่แนะนำ | สถานะการเก็บ |
 |---|---|---|---|
@@ -280,7 +280,7 @@
 #### T-07 · เก็บ history ของ evaluate + แสดง learning curve
 - **เชื่อมโยง:** FR-13, FR-14, FR-15 (แก้ F1, F2, F6 — หัวใจของ P2/P3)
 - **สิ่งที่ต้องทำ:**
-  1. เก็บผลทุกครั้งที่ evaluate ลง `<output_dir>/_bank/eval_history.json` — บันทึก `{timestamp, conf, จำนวน prompt ต่อคลาส ณ ขณะนั้น, metric รวม, metric ต่อคลาส}`
+  1. เก็บผลทุกครั้งที่ evaluate ลง `<input_dir>/.ctflow/_bank/eval_history.json` — บันทึก `{timestamp, conf, จำนวน prompt ต่อคลาส ณ ขณะนั้น, metric รวม, metric ต่อคลาส}`
   2. แสดงกราฟ F1 (แกน Y) เทียบจำนวน prompt (แกน X) แยกเส้นต่อคลาส
   3. ตรวจจับ plateau: ถ้า F1 ของคลาสใดไม่เพิ่มเกิน threshold (เช่น +0.02) ตลอด N ครั้ง evaluate ล่าสุดที่ prompt เพิ่มขึ้น ให้แสดงคำเตือนว่าคลาสนี้อาจตันแล้ว
   4. แสดงคำแนะนำ action หลัง evaluate เช่น "คลาส good_part พร้อม auto-label แล้ว (F1 0.79) / คลาส defect ตันที่ F1 0.06 — พิจารณาปรับวิธีแทนการ label เพิ่ม"
@@ -357,11 +357,11 @@
 | A3 | Pre-annotation (T-05) จะลดเวลา label จริง | วัด median time per label ก่อน/หลัง | เสีย effort ไปกับฟีเจอร์ที่ไม่ช่วย |
 | A4 | ผู้ใช้ยอมเสียเวลาเตรียม test set ถ้าเห็นประโยชน์ชัด | สังเกตว่ามีกี่ session ที่ข้ามขั้น evaluate | ต้องออกแบบวิธีวัดผลที่ไม่ต้องพึ่ง test set |
 | A5 | ภาพบนสายพานมีความต่อเนื่องพอที่ copy กล่องจากภาพก่อนหน้า (T-10) จะช่วยได้ | ดูตัวอย่างภาพจริงจาก dataset | T-10 ไม่คุ้มทำ |
-| A6 | จำนวนผู้ใช้พร้อมกันยังน้อย (1 คนต่อ output_dir) | ถามทีม | Phase 5 ต้องเลื่อนขึ้นมาก่อน |
+| A6 | จำนวนผู้ใช้พร้อมกันยังน้อย (1 คนต่อโปรเจกต์/`input_dir`) | ถามทีม | Phase 5 ต้องเลื่อนขึ้นมาก่อน |
 
 ### คำถามที่ทีมต้องตัดสินใจก่อนเริ่ม Phase 4
 
-1. **จะเปิดให้หลายคนใช้ output_dir เดียวกันพร้อมกันหรือไม่** — ถ้าใช่ ต้องออกแบบ conflict resolution ของ bank ใหม่ทั้งหมด (ปัจจุบันมีแค่ file lock ที่กันเขียนชนกัน ไม่ใช่ระบบ merge หลายคน) ถ้าไม่ใช่ แค่เพิ่ม auth ชั้นนอกก็พอ
+1. **จะเปิดให้หลายคนใช้โปรเจกต์ (`input_dir`) เดียวกันพร้อมกันหรือไม่** — ถ้าใช่ ต้องออกแบบ conflict resolution ของ bank ใหม่ทั้งหมด (ปัจจุบันมีแค่ file lock ที่กันเขียนชนกัน ไม่ใช่ระบบ merge หลายคน) ถ้าไม่ใช่ แค่เพิ่ม auth ชั้นนอกก็พอ
 2. **จะรองรับ QC Operator จริงหรือจะให้ ML Engineer เป็นตัวกลางต่อไป** — ตัดสินใจข้อนี้ก่อนลงทุน T-13/T-14
 3. **เกณฑ์ F1 เท่าไหร่ถึงถือว่า "พอ" สำหรับ auto-label** — ต้องมีตัวเลขที่ตกลงกันไว้ ไม่งั้น FR-27 (คำเตือน) ตั้ง threshold ไม่ได้
 

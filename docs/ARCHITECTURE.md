@@ -24,7 +24,7 @@ flowchart LR
     Routers --> Services["services:<br/>bank / vpe / metrics / models /<br/>groundtruth / yolo_labels / images / job_tracker"]
     Services --> Model[("YOLOE model(s)<br/>cache แยกตาม model_id ต่อ process<br/>(services/vpe.py)")]
     Model --> Weights[("MODELS_DIR<br/>auto-download ครั้งแรกที่เลือกใช้")]
-    Services --> Disk[("output_dir / test_dir:<br/>labels/, classes.txt, _bank/")]
+    Services --> Disk[("input_dir/.ctflow/:<br/>labels/, classes.txt, _bank/, testset/")]
 ```
 
 Browser ไม่เคยคุยกับ FastAPI โดยตรง — คุยผ่าน Next.js proxy เท่านั้น จึงไม่ต้องตั้งค่า CORS ฝั่ง frontend และไม่มี `NEXT_PUBLIC_*` env var ที่ต้องซิงก์ข้ามการ deploy
@@ -33,7 +33,7 @@ Browser ไม่เคยคุยกับ FastAPI โดยตรง — ค�
 
 - **Label flow** (`POST /api/label`): ตรวจ/ล็อก `model_id` ผ่าน `bank.lock_model()` ก่อน (ดูหัวข้อ "การเลือกโมเดล" ด้านล่าง) → ภาพ + กล่อง → crop ตามกล่อง → `vpe.extract_embedding()` (หนึ่ง embedding ต่อคลาสต่อการบันทึกหนึ่งครั้ง โดยเฉลี่ยจากทุกกล่องของคลาสนั้นในภาพเดียวกัน) → `bank.add()` บันทึก embedding + ที่มา → `bank.mark_labeled()` → เขียนไฟล์ label YOLO format ลงดิสก์
 - **Score flow** (`POST /api/score`, background job): โหลด `bank.mean_vpe()` → `vpe.arm()` เซ็ต classes บนโมเดลครั้งเดียว → รัน `predict_one(conf=0.05)` ทีละภาพในพูล → เก็บ detection ที่ confidence สูงสุดต่อภาพ
-- **Evaluate flow** (`POST /api/evaluate`, background job): โหลด ground truth จาก `test_dir` (`metrics.load_ground_truth`) → รันโมเดล arm แล้ว predict ทุกภาพใน test set → จับคู่ prediction กับ ground truth แบบ greedy ที่ IoU ≥ 0.5 → คำนวณ precision/recall/F1 ทั้งรวมและต่อคลาส
+- **Evaluate flow** (`POST /api/evaluate`, background job): โหลด ground truth จาก `<input_dir>/.ctflow/testset/` โดยอ่านรายชื่อภาพจาก manifest ไม่ใช่ `iterdir()` (`metrics.load_ground_truth` → `groundtruth.list_test_images`) → รันโมเดล arm แล้ว predict ทุกภาพใน test set → จับคู่ prediction กับ ground truth แบบ greedy ที่ IoU ≥ 0.5 → คำนวณ precision/recall/F1 ทั้งรวมและต่อคลาส
 - **Auto-label flow** (`POST /api/autolabel`, background job): arm โมเดลจาก bank ปัจจุบัน → predict ทุกภาพที่เหลือ → เขียนไฟล์ label เฉพาะภาพที่มี detection → `bank.mark_auto()` เฉพาะภาพที่เขียนป้ายจริง
 
 Job ทั้งสามตัว (`score`, `evaluate`, `autolabel`) ใช้สัญญาสัญญาเดียวกัน: สร้าง job ผ่าน `job_tracker.create(total)` → รันเป็น FastAPI `BackgroundTasks` → ฝั่ง frontend poll `GET /api/jobs/{id}` ทุก 400ms จนกว่า `finished`
@@ -46,18 +46,19 @@ Job ทั้งสามตัว (`score`, `evaluate`, `autolabel`) ใช้�
 
 - `Bank.model` เก็บใน `metadata.json`, เป็น `null` จนกว่าจะมี embedding แรกเข้า bank
 - `Bank.lock_model(model_id)` ตั้งค่าตอน embedding แรก แล้วปฏิเสธ (`ValueError` → HTTP 409) ทุกครั้งที่ภายหลังมีการส่ง `model_id` อื่นเข้ามา
-- `services/vpe.py` เก็บ model instance แยก dict ต่อ `model_id` (ไม่ใช่ singleton ตัวเดียวเหมือนก่อนหน้านี้) — เปิดสอง output_dir ที่ใช้คนละโมเดลพร้อมกันได้ในหนึ่ง process แต่ VRAM จะโตตามจำนวนโมเดลที่เคยถูกเรียกใช้ (มีคอมเมนต์ `ponytail:` กำกับไว้ว่ายังไม่มี eviction)
+- `services/vpe.py` เก็บ model instance แยก dict ต่อ `model_id` (ไม่ใช่ singleton ตัวเดียวเหมือนก่อนหน้านี้) — เปิดสองโปรเจกต์ (สอง `input_dir`) ที่ใช้คนละโมเดลพร้อมกันได้ในหนึ่ง process แต่ VRAM จะโตตามจำนวนโมเดลที่เคยถูกเรียกใช้ (มีคอมเมนต์ `ponytail:` กำกับไว้ว่ายังไม่มี eviction)
 - `/api/predict`, `/api/score`, `/api/evaluate`, `/api/autolabel` **ไม่รับ `model_id` จาก client** — อ่านจาก `bank.model` ที่ backend เท่านั้น กัน mismatch ระหว่างสิ่งที่ผู้ใช้เห็นกับสิ่งที่ bank ถูกสอนมาจริง
 
 ## รูปแบบการจัดเก็บข้อมูล (storage format)
 
 - **ป้าย (labels):** มาตรฐาน YOLO txt — `labels/<stem>.txt` หนึ่งบรรทัดต่อกล่อง `<class_idx> <cx> <cy> <w> <h>` ปรับสเกล 0–1 เทียบกับขนาดภาพ
 - **`classes.txt`:** index → ชื่อคลาส (บรรทัดที่ N = index N) เป็น **append-only เสมอ ห้ามเรียงใหม่หรือลบ** เพราะไฟล์ label ทุกไฟล์อ้างอิงด้วย index ตำแหน่งนี้ ทั้ง `bank.py` (คุณสมบัติ `classes`) และ `groundtruth.write_label` ยึดกติกานี้เหมือนกัน
-- **Prompt bank (`_bank/` ใน output_dir):**
-  - `embeddings.pt` — dict ที่ `torch.save` แล้ว: `{ชื่อคลาส: [Tensor, Tensor, ...]}` หนึ่ง tensor ต่อหนึ่ง instance ที่ label ด้วยมือ
-  - `metadata.json` — `{"instances": {ชื่อคลาส: [{source_image, bbox, added_at, labeled_by}]}, "labeled": [...], "auto": [...], "model": "yoloe-11s-seg" | null}`
-  - `.lock` — ไฟล์ `FileLock` กันการเขียนชนกัน
-- **Test set (`<test_dir>/`):** ใช้ convention `labels/*.txt` + `classes.txt` เดียวกับ output_dir ของพูล แต่ **ไม่มีโฟลเดอร์ `_bank/` เลย** — เป็นการบังคับว่าภาพ test set ต้องไม่ถูกป้อนเป็น prompt เด็ดขาด (มี assertion ตรวจสอบเรื่องนี้ใน `_smoke_test.py`)
+- **Project state (`<input_dir>/.ctflow/`, ดู `deps.state_dir()`):** subfolder เดียวที่ backend สร้างเองใต้โฟลเดอร์ภาพที่ผู้ใช้เลือก — ไม่มี output folder ให้เลือกแยกอีกต่อไป
+  - **Prompt bank (`_bank/`):**
+    - `embeddings.pt` — dict ที่ `torch.save` แล้ว: `{ชื่อคลาส: [Tensor, Tensor, ...]}` หนึ่ง tensor ต่อหนึ่ง instance ที่ label ด้วยมือ
+    - `metadata.json` — `{"instances": {ชื่อคลาส: [{source_image, bbox, added_at, labeled_by}]}, "labeled": [...], "auto": [...], "model": "yoloe-11s-seg" | null}`
+    - `.lock` — ไฟล์ `FileLock` กันการเขียนชนกัน
+  - **Test set (`testset/`, ดู `deps.test_dir()` และ `services/groundtruth.py`):** `testset.json` เก็บ path ของภาพในพูลที่ถูกแปะป้ายเป็น test set — **ไม่คัดลอกไฟล์ภาพ**, path เดียวกับในพูลเป๊ะ ๆ ใช้ convention `labels/*.txt` + `classes.txt` เดียวกับ bank ของพูล แต่ **ไม่มีโฟลเดอร์ `_bank/` เลย** — เป็นการบังคับว่าภาพ test set ต้องไม่ถูกป้อนเป็น prompt เด็ดขาด นอกจากนี้ `POST /api/label`/`POST /api/relabel` ยังเช็ค `groundtruth.is_test()` และปฏิเสธด้วย `400` ถ้าภาพที่ส่งมาถูกแปะป้ายเป็น test set ไว้ (มี assertion ตรวจสอบทั้งสองชั้นใน `_smoke_test.py`)
 
 ## การ deploy
 

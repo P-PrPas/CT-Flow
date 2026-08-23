@@ -9,3 +9,12 @@ services:
     volumes:
       - ./backend:/app/backend
     command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Click-around DB browser -- no SQL needed. http://localhost:8080, system
+  # "PostgreSQL", server "db", user/pass/db from POSTGRES_PASSWORD in .env.
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db

@@ -1,6 +1,6 @@
 # CT-Flow — แผน Refactor Backend จาก Python เป็น Go
 
-> **สถานะ: อนุมัติแล้ว กำลัง implement** · เขียน 2026-08-23 · branch ตั้งต้น `feature/database-migration` (3e6f3f3) · ข้อตัดสินใจทั้ง 5 ข้ออยู่ที่หัวข้อ 8
+> **สถานะ: ✅ เสร็จแล้ว (2026-08-23)** — ดูบันทึกความคืบหน้าจริงที่หัวข้อ 10 · เขียน 2026-08-23 · branch ตั้งต้น `feature/database-migration` (3e6f3f3) · ข้อตัดสินใจทั้ง 5 ข้ออยู่ที่หัวข้อ 8
 >
 > **ที่มา:** ระบบ login ของบริษัทเป็น Go — backend ตัวนี้ต้องปรับตามเพื่อให้ integrate กันได้ ไม่ใช่เพราะ Python มีปัญหาด้าน performance **หลักการที่ตามมาจากเหตุผลนี้: ส่วนไหนคงเป็น Python service ได้ ให้คงไว้ ไม่ต้องฝืน**
 >
@@ -486,3 +486,43 @@ CT-Flow/
 - **บทเรียน:** ห้ามตั้งชื่อไฟล์ `Dockerfile.go` — `go vet ./...` พยายาม parse เป็น Go source (เปลี่ยนเป็น `Dockerfile.api`)
 - compose ตอนนี้: `db` · `vpe` · `legacy` (FastAPI) · `api` (Go, **35.5 MB**) · `web`
 - ยืนยัน: smoke test ผ่านผ่าน Go front door · parity 43/43 · UI ที่ :3000 ใช้งานได้ครบ
+
+### เฟส 2.3–2.8 — Go: ที่เหลือทั้งหมด ✅ (2026-08-23)
+
+| กลุ่ม | สิ่งที่พบระหว่างทำ |
+|---|---|
+| 2.3 history/events | **`round()` ของ Python เป็น banker's rounding** — `math.Round(v*1000)/1000` ให้คำตอบต่างกันบน input ที่เกิดขึ้นจริง (1 fix / 16 auto-label = 0.0625 → Python ได้ 0.062, Go แบบ naive ได้ 0.063) แก้ด้วย `pyRound` บน `big.Rat` + เพิ่ม tie case เข้า golden vectors |
+| 2.4 store | SQL คัดลอกมาทั้งดุ้น · **แต่พบว่า `TestConcurrentNewClasses` ผ่านแม้ลบ `FOR UPDATE` ออก** เพราะ upsert ของ `getOrCreateProject` ถือ row lock อยู่แล้ว — เขียนไว้ในคอมเมนต์ของ test ตรง ๆ ว่ามันพิสูจน์อะไรและไม่พิสูจน์อะไร ดีกว่าปล่อยให้เข้าใจผิด |
+| 2.5 export | zip เทียบ byte ไม่ได้ (embed mtime) → แก้ `_parity.py` ให้เทียบ *เนื้อใน* zip ซึ่งเป็นการเทียบที่ถูกต้องกว่าอยู่แล้ว · COCO image id นับตำแหน่ง ไม่ใช่ภาพที่ออกจริง (ภาพที่ถูกลบกิน id ไปแล้วเว้นช่อง) — คัดลอกพฤติกรรมมา |
+| 2.6 upload | `filepath.Base` ไม่ตัด backslash บน Linux ต้องเช็คเพิ่มเอง |
+| 2.7 label | `conf` ต้องเป็น `*float64` — FR-33 ยิง `conf: 0.0` จริง ถ้าใช้ zero value จะกลายเป็น default 0.25 เงียบ ๆ |
+| 2.8 jobs | **ต้องใช้ `context.Background()` ไม่ใช่ `r.Context()`** — request context ถูก cancel ทันทีที่ตอบกลับ ซึ่งคือจังหวะที่ job เพิ่งเริ่ม (R5 ในตารางความเสี่ยง เกิดขึ้นจริงตามคาด) |
+
+### เฟส 3 — เก็บกวาด ✅ (2026-08-23)
+
+- ลบ FastAPI + strangler proxy + `legacy` service ออกหมด · compose เหลือ `db` · `vpe` · `api` · `web`
+- **เกินแผน:** `services/auth.py` เป็นเครื่องมือสร้าง `LABEL_TOOL_USERS` ด้วย ลบทิ้งเฉย ๆ จะไม่เหลือวิธีตั้งค่า auth เลย → เพิ่ม flag `-hash-password` ให้ binary Go
+- **เกินแผน:** `_gen_testdata.py` regenerate ได้แค่ `metrics_cases.json` แล้ว (Python ที่สร้างอีกสามไฟล์ถูกลบไป) → เปลี่ยนสถานะสามไฟล์นั้นเป็น "frozen" และเขียนเหตุผลไว้ในไฟล์
+- **ต่างจากแผน:** ลบ `_migrate_to_db.py` ด้วย (แผนเดิมบอกให้เก็บ) เพราะมันพึ่ง `annotations_db.py` ทั้งก้อน — เก็บไว้แปลว่าต้องเก็บโค้ด storage ที่ตายแล้ว ~400 บรรทัด migration T-21 รันไปแล้วตั้งแต่ 2026-08-21 ใครมี project ก่อน T-21 ให้ checkout commit ก่อนหน้ามารัน
+- CI เป็น 3 job: `go` (vet + gofmt + test กับ Postgres จริง) · `python` (self-check ที่เหลือ) · `smoke` (ยก API + sidecar จริงแล้วยิง HTTP)
+
+### ผลลัพธ์รวม
+
+| | ก่อน | หลัง |
+|---|---|---|
+| API image | 12.3 GB | **35.5 MB** |
+| Service | `db` `api` `web` | `db` `vpe` `api` `web` |
+| Python ใน runtime path | ~2,600 บรรทัด | ~600 บรรทัด (sidecar เท่านั้น) |
+| Dependency นอก stdlib (API) | 10 | **3** |
+| frontend ที่แก้ | — | **0 บรรทัด** |
+| data migration | — | **ไม่มี** |
+
+**ยืนยันครั้งสุดท้าย:** `go test ./...` เขียว · smoke test เขียวทั้งแบบ auth-off และ auth-on · `_parity` 43/43 เทียบกับ FastAPI ก่อนลบ (รวม background job ทั้งสี่) · golden vectors ทั้ง 4 ไฟล์ตรง · UI ที่ :3000 ใช้งานได้ครบ workflow · เปิด project เดิมที่มี `.ctflow/_bank/` + แถวใน Postgres เดิมได้โดยไม่ต้อง migrate อะไรเลย
+
+### สิ่งที่ยัง **ไม่ได้** แก้ (ตั้งใจ)
+
+ทั้งสามข้อนี้อยู่นอก scope ตั้งแต่ต้น และ Go ไม่ได้ช่วยข้อไหนเลย — ดูหัวข้อ 0:
+
+1. Job tracker ยังอยู่ใน memory ไม่มี TTL ไม่ persist (`internal/jobs`)
+2. VRAM ไม่มี eviction — โมเดลที่โหลดแล้วอยู่ยาวจนจบ process (`services/vpe.py`)
+3. ยังไม่มีหน้า login บน UI (backend พร้อมมานานแล้ว)

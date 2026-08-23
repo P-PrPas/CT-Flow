@@ -1,0 +1,127 @@
+{
+  "pool_dir": "backend/test_pool",
+  "names": [
+    "test_item",
+    "aaa_new_class"
+  ],
+  "by_image": {
+    "contact1.jpg": [
+      {
+        "cls": "test_item",
+        "box": [
+          30.0,
+          30.0,
+          120.0,
+          120.0
+        ]
+      },
+      {
+        "cls": "aaa_new_class",
+        "box": [
+          1.5,
+          2.5,
+          20.25,
+          40.75
+        ]
+      }
+    ],
+    "contact_165_255.jpg": [
+      {
+        "cls": "aaa_new_class",
+        "box": [
+          0.0,
+          0.0,
+          10.0,
+          10.0
+        ]
+      }
+    ],
+    "deleted_since_it_was_labelled.jpg": [
+      {
+        "cls": "test_item",
+        "box": [
+          1.0,
+          1.0,
+          2.0,
+          2.0
+        ]
+      }
+    ]
+  },
+  "yolo": {
+    "classes.txt": "test_item\naaa_new_class",
+    "labels/contact1.txt": "0 0.033482 0.059524 0.040179 0.071429\n1 0.004855 0.017163 0.008371 0.030357",
+    "labels/contact_165_255.txt": "1 0.002976 0.006329 0.005952 0.012658"
+  },
+  "coco": {
+    "images": [
+      {
+        "id": 1,
+        "file_name": "contact1.jpg",
+        "width": 2240,
+        "height": 1260
+      },
+      {
+        "id": 2,
+        "file_name": "contact_165_255.jpg",
+        "width": 1680,
+        "height": 790
+      }
+    ],
+    "annotations": [
+      {
+        "id": 1,
+        "image_id": 1,
+        "category_id": 1,
+        "bbox": [
+          30.0,
+          30.0,
+          90.0,
+          90.0
+        ],
+        "area": 8100.0,
+        "iscrowd": 0
+      },
+      {
+        "id": 2,
+        "image_id": 1,
+        "category_id": 2,
+        "bbox": [
+          1.5,
+          2.5,
+          18.75,
+          38.25
+        ],
+        "area": 717.1875,
+        "iscrowd": 0
+      },
+      {
+        "id": 3,
+        "image_id": 2,
+        "category_id": 2,
+        "bbox": [
+          0.0,
+          0.0,
+          10.0,
+          10.0
+        ],
+        "area": 100.0,
+        "iscrowd": 0
+      }
+    ],
+    "categories": [
+      {
+        "id": 1,
+        "name": "test_item"
+      },
+      {
+        "id": 2,
+        "name": "aaa_new_class"
+      }
+    ]
+  },
+  "voc": {
+    "contact1.xml": "<annotation><filename>contact1.jpg</filename><size><width>2240</width><height>1260</height><depth>3</depth></size><object><name>test_item</name><bndbox><xmin>30.0</xmin><ymin>30.0</ymin><xmax>120.0</xmax><ymax>120.0</ymax></bndbox></object><object><name>aaa_new_class</name><bndbox><xmin>1.5</xmin><ymin>2.5</ymin><xmax>20.2</xmax><ymax>40.8</ymax></bndbox></object></annotation>",
+    "contact_165_255.xml": "<annotation><filename>contact_165_255.jpg</filename><size><width>1680</width><height>790</height><depth>3</depth></size><object><name>aaa_new_class</name><bndbox><xmin>0.0</xmin><ymin>0.0</ymin><xmax>10.0</xmax><ymax>10.0</ymax></bndbox></object></annotation>"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "log": [
+    {
+      "kind": "session",
+      "session": "s1",
+      "secs": null,
+      "written": 0
+    },
+    {
+      "kind": "label",
+      "session": "s1",
+      "secs": 12.0,
+      "written": 1
+    },
+    {
+      "kind": "label",
+      "session": "s1",
+      "secs": 8.0,
+      "written": 1
+    },
+    {
+      "kind": "label",
+      "session": "s1",
+      "secs": 30.0,
+      "written": 1
+    },
+    {
+      "kind": "auto",
+      "session": "s1",
+      "secs": 300.0,
+      "written": 4
+    },
+    {
+      "kind": "fix",
+      "session": "s1",
+      "secs": null,
+      "written": 1
+    },
+    {
+      "kind": "session",
+      "session": "s2",
+      "secs": null,
+      "written": 0
+    },
+    {
+      "kind": "label",
+      "session": "s2",
+      "secs": 20.0,
+      "written": 1
+    },
+    {
+      "kind": "not-a-kind",
+      "session": "s2",
+      "secs": 1.0,
+      "written": 99
+    }
+  ],
+  "want": {
+    "sessions": 2,
+    "sessions_reaching_autolabel": 1,
+    "abandonment": 0.5,
+    "manual_labels": 4,
+    "median_label_secs": 16.0,
+    "median_time_to_first_auto_secs": 300.0,
+    "auto_written": 4,
+    "corrections": 1,
+    "correction_rate": 0.25
+  },
+  "want_empty": {
+    "sessions": 0,
+    "sessions_reaching_autolabel": 0,
+    "abandonment": null,
+    "manual_labels": 0,
+    "median_label_secs": null,
+    "median_time_to_first_auto_secs": null,
+    "auto_written": 0,
+    "corrections": 0,
+    "correction_rate": null
+  }
+}

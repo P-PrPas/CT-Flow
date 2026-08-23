@@ -30,7 +30,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
-      - run: pip install numpy opencv-python-headless psycopg2-binary
+      # fastapi is needed by the cross-language vector check, which imports
+      # routers/export.py to verify the committed YOLO/COCO/VOC goldens.
+      - run: pip install numpy opencv-python-headless psycopg2-binary fastapi
       - run: python -m backend.services.auth
       - run: python -m backend.services.events
       - run: python -m backend.services.groundtruth
@@ -39,6 +41,11 @@ jobs:
       - run: python -m backend.services.db
       - run: python -m backend.services.annotations_db
       - run: python -m backend._migrate_to_db --selfcheck
+      - run: python -m backend._dbcheck
+      # The contract the Go port is held to (docs/REFACTOR_PLAN.md phase 0):
+      # if this fails, Python moved and backend/testdata/ was not regenerated,
+      # which means Go is now being checked against a stale spec.
+      - run: python -m backend._gen_testdata --check
 
   smoke:
     runs-on: ubuntu-latest

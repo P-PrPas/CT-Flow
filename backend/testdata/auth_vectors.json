@@ -1,0 +1,75 @@
+{
+  "iterations": 240000,
+  "cookie_name": "labeltool_session",
+  "ttl_seconds": 43200,
+  "verify": [
+    {
+      "password": "hunter2",
+      "stored": "pbkdf2$240000$85b1cb6565a1e72e45e7d54cee91e98d$a8006ade8e953b60528e9ed08393ac010b434a938339d7148906519b3e99c623",
+      "expect": true
+    },
+    {
+      "password": "hunter3",
+      "stored": "pbkdf2$240000$85b1cb6565a1e72e45e7d54cee91e98d$a8006ade8e953b60528e9ed08393ac010b434a938339d7148906519b3e99c623",
+      "expect": false
+    },
+    {
+      "password": "",
+      "stored": "pbkdf2$240000$85b1cb6565a1e72e45e7d54cee91e98d$a8006ade8e953b60528e9ed08393ac010b434a938339d7148906519b3e99c623",
+      "expect": false
+    },
+    {
+      "password": "correct horse battery staple",
+      "stored": "pbkdf2$240000$4f8dfb1e962bdc932efc44cd17f217af$46d851d834380454b5372af7cc7d00f15d9dcbee0cd73c267a5033b280a62d8c",
+      "expect": true
+    },
+    {
+      "password": "hunter2",
+      "stored": "garbage",
+      "expect": false
+    },
+    {
+      "password": "hunter2",
+      "stored": "bcrypt$1$aa$bb",
+      "expect": false
+    }
+  ],
+  "secret": "0000000000000000000000000000000000000000000000000000000000000000",
+  "identify": [
+    {
+      "token": "alice|9999999999|3004e447ad907ef47f852fa17cd5d84bc80f4fefea2e3e163202c45142fd6ae7",
+      "expect": "alice",
+      "why": "valid"
+    },
+    {
+      "token": "a|b|9999999999|52f981d1fcad453eb87565a7b7de9c9b1e150a93664da0eaf523d19da67b3b5f",
+      "expect": "a|b",
+      "why": "username contains the separator"
+    },
+    {
+      "token": "alice|1|5b8df3ceb4055c2bc3adea9821aa02df6cdd9f3975553e9e77ac32210e06dccc",
+      "expect": null,
+      "why": "correctly signed but expired"
+    },
+    {
+      "token": "alice|9999999999|deadbeef",
+      "expect": null,
+      "why": "forged signature"
+    },
+    {
+      "token": "nonsense",
+      "expect": null,
+      "why": "malformed"
+    },
+    {
+      "token": "",
+      "expect": null,
+      "why": "absent"
+    },
+    {
+      "token": "alice|notanumber|46b04b302207a42d9abeba2b59e9b8c52694bf94f4e65171063caaa340acd044",
+      "expect": null,
+      "why": "signed, but expiry is not an integer"
+    }
+  ]
+}

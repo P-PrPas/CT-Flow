@@ -1,0 +1,785 @@
+{
+  "iou": [
+    {
+      "a": [
+        0,
+        0,
+        10,
+        10
+      ],
+      "b": [
+        0,
+        0,
+        10,
+        10
+      ],
+      "want": 1.0
+    },
+    {
+      "a": [
+        0,
+        0,
+        10,
+        10
+      ],
+      "b": [
+        20,
+        20,
+        30,
+        30
+      ],
+      "want": 0.0
+    },
+    {
+      "a": [
+        0,
+        0,
+        10,
+        10
+      ],
+      "b": [
+        5,
+        5,
+        15,
+        15
+      ],
+      "want": 0.14285714285714285
+    },
+    {
+      "a": [
+        0,
+        0,
+        10,
+        10
+      ],
+      "b": [
+        10,
+        10,
+        20,
+        20
+      ],
+      "want": 0.0
+    },
+    {
+      "a": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "b": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "want": 0.0
+    }
+  ],
+  "cases": [
+    {
+      "name": "perfect match",
+      "gt": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ]
+          }
+        ]
+      },
+      "pred": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ],
+            "conf": 0.9
+          }
+        ]
+      },
+      "want": {
+        "overall": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "per_class": {
+          "x": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        "per_image": [
+          {
+            "image": "a.jpg",
+            "gt": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "matched": true
+              }
+            ],
+            "pred": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "conf": 0.9,
+                "matched": true
+              }
+            ],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        ],
+        "images": 1,
+        "iou": 0.5
+      }
+    },
+    {
+      "name": "missed detection (fn) and a spurious one (fp)",
+      "gt": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ]
+          }
+        ]
+      },
+      "pred": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              200,
+              200,
+              240,
+              240
+            ],
+            "conf": 0.7
+          }
+        ]
+      },
+      "want": {
+        "overall": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1
+        },
+        "per_class": {
+          "x": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "tp": 0,
+            "fp": 1,
+            "fn": 1
+          }
+        },
+        "per_image": [
+          {
+            "image": "a.jpg",
+            "gt": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "matched": false
+              }
+            ],
+            "pred": [
+              {
+                "cls": "x",
+                "box": [
+                  200,
+                  200,
+                  240,
+                  240
+                ],
+                "conf": 0.7,
+                "matched": false
+              }
+            ],
+            "tp": 0,
+            "fp": 1,
+            "fn": 1
+          }
+        ],
+        "images": 1,
+        "iou": 0.5
+      }
+    },
+    {
+      "name": "right place, wrong class -- never a match",
+      "gt": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ]
+          }
+        ]
+      },
+      "pred": {
+        "a.jpg": [
+          {
+            "cls": "y",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ],
+            "conf": 0.8
+          }
+        ]
+      },
+      "want": {
+        "overall": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1
+        },
+        "per_class": {
+          "x": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          },
+          "y": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "tp": 0,
+            "fp": 1,
+            "fn": 0
+          }
+        },
+        "per_image": [
+          {
+            "image": "a.jpg",
+            "gt": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "matched": false
+              }
+            ],
+            "pred": [
+              {
+                "cls": "y",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "conf": 0.8,
+                "matched": false
+              }
+            ],
+            "tp": 0,
+            "fp": 1,
+            "fn": 1
+          }
+        ],
+        "images": 1,
+        "iou": 0.5
+      }
+    },
+    {
+      "name": "two predictions on one gt -- the lower-scoring one is a fp",
+      "gt": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ]
+          }
+        ]
+      },
+      "pred": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              11,
+              11,
+              51,
+              51
+            ],
+            "conf": 0.6
+          },
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ],
+            "conf": 0.95
+          }
+        ]
+      },
+      "want": {
+        "overall": {
+          "precision": 0.5,
+          "recall": 1.0,
+          "f1": 0.6666666666666666,
+          "tp": 1,
+          "fp": 1,
+          "fn": 0
+        },
+        "per_class": {
+          "x": {
+            "precision": 0.5,
+            "recall": 1.0,
+            "f1": 0.6666666666666666,
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          }
+        },
+        "per_image": [
+          {
+            "image": "a.jpg",
+            "gt": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "matched": true
+              }
+            ],
+            "pred": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "conf": 0.95,
+                "matched": true
+              },
+              {
+                "cls": "x",
+                "box": [
+                  11,
+                  11,
+                  51,
+                  51
+                ],
+                "conf": 0.6,
+                "matched": false
+              }
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          }
+        ],
+        "images": 1,
+        "iou": 0.5
+      }
+    },
+    {
+      "name": "IoU either side of 0.5",
+      "gt": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              0,
+              0,
+              100,
+              100
+            ]
+          }
+        ],
+        "b.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              0,
+              0,
+              100,
+              100
+            ]
+          }
+        ]
+      },
+      "pred": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              0,
+              0,
+              100,
+              71
+            ],
+            "conf": 0.9
+          }
+        ],
+        "b.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              0,
+              0,
+              100,
+              69
+            ],
+            "conf": 0.9
+          }
+        ]
+      },
+      "want": {
+        "overall": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "tp": 2,
+          "fp": 0,
+          "fn": 0
+        },
+        "per_class": {
+          "x": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "tp": 2,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        "per_image": [
+          {
+            "image": "a.jpg",
+            "gt": [
+              {
+                "cls": "x",
+                "box": [
+                  0,
+                  0,
+                  100,
+                  100
+                ],
+                "matched": true
+              }
+            ],
+            "pred": [
+              {
+                "cls": "x",
+                "box": [
+                  0,
+                  0,
+                  100,
+                  71
+                ],
+                "conf": 0.9,
+                "matched": true
+              }
+            ],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          {
+            "image": "b.jpg",
+            "gt": [
+              {
+                "cls": "x",
+                "box": [
+                  0,
+                  0,
+                  100,
+                  100
+                ],
+                "matched": true
+              }
+            ],
+            "pred": [
+              {
+                "cls": "x",
+                "box": [
+                  0,
+                  0,
+                  100,
+                  69
+                ],
+                "conf": 0.9,
+                "matched": true
+              }
+            ],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        ],
+        "images": 2,
+        "iou": 0.5
+      }
+    },
+    {
+      "name": "two classes, mixed outcomes",
+      "gt": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ]
+          },
+          {
+            "cls": "y",
+            "box": [
+              60,
+              60,
+              90,
+              90
+            ]
+          }
+        ],
+        "b.jpg": [
+          {
+            "cls": "y",
+            "box": [
+              0,
+              0,
+              20,
+              20
+            ]
+          }
+        ]
+      },
+      "pred": {
+        "a.jpg": [
+          {
+            "cls": "x",
+            "box": [
+              10,
+              10,
+              50,
+              50
+            ],
+            "conf": 0.9
+          },
+          {
+            "cls": "y",
+            "box": [
+              61,
+              61,
+              91,
+              91
+            ],
+            "conf": 0.5
+          }
+        ],
+        "b.jpg": []
+      },
+      "want": {
+        "overall": {
+          "precision": 1.0,
+          "recall": 0.6666666666666666,
+          "f1": 0.8,
+          "tp": 2,
+          "fp": 0,
+          "fn": 1
+        },
+        "per_class": {
+          "x": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "y": {
+            "precision": 1.0,
+            "recall": 0.5,
+            "f1": 0.6666666666666666,
+            "tp": 1,
+            "fp": 0,
+            "fn": 1
+          }
+        },
+        "per_image": [
+          {
+            "image": "a.jpg",
+            "gt": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "matched": true
+              },
+              {
+                "cls": "y",
+                "box": [
+                  60,
+                  60,
+                  90,
+                  90
+                ],
+                "matched": true
+              }
+            ],
+            "pred": [
+              {
+                "cls": "x",
+                "box": [
+                  10,
+                  10,
+                  50,
+                  50
+                ],
+                "conf": 0.9,
+                "matched": true
+              },
+              {
+                "cls": "y",
+                "box": [
+                  61,
+                  61,
+                  91,
+                  91
+                ],
+                "conf": 0.5,
+                "matched": true
+              }
+            ],
+            "tp": 2,
+            "fp": 0,
+            "fn": 0
+          },
+          {
+            "image": "b.jpg",
+            "gt": [
+              {
+                "cls": "y",
+                "box": [
+                  0,
+                  0,
+                  20,
+                  20
+                ],
+                "matched": false
+              }
+            ],
+            "pred": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          }
+        ],
+        "images": 2,
+        "iou": 0.5
+      }
+    },
+    {
+      "name": "empty everywhere -- zeroes, not a divide by zero",
+      "gt": {
+        "a.jpg": []
+      },
+      "pred": {
+        "a.jpg": []
+      },
+      "want": {
+        "overall": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 0
+        },
+        "per_class": {},
+        "per_image": [
+          {
+            "image": "a.jpg",
+            "gt": [],
+            "pred": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 0
+          }
+        ],
+        "images": 1,
+        "iou": 0.5
+      }
+    }
+  ]
+}

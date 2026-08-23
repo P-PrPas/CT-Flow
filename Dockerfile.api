@@ -35,9 +35,13 @@ COPY --from=build /out/api /app/api
 # disagree -- see internal/models. It is data, not code, so it is copied here
 # rather than embedded.
 COPY backend/models.json /app/backend/models.json
+# Likewise the schema: the FastAPI service runs this exact file, and during the
+# port both apply it (it is idempotent). One file beats two that can drift.
+COPY backend/schema.sql /app/backend/schema.sql
 
 ENV MODELS_DIR=/models \
     MODELS_CATALOG=/app/backend/models.json \
+    SCHEMA_PATH=/app/backend/schema.sql \
     LABEL_TOOL_MODE=vm \
     LABEL_TOOL_VM_ROOT=/opt/mount/project \
     PORT=8000

@@ -18,12 +18,16 @@ import (
 	"github.com/P-PrPas/CT-Flow/internal/auth"
 	"github.com/P-PrPas/CT-Flow/internal/config"
 	"github.com/P-PrPas/CT-Flow/internal/models"
+	"github.com/P-PrPas/CT-Flow/internal/store"
+	"github.com/P-PrPas/CT-Flow/internal/vpe"
 )
 
 type Server struct {
 	Cfg     config.Config
 	Catalog *models.Catalog
 	Auth    *auth.Auth
+	Store   *store.Store
+	VPE     *vpe.Client
 	Log     *slog.Logger
 }
 
@@ -65,6 +69,15 @@ func (s *Server) Handle(h Handler) http.HandlerFunc {
 			var he *httpError
 			if errors.As(err, &he) {
 				writeJSON(w, he.Status, map[string]string{"detail": he.Message})
+				return
+			}
+			// The inference sidecar's refusals are this API's refusals: a
+			// mismatched model_id is still a 409 with the same message, an empty
+			// bank still a 400. The browser must not be able to tell that the
+			// check moved out of process.
+			var ve *vpe.Error
+			if errors.As(err, &ve) {
+				writeJSON(w, ve.Status, map[string]string{"detail": ve.Detail})
 				return
 			}
 			// An unexpected error is logged in full and reported as one line:

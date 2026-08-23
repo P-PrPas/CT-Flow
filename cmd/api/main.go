@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -22,6 +23,8 @@ import (
 	"github.com/P-PrPas/CT-Flow/internal/auth"
 	"github.com/P-PrPas/CT-Flow/internal/config"
 	"github.com/P-PrPas/CT-Flow/internal/models"
+	"github.com/P-PrPas/CT-Flow/internal/store"
+	"github.com/P-PrPas/CT-Flow/internal/vpe"
 )
 
 func main() {
@@ -38,7 +41,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &api.Server{Cfg: cfg, Catalog: catalog, Auth: auth.New(), Log: log}
+	ctx := context.Background()
+	db, err := store.Open(ctx, env("DATABASE_URL",
+		"postgresql://labeltool:labeltool@localhost:5432/labeltool"))
+	if err != nil {
+		log.Error("cannot reach postgres", "err", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	// Idempotent, so it runs on every boot rather than needing a migration step
+	// -- the same thing the FastAPI startup hook did.
+	schemaPath := env("SCHEMA_PATH", "backend/schema.sql")
+	if err := db.InitSchema(ctx, schemaPath); err != nil {
+		log.Error("cannot apply the schema", "path", schemaPath, "err", err)
+		os.Exit(1)
+	}
+
+	srv := &api.Server{
+		Cfg: cfg, Catalog: catalog, Auth: auth.New(), Log: log,
+		Store: db,
+		VPE:   vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
+	}
 
 	addr := ":" + env("PORT", "8000")
 	log.Info("starting", "addr", addr, "mode", cfg.Mode, "models", cfg.ModelsDir,
@@ -68,6 +91,13 @@ func routes(s *api.Server, log *slog.Logger) http.Handler {
 	mux.Handle("GET /api/config", s.Handle(s.GetConfig))
 	mux.Handle("GET /api/browse", s.Handle(s.Browse))
 	mux.Handle("GET /api/image", s.Handle(s.GetImage))
+
+	mux.Handle("POST /api/session", s.Handle(s.OpenSession))
+	mux.Handle("GET /api/boxes", s.Handle(s.GetBoxes))
+
+	mux.Handle("POST /api/testset/import", s.Handle(s.TestsetImport))
+	mux.Handle("POST /api/testset/remove", s.Handle(s.TestsetRemove))
+	mux.Handle("POST /api/testset/label", s.Handle(s.TestsetLabel))
 
 	mux.Handle("GET /api/history", s.Handle(s.GetHistory))
 	mux.Handle("POST /api/history", s.Handle(s.AddHistory))

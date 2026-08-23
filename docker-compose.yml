@@ -114,6 +114,8 @@ services:
       LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       LEGACY_URL: http://legacy:8000
+      VPE_URL: http://vpe:8001
+      DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool
     depends_on:
       legacy:
         condition: service_healthy

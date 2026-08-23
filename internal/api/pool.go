@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"os"
 
@@ -19,12 +20,15 @@ type bankSummary struct {
 	Auto    []string         `json:"auto"`
 }
 
-func (s *Server) bankSummary(r *http.Request, inputDir, stateDir string) (bankSummary, error) {
-	bank, err := s.VPE.Bank(r.Context(), stateDir)
+// bankSummaryCtx takes a context rather than a request because background jobs
+// build a summary after the response has gone out, when the request's context is
+// already cancelled.
+func (s *Server) bankSummaryCtx(ctx context.Context, inputDir, stateDir string) (bankSummary, error) {
+	bank, err := s.VPE.Bank(ctx, stateDir)
 	if err != nil {
 		return bankSummary{}, err
 	}
-	status, err := s.Store.ListByStatus(r.Context(), inputDir, store.KindPool)
+	status, err := s.Store.ListByStatus(ctx, inputDir, store.KindPool)
 	if err != nil {
 		return bankSummary{}, err
 	}
@@ -32,6 +36,10 @@ func (s *Server) bankSummary(r *http.Request, inputDir, stateDir string) (bankSu
 		Classes: bank.Classes, Model: bank.Model,
 		Labeled: status.Labeled, Auto: status.Auto,
 	}, nil
+}
+
+func (s *Server) bankSummary(r *http.Request, inputDir, stateDir string) (bankSummary, error) {
+	return s.bankSummaryCtx(r.Context(), inputDir, stateDir)
 }
 
 // OpenSession opens the one folder a project needs: the pool.

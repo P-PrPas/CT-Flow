@@ -17,6 +17,7 @@ import (
 
 	"github.com/P-PrPas/CT-Flow/internal/auth"
 	"github.com/P-PrPas/CT-Flow/internal/config"
+	"github.com/P-PrPas/CT-Flow/internal/jobs"
 	"github.com/P-PrPas/CT-Flow/internal/models"
 	"github.com/P-PrPas/CT-Flow/internal/store"
 	"github.com/P-PrPas/CT-Flow/internal/vpe"
@@ -28,6 +29,7 @@ type Server struct {
 	Auth    *auth.Auth
 	Store   *store.Store
 	VPE     *vpe.Client
+	Jobs    *jobs.Tracker
 	Log     *slog.Logger
 }
 

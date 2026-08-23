@@ -22,6 +22,7 @@ import (
 	"github.com/P-PrPas/CT-Flow/internal/api"
 	"github.com/P-PrPas/CT-Flow/internal/auth"
 	"github.com/P-PrPas/CT-Flow/internal/config"
+	"github.com/P-PrPas/CT-Flow/internal/jobs"
 	"github.com/P-PrPas/CT-Flow/internal/models"
 	"github.com/P-PrPas/CT-Flow/internal/store"
 	"github.com/P-PrPas/CT-Flow/internal/vpe"
@@ -61,6 +62,7 @@ func main() {
 		Cfg: cfg, Catalog: catalog, Auth: auth.New(), Log: log,
 		Store: db,
 		VPE:   vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
+		Jobs:  jobs.NewTracker(),
 	}
 
 	addr := ":" + env("PORT", "8000")
@@ -103,6 +105,12 @@ func routes(s *api.Server, log *slog.Logger) http.Handler {
 	mux.Handle("POST /api/testset/import", s.Handle(s.TestsetImport))
 	mux.Handle("POST /api/testset/remove", s.Handle(s.TestsetRemove))
 	mux.Handle("POST /api/testset/label", s.Handle(s.TestsetLabel))
+
+	mux.Handle("GET /api/jobs/{id}", s.Handle(s.GetJob))
+	mux.Handle("POST /api/score", s.Handle(s.Score))
+	mux.Handle("POST /api/evaluate", s.Handle(s.Evaluate))
+	mux.Handle("POST /api/autolabel", s.Handle(s.Autolabel))
+	mux.Handle("POST /api/reembed", s.Handle(s.Reembed))
 
 	mux.Handle("GET /api/export", s.Handle(s.Export))
 

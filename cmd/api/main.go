@@ -95,6 +95,11 @@ func routes(s *api.Server, log *slog.Logger) http.Handler {
 	mux.Handle("POST /api/session", s.Handle(s.OpenSession))
 	mux.Handle("GET /api/boxes", s.Handle(s.GetBoxes))
 
+	mux.Handle("POST /api/label", s.Handle(s.SaveLabel))
+	mux.Handle("POST /api/relabel", s.Handle(s.Relabel))
+	mux.Handle("POST /api/predict", s.Handle(s.Predict))
+	mux.Handle("POST /api/upload", s.Handle(s.Upload))
+
 	mux.Handle("POST /api/testset/import", s.Handle(s.TestsetImport))
 	mux.Handle("POST /api/testset/remove", s.Handle(s.TestsetRemove))
 	mux.Handle("POST /api/testset/label", s.Handle(s.TestsetLabel))

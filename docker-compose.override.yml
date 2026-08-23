@@ -1,0 +1,11 @@
+# Dev convenience, loaded automatically by `docker compose up` alongside
+# docker-compose.yml (no -f flag needed). Bind-mounts backend/ over what got
+# baked into the image and turns on uvicorn --reload, so editing backend
+# code takes effect in ~1s with no rebuild. `docker compose build api` is
+# only needed again when requirements.txt or backend/Dockerfile changes.
+# Don't want this? `docker compose -f docker-compose.yml up` skips it.
+services:
+  api:
+    volumes:
+      - ./backend:/app/backend
+    command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

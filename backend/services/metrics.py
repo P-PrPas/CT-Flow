@@ -16,7 +16,7 @@ from pathlib import Path
 
 import cv2
 
-from . import annotations_db, groundtruth
+from . import groundtruth
 
 
 def iou(a: list[float], b: list[float]) -> float:
@@ -63,28 +63,6 @@ def load_ground_truth(test_dir: str) -> dict[str, list[dict]]:
         gt[str(img_path)] = boxes
     if not gt:
         raise FileNotFoundError(f"no labeled images found in {test_dir}")
-    return gt
-
-
-def load_ground_truth_db(input_dir: str) -> dict[str, list[dict]]:
-    """DB-backed counterpart of load_ground_truth() (T-21/T-22) -- what
-    routers/jobs.py's /api/evaluate actually calls now. `load_ground_truth`
-    above stays file-based and unchanged: _experiment_conf.py points it at a
-    raw, hand-prepared YOLO folder that was never a `.ctflow` project and
-    has no PostgreSQL row to read.
-
-    Annotations are stored in pixel coords already (see annotations_db.py),
-    so there's no classes.txt to decode a position against and no image to
-    re-open just for its width/height."""
-    names = annotations_db.get_classes(input_dir, "testset")
-    if not names:
-        raise FileNotFoundError(f"no test-set ground truth for {input_dir} -- label the test set first")
-    gt: dict[str, list[dict]] = {}
-    for img_path, boxes in annotations_db.load_annotations(input_dir, "testset").items():
-        if boxes and Path(img_path).is_file():
-            gt[img_path] = boxes
-    if not gt:
-        raise FileNotFoundError(f"no labeled images found in test set for {input_dir}")
     return gt
 
 

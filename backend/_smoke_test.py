@@ -61,7 +61,19 @@ else:
     c = TestClient(app)
 
 if OUT.exists():
-    shutil.rmtree(OUT)
+    try:
+        shutil.rmtree(OUT)
+    except OSError as exc:
+        # The prompt bank is written by the inference sidecar under its own uid.
+        # Running the harness as someone who cannot delete it would silently
+        # reuse the previous run's bank, and every class-count assertion below
+        # would then be measuring the wrong thing -- so stop, and say how to fix
+        # it, rather than producing a green run that proved nothing.
+        raise SystemExit(
+            f"cannot clear {OUT}: {exc}\n"
+            f"It belongs to whichever uid the vpe service runs as (APP_UID). "
+            f"Run the harness as that user, or point SMOKE_POOL at a fresh folder."
+        )
 _dbcheck.init_schema()
 _dbcheck.delete_project(POOL)
 
@@ -528,6 +540,13 @@ else:
 
 assert c.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
-shutil.rmtree(OUT)
+# Teardown must not be able to fail the run. The prompt bank is written by the
+# inference sidecar, which runs as its own uid, so whoever drives the harness
+# may simply not be allowed to delete it -- that says nothing about whether the
+# assertions above passed.
+try:
+    shutil.rmtree(OUT)
+except OSError as exc:
+    print(f"note: could not remove {OUT} ({exc}) -- left for the owning user to clean up")
 _dbcheck.delete_project(POOL)
 print("SMOKE TEST OK")

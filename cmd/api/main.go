@@ -1,21 +1,19 @@
-// Command api is CT-Flow's HTTP backend.
+// Command api is CT-Flow's HTTP backend: every /api endpoint the frontend calls.
 //
-// During the port (docs/REFACTOR_PLAN.md phase 2) it is a strangler: routes
-// implemented here are served here, and everything else is proxied to the
-// FastAPI service still running behind it. That is what keeps the application
-// working at every commit -- and what makes a rollback one deleted line in
-// routes() rather than a revert and a redeploy.
+// Inference and the prompt bank are not here. They live in the Python sidecar
+// (backend/vpe_service.py) behind VPE_URL, because YOLOE's SAVPE head has no Go
+// equivalent and the bank is a torch.save -- see docs/REFACTOR_PLAN.md.
 //
-// Set LEGACY_URL to the FastAPI service. Once nothing needs proxying, drop it
-// and the fallback goes with it.
+// The strangler proxy this started as is gone; it existed only to keep the
+// application working while routes moved across one group at a time.
 package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"time"
 
@@ -29,6 +27,26 @@ import (
 )
 
 func main() {
+	// The only subcommand. LABEL_TOOL_USERS holds password hashes, and something
+	// has to be able to produce one -- this replaces
+	// `python -m backend.services.auth <name> <password>`, which went with the
+	// FastAPI service.
+	//
+	//	docker compose run --rm api /app/api -hash-password alice 'their password'
+	//
+	// The plaintext is never stored or logged; only the hash is printed.
+	hashUser := flag.String("hash-password", "",
+		"print a LABEL_TOOL_USERS entry for this username, reading the password from the next argument")
+	flag.Parse()
+	if *hashUser != "" {
+		if flag.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "usage: api -hash-password <username> <password>")
+			os.Exit(2)
+		}
+		fmt.Printf("%s:%s\n", *hashUser, auth.HashPassword(flag.Arg(0)))
+		return
+	}
+
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	cfg := config.Load()
@@ -66,12 +84,11 @@ func main() {
 	}
 
 	addr := ":" + env("PORT", "8000")
-	log.Info("starting", "addr", addr, "mode", cfg.Mode, "models", cfg.ModelsDir,
-		"legacy", os.Getenv("LEGACY_URL"))
+	log.Info("starting", "addr", addr, "mode", cfg.Mode, "models", cfg.ModelsDir)
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           srv.RequireLogin(routes(srv, log)),
+		Handler:           srv.RequireLogin(routes(srv)),
 		ReadHeaderTimeout: 15 * time.Second,
 		// No WriteTimeout: score/evaluate/autolabel are long inference passes
 		// and their poll responses are cheap, but a large image download over a
@@ -84,10 +101,7 @@ func main() {
 	}
 }
 
-// routes registers what Go serves. Everything unregistered falls through to "/"
-// and is proxied, so removing a line here rolls that endpoint back to Python
-// without touching anything else.
-func routes(s *api.Server, log *slog.Logger) http.Handler {
+func routes(s *api.Server) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /api/config", s.Handle(s.GetConfig))
@@ -124,34 +138,14 @@ func routes(s *api.Server, log *slog.Logger) http.Handler {
 	mux.Handle("POST /api/auth/login", s.Handle(s.AuthLogin))
 	mux.Handle("POST /api/auth/logout", s.Handle(s.AuthLogout))
 
-	mux.Handle("/", legacy(log))
+	// Anything else: JSON, not net/http's text 404, because lib/api.ts reads
+	// `detail` off every failed response.
+	mux.Handle("/", s.Handle(notFound))
 	return mux
 }
 
-func legacy(log *slog.Logger) http.Handler {
-	target := os.Getenv("LEGACY_URL")
-	if target == "" {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, `{"detail":"not found"}`, http.StatusNotFound)
-		})
-	}
-	u, err := url.Parse(target)
-	if err != nil {
-		log.Error("LEGACY_URL is not a URL", "value", target, "err", err)
-		os.Exit(1)
-	}
-	proxy := httputil.NewSingleHostReverseProxy(u)
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		log.Error("proxy to the legacy service failed", "path", r.URL.Path, "err", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_, _ = w.Write([]byte(`{"detail":"backend unavailable"}`))
-	}
-	// FlushInterval -1 streams responses through as they arrive rather than
-	// buffering: the poll loop wants each /api/jobs response immediately, and
-	// GET /api/image can be tens of megabytes.
-	proxy.FlushInterval = -1
-	return proxy
+func notFound(http.ResponseWriter, *http.Request) error {
+	return api.ErrNotFound
 }
 
 func env(key, fallback string) string {

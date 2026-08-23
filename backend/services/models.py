@@ -16,9 +16,13 @@ ultralytics.utils.downloads.GITHUB_ASSETS_NAMES, which is what actually
 resolves an auto-download -- a typo there fails at load time, not at import.
 """
 import json
+import os
 from pathlib import Path
 
-from .. import config
+# Read here rather than from a shared config module: this package is now just
+# the inference sidecar, and MODELS_DIR is the only setting it needs. The Go API
+# reads the same variable for its own is_available() check.
+MODELS_DIR = os.getenv("MODELS_DIR", str(Path(__file__).resolve().parents[2] / "models"))
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "models.json"
 _raw = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
@@ -34,11 +38,11 @@ DEFAULT_MODEL_ID: str = _raw["default"]
 
 def checkpoint_path(model_id: str) -> str:
     """Where this checkpoint lives (or lands once ultralytics auto-downloads
-    it -- see config.MODELS_DIR)."""
+    it -- see MODELS_DIR above)."""
     m = BY_ID.get(model_id)
     if m is None:
         raise ValueError(f"unknown model {model_id!r}")
-    return str(Path(config.MODELS_DIR) / m["file"])
+    return str(Path(MODELS_DIR) / m["file"])
 
 
 def is_available(model_id: str) -> bool:

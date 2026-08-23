@@ -1,77 +1,39 @@
-"""Regenerate the cross-language golden vectors in backend/testdata/.
+"""The cross-language golden vectors in backend/testdata/.
 
-These files are the contract the Go port is held to (docs/REFACTOR_PLAN.md
-phase 0): Python produces them, Go's unit tests must reproduce them exactly.
-That is the only practical way to check a pure function -- a pbkdf2 hash, an
-F1 score, a COCO document -- across two languages without standing both
-implementations up and diffing over HTTP.
+These files were how the Go port was held to Python's behaviour
+(docs/REFACTOR_PLAN.md phase 0): Python produced them, and Go's unit tests
+reproduce them exactly. That is the only practical way to check a pure function
+-- a pbkdf2 hash, an F1 score, a COCO document -- across two languages without
+standing both implementations up and diffing over HTTP.
 
-    python -m backend._gen_testdata          # rewrites backend/testdata/
+    python -m backend._gen_testdata            # regenerate what still can be
+    python -m backend._gen_testdata --check    # verify against current Python
 
-Regenerate ONLY when the behaviour is meant to change. A diff here is either a
-deliberate spec change or the bug this directory exists to catch, and the
-commit message has to say which.
+Now that the port is finished, most of these are **frozen**: the Python that
+produced them (services/auth.py, services/events.py, routers/export.py) no
+longer exists, so the committed files are the last output it gave -- which is
+precisely what makes them the spec. Go's tests are what check them:
+internal/auth, internal/events and internal/export respectively.
 
-Zip archives are stored decoded (member name -> text) rather than as bytes:
-zip embeds mtimes, so the container is not reproducible even when its contents
-are, and it is the contents both languages have to agree on.
+metrics_cases.json is the exception and the important one. services/metrics.py
+is still here and still called by _experiment_conf.py, so two implementations of
+the readiness score genuinely coexist -- this is what keeps them agreeing, and
+it is the only vector file this script can still generate or verify.
+
+Regenerate ONLY when the behaviour is meant to change. A diff is either a
+deliberate spec change or the bug this directory exists to catch, and the commit
+message has to say which.
+
+Zip archives inside export_cases.json are stored decoded (member name -> text)
+rather than as bytes: zip embeds mtimes, so the container is never reproducible
+even when its contents are, and it is the contents both languages agree on.
 """
-import io
 import json
-import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "testdata"
 POOL = HERE / "test_pool"
-
-
-def gen_auth() -> dict:
-    """pbkdf2 hashes and signed session cookies. Both formats are frozen: an
-    existing LABEL_TOOL_USERS entry has to keep working after the swap, and a
-    cookie issued by one implementation has to be accepted by the other --
-    during the strangler phase a login and the request after it can land on
-    different processes."""
-    import os
-
-    secret = "0" * 64  # fixed so the signatures below are reproducible
-    os.environ["LABEL_TOOL_SECRET"] = secret
-    from .services import auth
-
-    auth._SECRET = secret.encode()  # module already read the env at import time
-
-    stored = auth.hash_password("hunter2")
-    other = auth.hash_password("correct horse battery staple")
-    return {
-        "iterations": auth.ITERATIONS,
-        "cookie_name": auth.COOKIE,
-        "ttl_seconds": auth.TTL_SECONDS,
-        "verify": [
-            {"password": "hunter2", "stored": stored, "expect": True},
-            {"password": "hunter3", "stored": stored, "expect": False},
-            {"password": "", "stored": stored, "expect": False},
-            {"password": "correct horse battery staple", "stored": other, "expect": True},
-            {"password": "hunter2", "stored": "garbage", "expect": False},
-            {"password": "hunter2", "stored": "bcrypt$1$aa$bb", "expect": False},
-        ],
-        "secret": secret,
-        "identify": [
-            # far-future expiry, correctly signed
-            {"token": f"alice|9999999999|{auth._sign('alice|9999999999')}",
-             "expect": "alice", "why": "valid"},
-            # a username containing the separator must round-trip: identify()
-            # splits from the right so it can never shift the expiry field
-            {"token": f"a|b|9999999999|{auth._sign('a|b|9999999999')}",
-             "expect": "a|b", "why": "username contains the separator"},
-            {"token": f"alice|1|{auth._sign('alice|1')}",
-             "expect": None, "why": "correctly signed but expired"},
-            {"token": "alice|9999999999|deadbeef", "expect": None, "why": "forged signature"},
-            {"token": "nonsense", "expect": None, "why": "malformed"},
-            {"token": "", "expect": None, "why": "absent"},
-            {"token": f"alice|notanumber|{auth._sign('alice|notanumber')}",
-             "expect": None, "why": "signed, but expiry is not an integer"},
-        ],
-    }
 
 
 def gen_metrics() -> dict:
@@ -126,117 +88,17 @@ def gen_metrics() -> dict:
     }
 
 
-def gen_events(tmp: Path) -> dict:
-    """The §7 effort summary. Its one real rule is that "not measured" is null
-    and "measured zero" is 0.0 -- a port that collapses both to zero passes a
-    casual read and destroys the only number the metric exists to report."""
-    from .services import events
-
-    log = [
-        {"kind": "session", "session": "s1", "secs": None, "written": 0},
-        {"kind": "label", "session": "s1", "secs": 12.0, "written": 1},
-        {"kind": "label", "session": "s1", "secs": 8.0, "written": 1},
-        {"kind": "label", "session": "s1", "secs": 30.0, "written": 1},
-        {"kind": "auto", "session": "s1", "secs": 300.0, "written": 4},
-        {"kind": "fix", "session": "s1", "secs": None, "written": 1},
-        {"kind": "session", "session": "s2", "secs": None, "written": 0},
-        {"kind": "label", "session": "s2", "secs": 20.0, "written": 1},
-        {"kind": "not-a-kind", "session": "s2", "secs": 1.0, "written": 99},
-    ]
-    d = tmp / "events_fixture"
-    (d / "_bank").mkdir(parents=True, exist_ok=True)
-    (d / "_bank" / "events.jsonl").write_text(
-        "".join(json.dumps(e) + "\n" for e in log), encoding="utf-8"
-    )
-    both = {"log": log, "want": events.summary(str(d))}
-
-    empty = tmp / "events_empty"
-    empty.mkdir(parents=True, exist_ok=True)
-    both["want_empty"] = events.summary(str(empty))
-
-    # Rounding ties. Python's round() goes to the even digit on an exact tie and
-    # works on the float's true binary value; the obvious port (round(v*1000)/1000)
-    # does neither. One fix over sixteen auto-labels is exactly 0.0625, so the two
-    # disagree on a number a real project can produce -- 0.062 here, 0.063 there.
-    ties = [{"kind": "session", "session": "s1", "secs": None, "written": 0},
-            {"kind": "auto", "session": "s1", "secs": None, "written": 16},
-            {"kind": "fix", "session": "s1", "secs": None, "written": 1},
-            # median of an even count is the mean of the middle two: 12.2 and
-            # 12.3 average to 12.25, another exact tie at one decimal place.
-            {"kind": "label", "session": "s1", "secs": 12.2, "written": 1},
-            {"kind": "label", "session": "s1", "secs": 12.3, "written": 1}]
-    d2 = tmp / "events_ties"
-    (d2 / "_bank").mkdir(parents=True, exist_ok=True)
-    (d2 / "_bank" / "events.jsonl").write_text(
-        "".join(json.dumps(e) + "\n" for e in ties), encoding="utf-8")
-    both["ties_log"] = ties
-    both["want_ties"] = events.summary(str(d2))
-    return both
-
-
-def _unzip(raw: bytes) -> dict:
-    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-        return {n: zf.read(n).decode("utf-8") for n in sorted(zf.namelist())}
-
-
-def gen_export() -> dict:
-    """YOLO/COCO/VOC serialisation. Pixel coords come out of the database; only
-    yolo and voc reopen the image, for its dimensions -- so these vectors also
-    pin the normalisation arithmetic and the float formatting that goes with
-    it, which is exactly where two languages drift apart."""
-    from .routers import export
-
-    files = sorted(p.name for p in POOL.glob("*.jpg"))
-    names = ["test_item", "aaa_new_class"]
-    # Keyed by basename, not absolute path: the checkout lives somewhere else on
-    # every machine, and every field the exporters emit is derived from the
-    # basename or stem anyway. Both sides join these against their own
-    # backend/test_pool before running.
-    by_name = {
-        files[0]: [{"cls": "test_item", "box": [30.0, 30.0, 120.0, 120.0]},
-                   {"cls": "aaa_new_class", "box": [1.5, 2.5, 20.25, 40.75]}],
-        files[1]: [{"cls": "aaa_new_class", "box": [0.0, 0.0, 10.0, 10.0]}],
-        # a path that no longer exists is skipped, not fatal to the whole export
-        "deleted_since_it_was_labelled.jpg": [
-            {"cls": "test_item", "box": [1.0, 1.0, 2.0, 2.0]}],
-    }
-    by_image = {str(POOL / n): boxes for n, boxes in by_name.items()}
-    return {
-        "pool_dir": "backend/test_pool",
-        "names": names,
-        "by_image": by_name,
-        "yolo": _unzip(export._export_yolo(names, by_image)),
-        "coco": json.loads(export._export_coco(names, by_image).decode("utf-8")),
-        "voc": _unzip(export._export_voc(names, by_image)),
-    }
-
-
 def check():
-    """Verify the committed vectors against the current Python code -- the same
-    thing Go's unit tests do against the same files, which is what keeps the two
-    implementations pinned to each other instead of drifting in parallel.
+    """Verify metrics_cases.json against the current services/metrics.py.
 
-    Semantic, not a re-generate-and-diff: hash_password() salts randomly, so a
-    fresh run never reproduces byte-identical vectors. Checking behaviour is
-    also what a port actually has to satisfy.
+    Semantic, not a re-generate-and-diff. This is what stops the two surviving
+    implementations of the readiness score -- this one and internal/metrics --
+    from drifting apart while both are still in use.
+
+    The other three vector files are not checked here; the Python that produced
+    them is gone (see the module docstring), and Go's own tests check those.
     """
-    import os
-
     data = {p.stem: json.loads(p.read_text(encoding="utf-8")) for p in OUT.glob("*.json")}
-
-    av = data["auth_vectors"]
-    os.environ["LABEL_TOOL_SECRET"] = av["secret"]
-    from .services import auth
-
-    auth._SECRET = av["secret"].encode()
-    assert auth.ITERATIONS == av["iterations"], auth.ITERATIONS
-    assert auth.COOKIE == av["cookie_name"] and auth.TTL_SECONDS == av["ttl_seconds"]
-    for v in av["verify"]:
-        got = auth.verify_password(v["password"], v["stored"])
-        assert got == v["expect"], f"verify_password({v['password']!r}) -> {got}"
-    for v in av["identify"]:
-        got = auth.identify(v["token"] or None)
-        assert got == v["expect"], f"identify({v['why']}) -> {got!r}, want {v['expect']!r}"
 
     from .services import metrics
 
@@ -247,48 +109,14 @@ def check():
         got = metrics.evaluate(case["gt"], case["pred"])
         assert got == case["want"], case["name"]
 
-    import tempfile
-
-    from .services import events
-
-    ev = data["events_cases"]
-    with tempfile.TemporaryDirectory() as tmp:
-        d = Path(tmp) / "e"
-        (d / "_bank").mkdir(parents=True)
-        (d / "_bank" / "events.jsonl").write_text(
-            "".join(json.dumps(e) + "\n" for e in ev["log"]), encoding="utf-8")
-        assert events.summary(str(d)) == ev["want"], events.summary(str(d))
-        empty = Path(tmp) / "empty"
-        empty.mkdir()
-        assert events.summary(str(empty)) == ev["want_empty"]
-        t = Path(tmp) / "ties"
-        (t / "_bank").mkdir(parents=True)
-        (t / "_bank" / "events.jsonl").write_text(
-            "".join(json.dumps(e) + "\n" for e in ev["ties_log"]), encoding="utf-8")
-        assert events.summary(str(t)) == ev["want_ties"], events.summary(str(t))
-
-    from .routers import export
-
-    ex = data["export_cases"]
-    by_image = {str(POOL / n): b for n, b in ex["by_image"].items()}
-    assert _unzip(export._export_yolo(ex["names"], by_image)) == ex["yolo"]
-    assert json.loads(export._export_coco(ex["names"], by_image).decode()) == ex["coco"]
-    assert _unzip(export._export_voc(ex["names"], by_image)) == ex["voc"]
-
-    print(f"testdata self-check OK ({len(data)} vector files)")
+    frozen = sorted(set(data) - {"metrics_cases"})
+    print(f"metrics vectors verified against services/metrics.py; "
+          f"frozen (checked by Go): {', '.join(frozen)}")
 
 
 def main():
-    import tempfile
-
     OUT.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory() as tmp:
-        written = {
-            "auth_vectors.json": gen_auth(),
-            "metrics_cases.json": gen_metrics(),
-            "events_cases.json": gen_events(Path(tmp)),
-            "export_cases.json": gen_export(),
-        }
+    written = {"metrics_cases.json": gen_metrics()}
     for name, payload in written.items():
         (OUT / name).write_text(
             json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False) + "\n",

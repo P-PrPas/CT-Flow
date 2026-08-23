@@ -52,50 +52,7 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  # The FastAPI service, now behind the Go one. Every route Go has not taken
-  # over yet is proxied here (see cmd/api/main.go). It shrinks with each
-  # group ported and goes away entirely at the end of the port.
-  legacy:
-    build:
-      context: .                       # this repo's root
-      dockerfile: backend/Dockerfile
-      args:
-        APP_UID: ${APP_UID:-1000}      # must own DATA_DIR on a Linux host
-    image: ct-flow-legacy
-    environment:
-      LABEL_TOOL_MODE: vm              # in a container the FS is always "the vm"
-      LABEL_TOOL_VM_ROOT: /opt/mount/project
-      # Empty = no login and no upload (single trusted user). Fill both in to
-      # turn the tool multi-user -- see .env.example.
-      LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
-      LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
-      LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
-      # T-21: label/box storage. The prompt bank (embeddings) is unaffected --
-      # still the file under each project's .ctflow/_bank/. See
-      # docs/DB_MIGRATION_PLAN.md.
-      DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool
-      VPE_URL: http://vpe:8001
-    depends_on:
-      db:
-        condition: service_healthy
-      vpe:
-        condition: service_healthy
-    volumes:
-      # Everything the tool can see. Each project's labels/bank/test-set data
-      # live in a .ctflow/ subfolder next to its own images, all still under
-      # here -- the browser can only ever pick paths inside /opt/mount/project.
-      - ${DATA_DIR:-../data}:/opt/mount/project
-      # Read-only: services/models.py::is_available() only stats this to tell
-      # the frontend which checkpoints are already cached. `vpe` is the one
-      # that downloads into it, and the one whose image seeds it -- a brand-new
-      # named volume is populated from the image of the container that mounts
-      # it first, and this image has nothing at /models. depends_on above is
-      # what guarantees `vpe` gets there first; don't drop it to speed up boot.
-      - models:/models:ro
-    restart: unless-stopped
-
-  # The Go API service. Fronts everything: the browser reaches this, and it
-  # either answers or proxies to `legacy`.
+  # The API service. Every /api endpoint the frontend calls.
   api:
     build:
       context: .
@@ -113,18 +70,24 @@ services:
       # secret and every proxied request 401s.
       LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
-      LEGACY_URL: http://legacy:8000
       VPE_URL: http://vpe:8001
       DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool
     depends_on:
-      legacy:
+      db:
+        condition: service_healthy
+      vpe:
         condition: service_healthy
     volumes:
+      # Everything the tool can see. Each project's prompt bank, eval history
+      # and events log live in a .ctflow/ subfolder next to its own images, all
+      # under here -- the browser can only ever pick paths inside it.
       - ${DATA_DIR:-../data}:/opt/mount/project
       # Read-only: only to report which checkpoints are already cached.
       - models:/models:ro
-    ports:
-      - "${API_PORT:-8000}:8000"
+    # Not published: the browser reaches the API through the Next.js proxy in
+    # `web`, and Swagger -- the only other reason this port was ever on the host
+    # -- went with FastAPI. Add a ports entry back if you want to curl it
+    # directly during development.
     restart: unless-stopped
 
   web:

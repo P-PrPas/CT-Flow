@@ -1,0 +1,13 @@
+# The test harness, not a service: backend/_smoke_test.py drives whichever
+# backend is running, _parity.py diffs two of them, and _dbcheck.py asserts on
+# PostgreSQL directly. Nothing here ships in an image.
+#
+# _bank_test.py additionally needs torch, so it runs where the sidecar's
+# environment is (requirements-vpe.txt).
+httpx>=0.28.0
+psycopg2-binary>=2.9.9
+# Only for _gen_testdata.py --check, which imports the sidecar to verify the
+# golden vectors still describe it.
+fastapi>=0.115.0
+opencv-python-headless>=4.13.0
+numpy

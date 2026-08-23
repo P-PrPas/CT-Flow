@@ -44,6 +44,10 @@ func (e *httpError) Error() string { return e.Message }
 
 func errStatus(status int, msg string) error { return &httpError{Status: status, Message: msg} }
 
+// ErrNotFound is the catch-all for an unregistered path, so even a typo'd URL
+// answers in the shape lib/api.ts expects.
+var ErrNotFound = errStatus(http.StatusNotFound, "not found")
+
 // forbiddenPath is the one refusal produced in enough places to be worth a
 // constructor. The message is copied verbatim from backend/deps.py: the smoke
 // test and the parity differ both compare it.

@@ -1,22 +1,69 @@
 # NFR-05 / T-02 -- the smoke test is only worth writing if it runs without
 # anyone remembering to run it.
+#
+# Three jobs, cheapest first: Go unit tests, the Python self-checks that survive
+# the port, then the end-to-end smoke test against a real API and a real
+# inference sidecar.
 name: backend
 
 on:
   push:
-    paths: ["backend/**", ".github/workflows/backend.yml"]
+    paths:
+      - "backend/**"
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/backend.yml"
   pull_request:
-    paths: ["backend/**", ".github/workflows/backend.yml"]
+    paths:
+      - "backend/**"
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/backend.yml"
   workflow_dispatch:
 
 jobs:
-  # Everything that needs no model weight, so a broken invariant in the pure
-  # logic reports in seconds instead of waiting on a 28 MB download.
-  checks:
+  # Everything in Go, including the cross-language golden vectors: if this fails
+  # the port has diverged from the behaviour it was held to.
+  go:
     runs-on: ubuntu-latest
     services:
-      # T-21: label/box storage. db.init_schema() (called by every self-check
-      # below that touches it) is idempotent, so no separate migration step.
+      # internal/store's tests run against a real PostgreSQL, because the
+      # invariant they protect (append-only class indices under concurrency) is
+      # a property of row locking that no mock can have.
+      db:
+        image: postgres:16-alpine
+        env: { POSTGRES_DB: labeltool, POSTGRES_USER: labeltool, POSTGRES_PASSWORD: labeltool }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U labeltool" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://labeltool:labeltool@localhost:5432/labeltool
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache: true }
+      - run: go vet ./...
+      # gofmt is not advisory here: a formatting-only diff in a later PR buries
+      # the change that PR is actually about.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+      - run: go test ./... -count=1
+      - run: go build ./...
+
+  # What is left of the Python: the inference sidecar's own checks, plus the one
+  # golden-vector file whose producer still exists (see backend/_gen_testdata.py).
+  python:
+    runs-on: ubuntu-latest
+    services:
       db:
         image: postgres:16-alpine
         env: { POSTGRES_DB: labeltool, POSTGRES_USER: labeltool, POSTGRES_PASSWORD: labeltool }
@@ -30,26 +77,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
-      # fastapi is needed by the cross-language vector check, which imports
-      # routers/export.py to verify the committed YOLO/COCO/VOC goldens.
-      - run: pip install numpy opencv-python-headless psycopg2-binary fastapi
-      - run: python -m backend.services.auth
-      - run: python -m backend.services.events
-      - run: python -m backend.services.groundtruth
-      - run: python -m backend.services.metrics
+      # No torch: none of these load a model.
+      - run: pip install -r backend/requirements-harness.txt
       - run: python -m backend.services.models
-      - run: python -m backend.services.db
-      - run: python -m backend.services.annotations_db
-      - run: python -m backend._migrate_to_db --selfcheck
+      - run: python -m backend.services.metrics
+      - run: python -m backend.services.groundtruth
       - run: python -m backend._dbcheck
-      # The contract the Go port is held to (docs/REFACTOR_PLAN.md phase 0):
-      # if this fails, Python moved and backend/testdata/ was not regenerated,
-      # which means Go is now being checked against a stale spec.
+      # If this fails, services/metrics.py moved without internal/metrics moving
+      # with it -- and the readiness number the whole tool turns on now depends
+      # on which implementation you asked.
       - run: python -m backend._gen_testdata --check
 
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: [go, python]
     services:
       db:
         image: postgres:16-alpine
@@ -59,26 +101,33 @@ jobs:
           --health-cmd "pg_isready -U labeltool" --health-interval 5s
           --health-timeout 5s --health-retries 10
     env:
-      # services/models.py::is_available() checks this exact dir (see
-      # config.py) -- the cache path and the download destination below both
-      # have to agree with it, or `available` reads False even after a
-      # successful download.
+      # services/models.py and internal/models both resolve checkpoints against
+      # this exact directory -- the cache path and the download destination below
+      # have to agree with it, or `available` reads false after a successful
+      # download.
       MODELS_DIR: ${{ github.workspace }}/models
+      MODELS_CATALOG: ${{ github.workspace }}/backend/models.json
+      SCHEMA_PATH: ${{ github.workspace }}/backend/schema.sql
       DATABASE_URL: postgresql://labeltool:labeltool@localhost:5432/labeltool
+      VPE_URL: http://127.0.0.1:8001
+      YOLO_CONFIG_DIR: /tmp
+      MPLCONFIGDIR: /tmp
+      # Small enough that the harness exercises the upload size cap for real
+      # instead of skipping it.
+      LABEL_TOOL_MAX_UPLOAD_MB: "1"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache: true }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
 
-      # Both halves in one environment: the smoke test drives the API service
-      # in-process while the sidecar runs for real on :8001, which is the only
-      # arrangement that exercises the seam between them.
       - name: Install (CPU torch -- the CUDA wheel is ~2.5 GB)
         run: |
-          pip install -r backend/requirements.txt
           pip install --extra-index-url https://download.pytorch.org/whl/cpu \
             -r backend/requirements-vpe.txt
-          # requirements-vpe pulls the GUI build in for ultralytics' sake; a
+          pip install -r backend/requirements-harness.txt
+          # requirements-vpe pulls in the GUI build for ultralytics' sake; a
           # runner has no display, and the two packages cannot coexist.
           pip uninstall -y opencv-python
           pip install opencv-python-headless
@@ -90,38 +139,45 @@ jobs:
           path: ${{ env.MODELS_DIR }}/yoloe-11s-seg.pt
           key: yoloe-11s-seg
 
-      # actions/cache only restores an existing cache -- it never fetches
-      # anything on a miss (e.g. the very first run, or a cache eviction).
-      # Ultralytics knows how to resolve this exact filename to a download
-      # URL (ultralytics.utils.downloads.GITHUB_ASSETS_NAMES); running from
-      # inside MODELS_DIR makes it land where is_available() looks.
+      # actions/cache only restores an existing cache -- it never fetches on a
+      # miss (the first run, or an eviction). Ultralytics resolves this exact
+      # filename to a download URL; running from inside MODELS_DIR makes it land
+      # where both implementations look.
       - name: Download model weight (cache miss)
         if: steps.cache-weight.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$MODELS_DIR"
           cd "$MODELS_DIR" && python -c "from ultralytics import YOLOE; YOLOE('yoloe-11s-seg.pt')"
 
-      # Prompt-bank bookkeeping (model lock, the pre-FR-36 self-heal, reembed's
-      # atomic commit). Needs torch but loads no checkpoint, so it runs first
-      # and fails in seconds if the bank is broken.
+      # Prompt-bank bookkeeping (the model lock, the pre-FR-36 self-heal,
+      # reembed's atomic commit). Needs torch but loads no checkpoint, so a
+      # broken bank fails in seconds rather than after a full pass.
       - name: Bank unit checks
-        env: { YOLO_CONFIG_DIR: /tmp, MPLCONFIGDIR: /tmp }
         run: python -m backend._bank_test
 
       - name: Start the inference sidecar
-        env: { YOLO_CONFIG_DIR: /tmp, MPLCONFIGDIR: /tmp }
         run: |
           uvicorn backend.vpe_service:app --port 8001 --log-level warning &
-          # /vpe/health loads no model, so this comes up in about a second --
-          # a checkpoint is only loaded by the first request that needs one.
+          # /vpe/health loads no model, so this is up in about a second; a
+          # checkpoint is only loaded by the first request that needs one.
           for _ in $(seq 1 30); do
             curl -fs http://127.0.0.1:8001/vpe/health && break
             sleep 1
           done
 
+      - name: Start the API
+        run: |
+          go build -o /tmp/ctflow-api ./cmd/api
+          /tmp/ctflow-api &
+          for _ in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8000/api/config >/dev/null && break
+            sleep 1
+          done
+
+      # Drives the API over HTTP exactly as the browser does. The same command
+      # ran against FastAPI throughout the port, which is what made "Go behaves
+      # identically" checkable rather than asserted.
       - name: Smoke test
         env:
-          YOLO_CONFIG_DIR: /tmp
-          MPLCONFIGDIR: /tmp
-          VPE_URL: http://127.0.0.1:8001
+          SMOKE_BASE_URL: http://127.0.0.1:8000
         run: python -m backend._smoke_test

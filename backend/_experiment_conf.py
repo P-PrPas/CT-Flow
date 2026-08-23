@@ -19,7 +19,10 @@ from pathlib import Path
 
 import cv2
 
-from .config import REPO_ROOT
+# Was backend/config.py, which the Go port removed. This script is the only
+# thing that needed it, so the one constant lives here now.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 from .services import metrics
 from .services.bank import Bank
 from .services.vpe import arm, extract_embedding, predict_one

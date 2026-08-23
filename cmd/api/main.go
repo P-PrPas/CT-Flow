@@ -99,6 +99,8 @@ func routes(s *api.Server, log *slog.Logger) http.Handler {
 	mux.Handle("POST /api/testset/remove", s.Handle(s.TestsetRemove))
 	mux.Handle("POST /api/testset/label", s.Handle(s.TestsetLabel))
 
+	mux.Handle("GET /api/export", s.Handle(s.Export))
+
 	mux.Handle("GET /api/history", s.Handle(s.GetHistory))
 	mux.Handle("POST /api/history", s.Handle(s.AddHistory))
 	mux.Handle("DELETE /api/history", s.Handle(s.DeleteHistory))

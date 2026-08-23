@@ -21,10 +21,12 @@ float, has to agree.
 """
 import argparse
 import hashlib
+import io
 import json
 import shutil
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import httpx
@@ -86,11 +88,23 @@ class Side:
         try:
             body = r.json()
         except ValueError:
-            # Not every endpoint answers JSON (GET /api/image, GET /api/export)
-            # -- compare the bytes and the content type instead.
-            body = {"_bytes_sha": hashlib.sha256(r.content).hexdigest(),
-                    "_content_type": r.headers.get("content-type")}
+            body = self._binary(r)
         return {"status": r.status_code, "body": _norm(body, self.pool)}
+
+    @staticmethod
+    def _binary(r) -> dict:
+        """Not every endpoint answers JSON. An image is compared by hash, but a
+        zip cannot be: the container records a modification time per member, so
+        two archives with identical contents never hash the same. Compare what
+        the archive *says* instead -- which is also the only part a consumer of
+        the export reads."""
+        ctype = r.headers.get("content-type")
+        if ctype == "application/zip":
+            with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+                return {"_content_type": ctype,
+                        "_zip": {n: zf.read(n).decode("utf-8", "replace")
+                                 for n in sorted(zf.namelist())}}
+        return {"_bytes_sha": hashlib.sha256(r.content).hexdigest(), "_content_type": ctype}
 
     def job(self, path: str, payload: dict):
         """Start a background job and return its finished result -- the job id

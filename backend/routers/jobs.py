@@ -5,18 +5,21 @@ polls GET /api/jobs/{id} for progress. See services/job_tracker.py.
 Every job-starting endpoint below returns the same shape ({job_id, total}) and
 is polled the same way; only `result`'s shape once `finished` differs per job
 -- documented on each endpoint since GET /api/jobs/{id} itself can't know
-which kind of job it's looking at."""
+which kind of job it's looking at.
+
+The inference itself happens in the sidecar (backend/vpe_service.py), which
+streams one line per image back. This router owns the job tracker, the
+database writes, and the metrics -- so the shape of every result below is
+unchanged even though nothing here loads a model any more."""
 import time
 
-import cv2
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from .. import deps
 from ..deps import checked_path
-from ..services import annotations_db, job_tracker, metrics
+from ..services import annotations_db, job_tracker, metrics, vpe_client
 from ..services import models as model_registry
-from ..services.bank import Bank
-from ..services.vpe import arm, extract_embedding, predict_one
+from .pool import bank_summary
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -32,6 +35,15 @@ def get_job(job_id: str):
     return j | {"now": time.time()}
 
 
+def _bank_or_400(state_dir: str) -> dict:
+    """Every job below is meaningless against an empty bank, and finding that
+    out here costs one cheap call instead of a job that fails immediately."""
+    b = vpe_client.bank(state_dir)
+    if not b["classes"]:
+        raise HTTPException(400, "prompt bank is empty -- label something first")
+    return b
+
+
 @router.post("/score")
 def score(req: dict, background_tasks: BackgroundTasks):
     """Rescore the pool with the current bank. Runs as a background job so
@@ -39,42 +51,34 @@ def score(req: dict, background_tasks: BackgroundTasks):
 
     Job result: `{"scores": {image_path: {"conf": float, "cls": str|None, "sig": [int, ...]}}}`."""
     paths = [str(checked_path(p)) for p in req["images"]]
+    state_dir = str(deps.state_dir(checked_path(req["input_dir"])))
     job_id = job_tracker.create(len(paths))
-    bank = Bank(str(deps.state_dir(checked_path(req["input_dir"]))))
-    mean = bank.mean_vpe()
-    if mean is None or not paths:
+    if not vpe_client.bank(state_dir)["classes"] or not paths:
         job_tracker.finish(job_id, {"scores": {}})
         return {"job_id": job_id, "total": 0}
-    names, combined = mean
-    background_tasks.add_task(_run_score, job_id, names, combined, paths, bank.model_or_default)
+    background_tasks.add_task(_run_score, job_id, state_dir, paths)
     return {"job_id": job_id, "total": len(paths)}
 
 
-def _signature(path: str) -> list[int]:
-    """FR-18 — an 8x8 grayscale thumbnail, so the UI can tell "another frame of
-    the same thing" from "something new" and stop offering five near-identical
-    images in a row. ponytail: a perceptual thumbnail, not bank-embedding
-    distance; it catches conveyor near-duplicates, which is the actual
-    complaint. Swap in embeddings if it ever misses a case that matters."""
-    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        return []
-    return cv2.resize(img, (8, 8), interpolation=cv2.INTER_AREA).flatten().tolist()
-
-
-def _run_score(job_id: str, names: list[str], combined, paths: list[str], model_id: str):
+def _run_score(job_id: str, state_dir: str, paths: list[str]):
     try:
-        model = arm(names, combined, model_id)
         results = {}
-        for i, path in enumerate(paths):
-            dets = predict_one(model, names, path, conf=0.05)
-            best = max(dets, key=lambda d: d["conf"], default=None)
-            results[path] = {
+        done = 0
+        # conf=0.05 rather than the usual default: this pass exists to rank
+        # images by "how sure is the model here", so a box below the labelling
+        # threshold is still a signal worth recording.
+        for line in vpe_client.predict_stream(state_dir, paths, conf=0.05,
+                                              conf_by_class={}, want_sig=True):
+            if line.get("done"):
+                break
+            best = max(line["boxes"], key=lambda d: d["conf"], default=None)
+            results[line["image"]] = {
                 "conf": best["conf"] if best else 0.0,
                 "cls": best["cls"] if best else None,
-                "sig": _signature(path),
+                "sig": line["sig"],
             }
-            job_tracker.tick(job_id, i + 1)
+            done += 1
+            job_tracker.tick(job_id, done)
         job_tracker.finish(job_id, {"scores": results})
     except Exception as exc:
         job_tracker.fail(job_id, str(exc))
@@ -89,31 +93,30 @@ def evaluate(req: dict, background_tasks: BackgroundTasks):
     Job result: overall/per_class precision-recall-F1 plus per_image detail --
     see services/metrics.py::evaluate()."""
     inp = checked_path(req["input_dir"])
-    bank = Bank(str(deps.state_dir(inp)))
-    mean = bank.mean_vpe()
-    if mean is None:
-        raise HTTPException(400, "prompt bank is empty -- label something first")
+    state_dir = str(deps.state_dir(inp))
+    _bank_or_400(state_dir)
     try:
         gt = metrics.load_ground_truth_db(str(inp))
     except FileNotFoundError as exc:
         raise HTTPException(400, str(exc))
-    names, combined = mean
     conf = req.get("conf", 0.25)
     conf_by_class = req.get("conf_by_class", {})
     job_id = job_tracker.create(len(gt))
-    background_tasks.add_task(_run_evaluate, job_id, names, combined, gt,
-                              conf, conf_by_class, bank.model_or_default)
+    background_tasks.add_task(_run_evaluate, job_id, state_dir, gt, conf, conf_by_class)
     return {"job_id": job_id, "total": len(gt)}
 
 
-def _run_evaluate(job_id: str, names: list[str], combined, gt: dict, conf: float,
-                  conf_by_class: dict[str, float], model_id: str):
+def _run_evaluate(job_id: str, state_dir: str, gt: dict, conf: float,
+                  conf_by_class: dict[str, float]):
     try:
-        model = arm(names, combined, model_id)
         pred = {}
-        for i, path in enumerate(gt):
-            pred[path] = predict_one(model, names, path, conf, conf_by_class)
-            job_tracker.tick(job_id, i + 1)
+        done = 0
+        for line in vpe_client.predict_stream(state_dir, list(gt), conf, conf_by_class):
+            if line.get("done"):
+                break
+            pred[line["image"]] = line["boxes"]
+            done += 1
+            job_tracker.tick(job_id, done)
         job_tracker.finish(job_id, metrics.evaluate(gt, pred)
                            | {"conf": conf, "conf_by_class": conf_by_class})
     except Exception as exc:
@@ -122,47 +125,45 @@ def _run_evaluate(job_id: str, names: list[str], combined, gt: dict, conf: float
 
 @router.post("/autolabel")
 def autolabel(req: dict, background_tasks: BackgroundTasks):
-    """Write YOLO labels for these images straight from the bank. Only worth
-    doing once the test-set numbers say the bank is good enough. Runs as a
+    """Write labels for these images straight from the bank. Only worth doing
+    once the test-set numbers say the bank is good enough. Runs as a
     background job -- a full pool pass has the same cost as Evaluate.
 
     Job result: `{"written": int, "no_detection": int, "no_detection_images": [str], "bank": dict}`."""
     inp = checked_path(req["input_dir"])
     state_dir = str(deps.state_dir(inp))
-    bank = Bank(state_dir)
-    mean = bank.mean_vpe()
-    if mean is None:
-        raise HTTPException(400, "prompt bank is empty -- label something first")
-    names, combined = mean
+    _bank_or_400(state_dir)
     paths = [str(checked_path(p)) for p in req["images"]]
     conf = req.get("conf", 0.25)
     conf_by_class = req.get("conf_by_class", {})
     job_id = job_tracker.create(len(paths))
     background_tasks.add_task(_run_autolabel, job_id, str(inp), state_dir,
-                              names, combined, paths, conf, conf_by_class, bank.model_or_default)
+                              paths, conf, conf_by_class)
     return {"job_id": job_id, "total": len(paths)}
 
 
-def _run_autolabel(job_id: str, input_dir: str, output_dir: str, names: list[str], combined,
-                   paths: list[str], conf: float, conf_by_class: dict[str, float], model_id: str):
+def _run_autolabel(job_id: str, input_dir: str, state_dir: str, paths: list[str],
+                   conf: float, conf_by_class: dict[str, float]):
     try:
-        bank = Bank(output_dir)
-        model = arm(names, combined, model_id)
         written, empty, auto_paths = 0, [], []
-        for i, path in enumerate(paths):
-            dets = predict_one(model, names, path, conf, conf_by_class)
-            if not dets:
+        done = 0
+        for line in vpe_client.predict_stream(state_dir, paths, conf, conf_by_class):
+            if line.get("done"):
+                break
+            if not line["boxes"]:
                 # FR-28 -- name the images, not just the count: "12 with nothing
                 # found" is a number, a list is something a person can act on.
-                empty.append(path)
+                empty.append(line["image"])
             else:
-                annotations_db.write_boxes(input_dir, "pool", path, dets)
+                annotations_db.write_boxes(input_dir, "pool", line["image"], line["boxes"])
                 written += 1
-                auto_paths.append(path)
-            job_tracker.tick(job_id, i + 1)
+                auto_paths.append(line["image"])
+            done += 1
+            job_tracker.tick(job_id, done)
         annotations_db.mark_auto(input_dir, auto_paths)
         job_tracker.finish(job_id, {"written": written, "no_detection": len(empty),
-                                    "no_detection_images": empty, "bank": bank.summary()})
+                                    "no_detection_images": empty,
+                                    "bank": bank_summary(input_dir, state_dir)})
     except Exception as exc:
         job_tracker.fail(job_id, str(exc))
 
@@ -173,50 +174,34 @@ def reembed(req: dict, background_tasks: BackgroundTasks):
     re-extracting every stored instance's embedding under it -- the only
     sanctioned way to change a bank's model after its first label (see
     Bank.lock_model()). Runs as a background job: a bank with hundreds of
-    taught instances re-reads and re-infers every one of them. Label files
-    are never touched -- only the prompt bank's vectors and `model` change.
+    taught instances re-reads and re-infers every one of them. Labels in
+    PostgreSQL are never touched -- only the prompt bank's vectors and `model`
+    change.
 
     Job result: `{"bank": dict}`."""
-    state_dir = str(deps.state_dir(checked_path(req["input_dir"])))
-    bank = Bank(state_dir)
+    inp = checked_path(req["input_dir"])
+    state_dir = str(deps.state_dir(inp))
     model_id = req["model_id"]
-    if bank.model is None:
+    info = vpe_client.total_instances(state_dir)
+    if info["model"] is None:
         raise HTTPException(400, "this project has no model yet -- just label normally, no need to reembed")
-    if model_id == bank.model:
+    if model_id == info["model"]:
         raise HTTPException(400, f"already using {model_id!r}")
     try:
         model_registry.checkpoint_path(model_id)  # fail fast on a bad id, before spawning the job
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    total = sum(len(insts) for insts in bank.instances.values())
-    job_id = job_tracker.create(total)
-    background_tasks.add_task(_run_reembed, job_id, state_dir, model_id)
-    return {"job_id": job_id, "total": total}
+    job_id = job_tracker.create(info["total"])
+    background_tasks.add_task(_run_reembed, job_id, str(inp), state_dir, model_id)
+    return {"job_id": job_id, "total": info["total"]}
 
 
-def _run_reembed(job_id: str, output_dir: str, model_id: str):
+def _run_reembed(job_id: str, input_dir: str, state_dir: str, model_id: str):
     try:
-        bank = Bank(output_dir)
-        new_embeddings: dict[str, list] = {}
-        done = 0
-        for cls_name in bank.classes:
-            vecs = []
-            for inst in bank.instances[cls_name]:
-                img = cv2.imread(inst["source_image"])
-                if img is None:
-                    raise ValueError(f"cannot re-read {inst['source_image']!r} -- has it moved or been deleted?")
-                # ponytail: an instance taught from several same-class boxes in
-                # one save is stored with only the first box's coordinates
-                # (see routers/pool.py::save_label) -- reembed can only replay
-                # that one box, so a multi-box instance loses the averaging it
-                # originally had. Rare in practice (most saves are one box per
-                # class); store the full box list per instance if this turns
-                # out to matter.
-                vecs.append(extract_embedding(img, [inst["bbox"]], model_id))
-                done += 1
-                job_tracker.tick(job_id, done)
-            new_embeddings[cls_name] = vecs
-        bank.reembed(model_id, new_embeddings)
-        job_tracker.finish(job_id, {"bank": bank.summary()})
+        for line in vpe_client.reembed_stream(state_dir, model_id):
+            if line.get("done"):
+                break
+            job_tracker.tick(job_id, line["done_count"])
+        job_tracker.finish(job_id, {"bank": bank_summary(input_dir, state_dir)})
     except Exception as exc:
         job_tracker.fail(job_id, str(exc))

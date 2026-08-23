@@ -15,8 +15,10 @@ Two things the HTTP form needs from its environment:
   * the server must resolve the same filesystem paths this process does (run it
     on the host, or bind-mount so SMOKE_POOL means the same thing on both
     sides) -- input_dir crosses the wire as a plain string;
-  * torch has to be importable here too, because the bank assertions construct
-    Bank(...) directly to check what actually landed on disk.
+  * nothing else -- in particular NOT torch. Every assertion here goes over
+    HTTP or reads a plain file; the checks that construct Bank() directly moved
+    to backend/_bank_test.py so this can be driven from a machine that has no
+    reason to carry a CUDA wheel.
 
 Environment: SMOKE_BASE_URL, SMOKE_POOL, SMOKE_USER/SMOKE_PASSWORD (only when
 the target server has LABEL_TOOL_USERS set), DATABASE_URL.
@@ -28,8 +30,6 @@ import time
 from pathlib import Path
 
 from . import _dbcheck
-from .services import models as model_registry
-from .services.bank import Bank
 
 HERE = Path(__file__).parent
 # input_dir is the only path a client ever sends -- the bank lives in a fixed
@@ -136,9 +136,21 @@ saved0 = _dbcheck.read_boxes(POOL, "pool", target)
 assert saved0 and saved0[0]["cls"] == "test_item", saved0
 print("annotation stored in DB:", saved0)
 
-# reload from disk -- bank must round-trip (embeddings/classes are still a file)
-reloaded = Bank(str(OUT))
-assert reloaded.classes == ["test_item"]
+# reload from disk -- the bank must round-trip (embeddings/classes are still a
+# file). A fresh /api/session re-reads it from scratch, which is what proves it:
+# nothing is cached between requests on either side of the sidecar boundary.
+def bank_classes() -> list[dict]:
+    """BankSummary's `classes`: [{"name", "count"}] in insertion order. Counts
+    matter as much as names here -- "relabel added no embeddings" is a
+    statement about counts, not about the class list."""
+    return c.post("/api/session", json={"input_dir": POOL}).json()["bank"]["classes"]
+
+
+def bank_names() -> list[str]:
+    return [entry["name"] for entry in bank_classes()]
+
+
+assert bank_names() == ["test_item"]
 assert _dbcheck.list_by_status(POOL, "pool")["labeled"] == [target]
 
 r = c.post("/api/score", json={"input_dir": POOL, "images": images[1:]})
@@ -196,13 +208,13 @@ assert _dbcheck.get_classes(POOL, "pool") == ["test_item", "aaa_new_class"], \
 print("class order stable after adding 'aaa_new_class':", still_correct)
 
 # /api/relabel: fix a generated label directly -- no new embeddings, unlike /api/label
-bank_before = Bank(str(OUT)).summary()
+bank_before = bank_classes()
 r = c.post("/api/relabel", json={
     "input_dir": POOL, "image": target,
     "boxes": [{"cls": "test_item", "box": [1, 1, 9, 9]}],
 })
 assert r.status_code == 200, r.text
-assert r.json()["bank"]["classes"] == bank_before["classes"], r.json()["bank"]  # no embeddings added
+assert r.json()["bank"]["classes"] == bank_before, r.json()["bank"]  # no embeddings added
 r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 assert [b["cls"] for b in r.json()["boxes"]] == ["test_item"], r.json()
 
@@ -275,7 +287,7 @@ print("ground truth after update:", gt_merged)
 
 # must not touch the prompt bank -- test images are held out, not prompts
 assert not (TEST / "_bank").exists()
-assert Bank(str(OUT)).summary()["classes"] == bank_before["classes"]  # unaffected by testset writes
+assert bank_classes() == bank_before  # unaffected by testset writes
 
 r = c.post("/api/testset/import", json={"input_dir": POOL, "images": []})  # cheap way to re-read state
 assert r.json()["labeled"] == [Path(test_img).stem]
@@ -322,7 +334,7 @@ print("autolabel:", auto["written"], "written,", auto["no_detection"], "empty")
 r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.05})
 assert r.status_code == 200, r.text
 drafts = r.json()["boxes"]
-assert all(d["cls"] in Bank(str(OUT)).classes and len(d["box"]) == 4 for d in drafts), drafts
+assert all(d["cls"] in bank_names() and len(d["box"]) == 4 for d in drafts), drafts
 print("predict:", len(drafts), "draft box(es)")
 
 # an empty bank must cost nothing rather than error
@@ -361,14 +373,14 @@ print("eval history: persisted, read back, cleared")
 # takes to reach the mask head where a stale class count blows up -- see arm().
 r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.001})
 assert r.status_code == 200 and r.json()["boxes"], r.text[:200]
-assert {b["cls"] for b in r.json()["boxes"]} <= set(Bank(str(OUT)).classes), r.json()
+assert {b["cls"] for b in r.json()["boxes"]} <= set(bank_names()), r.json()
 print("predict after a class was added:", len(r.json()["boxes"]), "boxes, no shape error")
 
 # FR-33: a per-class threshold above 1.0 can never be met, so naming every
 # class in conf_by_class must empty the result even at conf=0.0
 r = c.post("/api/predict", json={
     "input_dir": POOL, "image": target, "conf": 0.0,
-    "conf_by_class": {n: 1.01 for n in Bank(str(OUT)).classes},
+    "conf_by_class": {n: 1.01 for n in bank_names()},
 })
 assert r.status_code == 200 and r.json()["boxes"] == [], r.text
 r = c.post("/api/evaluate", json={
@@ -382,85 +394,6 @@ print("conf_by_class: per-class thresholds honoured and echoed back")
 meta = json.loads((OUT / "_bank" / "metadata.json").read_text(encoding="utf-8"))
 assert all("labeled_by" in i for insts in meta["instances"].values() for i in insts), meta
 
-# --- model lock, exercised directly (no HTTP, no model load needed) ---
-LOCK = SCRATCH / "_smoke_lock"
-if LOCK.exists():
-    shutil.rmtree(LOCK)
-b = Bank(str(LOCK))
-assert b.model is None
-assert b.lock_model("yoloe-11s-seg") == "yoloe-11s-seg"
-assert b.lock_model("yoloe-11s-seg") == "yoloe-11s-seg"  # same model again: no-op
-try:
-    b.lock_model("yoloe-11m-seg")
-    assert False, "a second model on the same bank should have been rejected"
-except ValueError:
-    pass
-assert Bank(str(LOCK)).model == "yoloe-11s-seg"  # persisted across a reload
-shutil.rmtree(LOCK)
-print("model lock: first embedding fixes the bank's model, survives reload, rejects mismatches")
-
-# --- regression: a bank written before FR-36 has no "model" key at all (not
-# just None) -- simulate that exact on-disk shape and confirm the bank heals
-# itself the moment anything next constructs a Bank() for it, instead of
-# staying permanently None (which used to crash predict/score/evaluate/
-# autolabel with "unknown model None", and separately left the frontend
-# showing an editable model picker for an already-taught project forever).
-b = Bank(str(LOCK))
-b.embeddings["ore"] = []  # give it a class so classes/mean_vpe aren't the reason it's empty
-b._save()
-(LOCK / "_bank" / "metadata.json").write_text(
-    json.dumps({k: v for k, v in json.loads((LOCK / "_bank" / "metadata.json").read_text()).items() if k != "model"}),
-    encoding="utf-8",
-)
-assert "model" not in json.loads((LOCK / "_bank" / "metadata.json").read_text())  # simulated shape confirmed
-
-healed = Bank(str(LOCK))  # __init__ self-heals: has embeddings, no model key -> locks to the default
-assert healed.model == model_registry.DEFAULT_MODEL_ID, healed.model
-assert healed.model_or_default == model_registry.DEFAULT_MODEL_ID
-assert json.loads((LOCK / "_bank" / "metadata.json").read_text())["model"] == model_registry.DEFAULT_MODEL_ID  # persisted, not just in-memory
-
-try:
-    healed.lock_model("yoloe-26x-seg")  # now genuinely locked -- a mismatch must reject, not silently switch
-    assert False, "a healed bank should reject a different model like any other locked bank"
-except ValueError:
-    pass
-shutil.rmtree(LOCK)
-print("model lock: a pre-FR-36 bank (no model key on disk) self-heals to the default and locks for real")
-
-# --- reembed: the only sanctioned way to change a bank's model after its
-# first label. Exercised directly against Bank -- routers/jobs.py::_run_reembed
-# is the thing that actually calls a model, this only tests the atomic commit.
-import torch as _torch  # noqa: E402 -- local, smoke-test only
-
-b = Bank(str(LOCK))
-b.add("a", _torch.zeros(1, 4), "img1.jpg", [0, 0, 1, 1])
-b.add("a", _torch.ones(1, 4), "img2.jpg", [0, 0, 1, 1])
-b.add("b", _torch.full((1, 4), 2.0), "img3.jpg", [0, 0, 1, 1])
-b.lock_model("yoloe-11s-seg")
-instances_before = json.loads(json.dumps(b.instances))  # deep copy for comparison
-
-new = {"a": [_torch.full((1, 4), 9.0), _torch.full((1, 4), 8.0)], "b": [_torch.full((1, 4), 7.0)]}
-b.reembed("yoloe-11m-seg", new)
-assert b.model == "yoloe-11m-seg"
-assert [t.tolist() for t in b.embeddings["a"]] == [[[9.0] * 4], [[8.0] * 4]]
-assert [t.tolist() for t in b.embeddings["b"]] == [[[7.0] * 4]]
-assert b.classes == ["a", "b"]  # insertion order survived the swap
-assert b.instances == instances_before  # provenance untouched
-assert Bank(str(LOCK)).model == "yoloe-11m-seg"  # persisted, not just in-memory
-
-try:
-    b.reembed("yoloe-11l-seg", {"a": new["a"]})  # missing class "b"
-    assert False, "reembed covering fewer classes than the bank has should reject"
-except ValueError:
-    pass
-try:
-    b.reembed("yoloe-11l-seg", {"a": new["a"], "b": [_torch.zeros(1, 4), _torch.zeros(1, 4)]})  # wrong count for "b"
-    assert False, "reembed with a mismatched instance count should reject"
-except ValueError:
-    pass
-assert b.model == "yoloe-11m-seg"  # both rejected attempts left the bank exactly as it was
-shutil.rmtree(LOCK)
-print("reembed: swaps every embedding + the model lock atomically, rejects a partial/mismatched replacement")
 
 # --- §7: effort metrics outlive the browser tab ---
 for e in [{"kind": "session", "session": "s1"},

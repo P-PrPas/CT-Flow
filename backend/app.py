@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from .routers import auth as auth_router
 from .routers import export, jobs, pool, system, testset, uploads
 from .services import auth, db
+from .services.vpe_client import VpeError
 
 TAGS = [
     {"name": "system", "description": "Environment info and the server-side folder picker. "
@@ -56,6 +57,16 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+
+
+@app.exception_handler(VpeError)
+async def _vpe_error(request: Request, exc: VpeError):
+    """The inference sidecar's refusals are this API's refusals: a mismatched
+    model_id is still a 409 with the same message, an empty bank still a 400.
+    Routers stay free of the translation (a service never imports FastAPI in
+    this backend), and the browser cannot tell that the check moved out of
+    process -- which is the whole point."""
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status)
 
 
 @app.on_event("startup")

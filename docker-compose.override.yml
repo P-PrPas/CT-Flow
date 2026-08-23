@@ -1,14 +1,23 @@
 # Dev convenience, loaded automatically by `docker compose up` alongside
 # docker-compose.yml (no -f flag needed). Bind-mounts backend/ over what got
 # baked into the image and turns on uvicorn --reload, so editing backend
-# code takes effect in ~1s with no rebuild. `docker compose build api` is
-# only needed again when requirements.txt or backend/Dockerfile changes.
+# code takes effect in ~1s with no rebuild. `docker compose build` is only
+# needed again when a requirements file or a Dockerfile changes.
 # Don't want this? `docker compose -f docker-compose.yml up` skips it.
 services:
   api:
     volumes:
       - ./backend:/app/backend
     command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Same treatment for the sidecar, but note what it costs: a reload here drops
+  # every loaded checkpoint, so the next request pays the cold-start again.
+  # Editing API code no longer triggers that -- which is half the point of the
+  # split.
+  vpe:
+    volumes:
+      - ./backend:/app/backend
+    command: ["uvicorn", "backend.vpe_service:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
 
   db:
     # Published for the parity harness (backend/_parity.py, _smoke_test.py's

@@ -1,5 +1,10 @@
 """The core labeling loop: open an image pool, save boxes into the prompt
-bank, review/fix a generated label without touching the bank."""
+bank, review/fix a generated label without touching the bank.
+
+The prompt bank itself lives in the inference sidecar (backend/vpe_service.py)
+-- this router assembles what the frontend sees out of two halves: what the
+bank was taught (from the sidecar) and which images are labeled/auto (from
+PostgreSQL, which the sidecar has no connection to)."""
 import cv2
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -7,14 +12,19 @@ from fastapi.responses import FileResponse
 from .. import deps
 from ..deps import checked_path, current_user
 from ..services import annotations_db
-from ..services import bank as bank_store
 from ..services import events as event_log
-from ..services import models as model_registry
-from ..services.bank import Bank
+from ..services import history as history_store
+from ..services import vpe_client
 from ..services.images import list_images
-from ..services.vpe import arm, extract_embedding, predict_one
 
 router = APIRouter(prefix="/api", tags=["pool"])
+
+
+def bank_summary(input_dir: str, state_dir: str) -> dict:
+    """BankSummary as docs/API_REFERENCE.md defines it. Assembled here rather
+    than by either store, because neither one can see both halves."""
+    status = annotations_db.list_by_status(input_dir, "pool")
+    return vpe_client.bank(state_dir) | {"labeled": status["labeled"], "auto": status["auto"]}
 
 
 @router.post("/session")
@@ -31,10 +41,9 @@ def open_session(req: dict):
     images = list_images(str(inp))
     if not images:
         raise HTTPException(400, f"no images in {inp}")
-    bank = Bank(str(deps.state_dir(inp)))
     return {
         "images": images,
-        "bank": bank.summary(),
+        "bank": bank_summary(str(inp), str(deps.state_dir(inp))),
         "testset": {
             "images": annotations_db.list_test_images(str(inp)),
             "labeled": sorted(annotations_db.labeled_stems(str(inp))),
@@ -74,72 +83,66 @@ def save_label(req: dict, user: str | None = Depends(current_user)):
     -- see `POST /api/reembed` to change it deliberately instead. `400` if
     `image` is flagged in the test set -- teaching the bank from a held-out
     image would make /api/evaluate measure memorization instead of
-    generalization."""
+    generalization.
+
+    What is load-bearing about the order survives the split to the sidecar:
+    the test-set check and the model lock both refuse before any inference
+    runs, and the bank is taught before the database is written. Those two
+    stores have never shared a transaction, so a failure between them still
+    leaves an embedding with no annotation row -- same exposure as before,
+    deliberately not widened here.
+
+    One deliberate change: "cannot read image" used to be reported ahead of
+    "no boxes" and the test-set refusal, because the router decoded the image
+    itself before checking anything. The decode now happens in the sidecar, so
+    a request that is *both* unreadable and empty (or unreadable and held out)
+    reports the cheap reason instead. Each condition on its own still answers
+    exactly as before; the alternative was decoding every image twice per save
+    to preserve the precedence of two degenerate cases."""
     inp = checked_path(req["input_dir"])
-    img = cv2.imread(str(checked_path(req["image"])))
-    if img is None:
-        raise HTTPException(400, "cannot read image")
     boxes = req["boxes"]
     if not boxes:
         raise HTTPException(400, "no boxes")
     if annotations_db.is_test(str(inp), req["image"]):
         raise HTTPException(400, "this image is in the test set -- it can never be taught to the model")
-    bank = Bank(str(deps.state_dir(inp)))
-    try:
-        model_id = bank.lock_model(req.get("model_id", model_registry.DEFAULT_MODEL_ID))
-    except ValueError as exc:
-        raise HTTPException(409, str(exc))
-
-    by_class: dict[str, list[list[float]]] = {}
-    for b in boxes:
-        by_class.setdefault(b["cls"], []).append(b["box"])
-    for cls_name, cls_boxes in by_class.items():
-        bank.add(cls_name, extract_embedding(img, cls_boxes, model_id), req["image"], cls_boxes[0], user)
+    state_dir = str(deps.state_dir(inp))
+    vpe_client.teach(state_dir, str(checked_path(req["image"])), boxes,
+                     req.get("model_id"), user)
 
     annotations_db.write_boxes(str(inp), "pool", req["image"], boxes, created_by=user,
                                 merge=(req.get("mode", "replace") == "update"))
     annotations_db.mark_labeled(str(inp), "pool", req["image"])
-    return {"bank": bank.summary()}
+    return {"bank": bank_summary(str(inp), state_dir)}
 
 
 @router.post("/predict")
 def predict(req: dict):
     """FR-19 / T-05 — the model's guesses for ONE image, so the user corrects
-    instead of drawing from scratch. Empty bank -> empty list, no forward pass.
-
-    ponytail: synchronous, and arm() mutates the process-wide model, same as
-    every other inference path here. Fine for one image and one labeler; give
-    predict its own model instance if a second concurrent user shows up."""
-    bank = Bank(str(deps.state_dir(checked_path(req["input_dir"]))))
-    mean = bank.mean_vpe()
-    if mean is None:
-        return {"boxes": []}
-    names, combined = mean
-    model = arm(names, combined, bank.model_or_default)
-    dets = predict_one(model, names, str(checked_path(req["image"])),
-                        req.get("conf", 0.25), req.get("conf_by_class", {}))
-    return {"boxes": dets}
+    instead of drawing from scratch. Empty bank -> empty list, no forward pass."""
+    inp = checked_path(req["input_dir"])
+    return vpe_client.predict(str(deps.state_dir(inp)), str(checked_path(req["image"])),
+                              req.get("conf", 0.25), req.get("conf_by_class", {}))
 
 
 @router.get("/history")
 def get_history(input_dir: str):
     """T-07 — every Evaluate run this project has recorded, for the accuracy-
     over-time chart. Lives on disk next to the bank, so it survives a reload."""
-    return {"history": bank_store.read_history(str(deps.state_dir(checked_path(input_dir))))}
+    return {"history": history_store.read_history(str(deps.state_dir(checked_path(input_dir))))}
 
 
 @router.post("/history")
 def add_history(req: dict):
-    """Append one point (read-modify-write, no lock -- see bank.py's
-    append_history) and return the history as it now stands."""
+    """Append one point (read-modify-write, no lock -- see
+    history.py's append_history) and return the history as it now stands."""
     d = deps.state_dir(checked_path(req["input_dir"]))
-    return {"history": bank_store.append_history(str(d), req["point"])}
+    return {"history": history_store.append_history(str(d), req["point"])}
 
 
 @router.delete("/history")
 def del_history(input_dir: str):
     d = deps.state_dir(checked_path(input_dir))
-    bank_store.history_path(str(d)).unlink(missing_ok=True)
+    history_store.history_path(str(d)).unlink(missing_ok=True)
     return {"history": []}
 
 
@@ -169,9 +172,10 @@ def relabel(req: dict, user: str | None = Depends(current_user)):
     inp = checked_path(req["input_dir"])
     if annotations_db.is_test(str(inp), req["image"]):
         raise HTTPException(400, "this image is in the test set -- it can never be taught to the model")
-    bank = Bank(str(deps.state_dir(inp)))
+    state_dir = str(deps.state_dir(inp))
     boxes = req["boxes"]
-    unknown = {b["cls"] for b in boxes} - set(bank.classes)
+    taught = {c["name"] for c in vpe_client.bank(state_dir)["classes"]}
+    unknown = {b["cls"] for b in boxes} - taught
     if unknown:
         raise HTTPException(
             400, f"unknown class(es) {sorted(unknown)} -- use Save to bank to teach a new class"
@@ -180,4 +184,4 @@ def relabel(req: dict, user: str | None = Depends(current_user)):
         raise HTTPException(400, "cannot read image")
     annotations_db.write_boxes(str(inp), "pool", req["image"], boxes, created_by=user,
                                 merge=(req.get("mode", "replace") == "update"))
-    return {"bank": bank.summary()}
+    return {"bank": bank_summary(str(inp), state_dir)}

@@ -14,6 +14,44 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Inference sidecar: YOLOE + the prompt bank (docs/REFACTOR_PLAN.md). Split
+  # out of `api` so the API service carries no torch, and so the two can be
+  # rebuilt and restarted independently -- reloading an API change no longer
+  # means re-loading a checkpoint.
+  #
+  # Not published to the host, and it must stay that way: it trusts its caller
+  # to have run every path through checked_path() already.
+  vpe:
+    build:
+      context: .                       # needs certs/ too
+      dockerfile: backend/Dockerfile.vpe
+      args:
+        APP_UID: ${APP_UID:-1000}      # must match api's -- both write under DATA_DIR
+    image: ct-flow-vpe
+    environment:
+      LABEL_TOOL_MODE: vm
+      LABEL_TOOL_VM_ROOT: /opt/mount/project
+    volumes:
+      # It reads the images it embeds, and owns <input_dir>/.ctflow/_bank/
+      # outright -- no other process writes there.
+      - ${DATA_DIR:-../data}:/opt/mount/project
+      # YOLOE checkpoints, auto-downloaded on first use per selected model
+      # (see backend/services/models.py) -- named so a restart doesn't
+      # re-fetch every weight from scratch.
+      - models:/models
+    # Requires an NVIDIA GPU + driver + the NVIDIA Container Toolkit on the
+    # host (`docker info` should list an `nvidia` runtime). No GPU available?
+    # Delete this block and rebuild with TORCH_INDEX_URL=.../whl/cpu instead
+    # (see backend/Dockerfile.vpe) -- inference still runs, just on CPU.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
   api:
     build:
       context: .                       # this repo's root
@@ -33,34 +71,29 @@ services:
       # still the file under each project's .ctflow/_bank/. See
       # docs/DB_MIGRATION_PLAN.md.
       DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool
+      VPE_URL: http://vpe:8001
     depends_on:
       db:
+        condition: service_healthy
+      vpe:
         condition: service_healthy
     volumes:
       # Everything the tool can see. Each project's labels/bank/test-set data
       # live in a .ctflow/ subfolder next to its own images, all still under
       # here -- the browser can only ever pick paths inside /opt/mount/project.
       - ${DATA_DIR:-../data}:/opt/mount/project
-      # YOLOE checkpoints, auto-downloaded on first use per selected model
-      # (see backend/services/models.py) -- named so a restart doesn't
-      # re-fetch every weight from scratch.
-      - models:/models
+      # Read-only: services/models.py::is_available() only stats this to tell
+      # the frontend which checkpoints are already cached. `vpe` is the one
+      # that downloads into it, and the one whose image seeds it -- a brand-new
+      # named volume is populated from the image of the container that mounts
+      # it first, and this image has nothing at /models. depends_on above is
+      # what guarantees `vpe` gets there first; don't drop it to speed up boot.
+      - models:/models:ro
     # Swagger UI (/docs), ReDoc (/redoc), and the raw spec (/openapi.json) --
     # not proxied through `web` (its catch-all only forwards /api/*), so this
     # is the only way to reach them against the Dockerized backend.
     ports:
       - "${API_PORT:-8000}:8000"
-    # Requires an NVIDIA GPU + driver + the NVIDIA Container Toolkit on the
-    # host (`docker info` should list an `nvidia` runtime). No GPU available?
-    # Delete this block and rebuild with TORCH_INDEX_URL=.../whl/cpu instead
-    # (see backend/Dockerfile) -- inference still runs, just on CPU.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     restart: unless-stopped
 
   web:

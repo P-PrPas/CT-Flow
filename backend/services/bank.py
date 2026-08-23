@@ -21,48 +21,12 @@ from pathlib import Path
 import torch
 from filelock import FileLock
 
-from . import annotations_db
 from . import models as model_registry
-
-HISTORY_MAX = 200
-
-
-def history_path(output_dir: str) -> Path:
-    return Path(output_dir) / "_bank" / "eval_history.json"
-
-
-def read_history(output_dir: str) -> list[dict]:
-    """T-07: every Evaluate run, kept next to the bank it measured. Lives on
-    disk so the learning curve survives a browser, a machine, and a colleague."""
-    p = history_path(output_dir)
-    if not p.exists():
-        return []
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []  # a truncated history is a nicety to lose, never an error to raise
-
-
-def append_history(output_dir: str, point: dict) -> list[dict]:
-    # ponytail: read-modify-write, no lock. Two people evaluating the same
-    # output_dir in the same second would drop a point -- reuse Bank.lock if
-    # that ever stops being hypothetical.
-    p = history_path(output_dir)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    hist = (read_history(output_dir) + [point])[-HISTORY_MAX:]
-    p.write_text(json.dumps(hist, ensure_ascii=False), encoding="utf-8")
-    return hist
 
 
 class Bank:
     def __init__(self, output_dir: str):
         self.dir = Path(output_dir)
-        # output_dir is always <input_dir>/.ctflow (see deps.state_dir) --
-        # only used by summary()'s DB-backed labeled/auto lookup, so a bank
-        # built against some other directory (as a couple of smoke-test
-        # fixtures do, to exercise embeddings in isolation) just never calls
-        # summary().
-        self.input_dir = self.dir.parent
         self.bank_dir = self.dir / "_bank"
         self.bank_dir.mkdir(parents=True, exist_ok=True)
         self.emb_path = self.bank_dir / "embeddings.pt"
@@ -77,7 +41,7 @@ class Bank:
         entirely, so `self.model` reads as None even though the bank is very
         much locked in practice -- those embeddings only ever came from
         DEFAULT_MODEL_ID, the one checkpoint that existed back then. Without
-        this, `bank.summary()["model"]` stays null forever, the frontend keeps
+        this, `classes_summary()["model"]` stays null forever, the frontend keeps
         rendering an editable model picker for an already-taught project, and
         picking a different model there does nothing (evaluate/predict never
         read it) or -- worse -- silently locks the bank to a model that
@@ -198,12 +162,17 @@ class Bank:
     def count(self, name: str) -> int:
         return len(self.embeddings.get(name, []))
 
-    def summary(self) -> dict:
-        status = annotations_db.list_by_status(str(self.input_dir), "pool")
+    def classes_summary(self) -> dict:
+        """The half of BankSummary that is actually the bank's to answer: what
+        it has been taught, and which checkpoint taught it.
+
+        Split out from summary() because this is everything the inference
+        sidecar can know (docs/REFACTOR_PLAN.md) -- `labeled`/`auto` are image
+        status in PostgreSQL, which belongs to the API service, not to the
+        process holding the embeddings. Keeping them apart is what lets the
+        sidecar drop its database dependency entirely."""
         return {
             "classes": [{"name": n, "count": self.count(n)} for n in self.classes],
-            "labeled": status["labeled"],
-            "auto": status["auto"],
             "model": self.model,  # null until the first box is saved -- model picker stays open until then
         }
 

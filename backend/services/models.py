@@ -1,38 +1,35 @@
 """Selectable YOLOE checkpoints.
 
+The catalog itself lives in backend/models.json, not in this file. Two
+processes need it and they are written in different languages: the Python
+inference sidecar resolves an id to a weight file to load, and the Go API
+serves the list to the frontend and reports which weights are already on disk
+(docs/REFACTOR_PLAN.md). A shared data file is the only arrangement where
+adding a checkpoint is one edit instead of two that can disagree -- and a
+disagreement here is not a crash, it is `GET /api/config` advertising a model
+the sidecar cannot load.
+
 Only the prompt-capable segmentation releases are listed -- the "-pf"
 (prompt-free, fixed open-vocabulary) checkpoints can't take set_classes(vpe),
 so arm()/extract_embedding() would break on them. Filenames are copied from
 ultralytics.utils.downloads.GITHUB_ASSETS_NAMES, which is what actually
-resolves an auto-download -- a typo here fails at load time, not at import.
+resolves an auto-download -- a typo there fails at load time, not at import.
 """
+import json
 from pathlib import Path
 
 from .. import config
+
+CATALOG_PATH = Path(__file__).resolve().parent.parent / "models.json"
+_raw = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
 
 # One selectable checkpoint, as returned by GET /api/config -- `id` is what a
 # client sends back as `model_id` (POST /api/label, /api/reembed): {id, family,
 # size, note, available} where `available` (bool) means the weight is already
 # on MODELS_DIR, vs. auto-downloading on first use.
-CATALOG = [
-    {"id": "yoloe-v8s-seg", "family": "YOLOE v8", "size": "S", "file": "yoloe-v8s-seg.pt",
-     "note": "oldest generation, smallest"},
-    {"id": "yoloe-v8m-seg", "family": "YOLOE v8", "size": "M", "file": "yoloe-v8m-seg.pt", "note": ""},
-    {"id": "yoloe-v8l-seg", "family": "YOLOE v8", "size": "L", "file": "yoloe-v8l-seg.pt", "note": ""},
-    {"id": "yoloe-11s-seg", "family": "YOLOE 11", "size": "S", "file": "yoloe-11s-seg.pt",
-     "note": "current default"},
-    {"id": "yoloe-11m-seg", "family": "YOLOE 11", "size": "M", "file": "yoloe-11m-seg.pt", "note": ""},
-    {"id": "yoloe-11l-seg", "family": "YOLOE 11", "size": "L", "file": "yoloe-11l-seg.pt", "note": ""},
-    {"id": "yoloe-26n-seg", "family": "YOLOE 26", "size": "N", "file": "yoloe-26n-seg.pt",
-     "note": "newest generation, smallest/fastest"},
-    {"id": "yoloe-26s-seg", "family": "YOLOE 26", "size": "S", "file": "yoloe-26s-seg.pt", "note": ""},
-    {"id": "yoloe-26m-seg", "family": "YOLOE 26", "size": "M", "file": "yoloe-26m-seg.pt", "note": ""},
-    {"id": "yoloe-26l-seg", "family": "YOLOE 26", "size": "L", "file": "yoloe-26l-seg.pt", "note": ""},
-    {"id": "yoloe-26x-seg", "family": "YOLOE 26", "size": "X", "file": "yoloe-26x-seg.pt",
-     "note": "newest generation, largest, best accuracy"},
-]
+CATALOG: list[dict] = _raw["catalog"]
 BY_ID = {m["id"]: m for m in CATALOG}
-DEFAULT_MODEL_ID = "yoloe-11s-seg"
+DEFAULT_MODEL_ID: str = _raw["default"]
 
 
 def checkpoint_path(model_id: str) -> str:
@@ -64,12 +61,18 @@ def demo():
     assert all("file" not in m for m in public_catalog())
     assert all(isinstance(m["available"], bool) for m in public_catalog())
     assert len(public_catalog()) == len(CATALOG)
+    # Every entry has to carry the keys both the frontend and the sidecar read;
+    # a half-filled row in models.json is the failure this file now invites.
+    for m in CATALOG:
+        assert {"id", "family", "size", "file", "note"} == set(m), m
+        assert m["file"].endswith(".pt"), m
+    assert len({m["id"] for m in CATALOG}) == len(CATALOG), "duplicate model id"
     try:
         checkpoint_path("not-a-real-model")
         assert False
     except ValueError:
         pass
-    print("models self-check OK")
+    print(f"models self-check OK ({len(CATALOG)} checkpoints from {CATALOG_PATH.name})")
 
 
 if __name__ == "__main__":

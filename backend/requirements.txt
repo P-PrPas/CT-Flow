@@ -1,10 +1,15 @@
-ultralytics>=8.4.48
-opencv-python>=4.13.0
-pillow>=12.2.0
-numpy
+# The API service. No torch, no ultralytics: inference and the prompt bank moved
+# to the sidecar (backend/requirements-vpe.txt, backend/vpe_service.py), which is
+# what takes ~2.5 GB of CUDA wheel out of this image. See docs/REFACTOR_PLAN.md.
 fastapi>=0.115.0
 uvicorn>=0.34.0
 python-multipart>=0.0.18
-filelock>=3.13.0
-httpx>=0.28.0
 psycopg2-binary>=2.9.9
+# Talking to the sidecar (services/vpe_client.py), and the parity harness.
+httpx>=0.28.0
+# Not for inference: decoding an upload to prove it is really an image, reading
+# image dimensions for YOLO/VOC export, and the ground-truth reader. headless
+# because a server never opens a window -- same imdecode/imread, no GUI stack,
+# and no libgl1 needed in the image.
+opencv-python-headless>=4.13.0
+numpy

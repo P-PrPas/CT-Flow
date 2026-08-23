@@ -166,7 +166,8 @@ def mark_auto(input_dir: str, image_paths: list[str]) -> None:
 
 
 def list_by_status(input_dir: str, kind: str) -> dict[str, list[str]]:
-    """{"labeled": [...], "auto": [...]} for Bank.summary()."""
+    """{"labeled": [...], "auto": [...]} -- the database half of BankSummary
+    (routers/pool.py::bank_summary assembles it with the bank's own half)."""
     project_id = get_or_create_project(input_dir)
     with db.connect() as conn, conn.cursor() as cur:
         cur.execute(

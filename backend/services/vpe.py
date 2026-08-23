@@ -3,6 +3,9 @@
 Mirrors the get_vpe() -> set_classes() pattern already proven in
 poc/vp_studio/inference.py, just against single images instead of video frames.
 """
+import threading
+from contextlib import contextmanager
+
 import cv2
 import torch
 from ultralytics import YOLOE
@@ -17,6 +20,31 @@ from ..services import models as model_registry
 # a real OOM.
 _models: dict[str, YOLOE] = {}
 _predictors: dict[str, YOLOEVPSegPredictor] = {}
+
+# arm() and set_prompts() both write to the shared YOLOE object -- class names,
+# nc, the SAVPE vectors -- and predict()/get_vpe() read it straight back. Two
+# projects using the same checkpoint therefore cannot be in flight at once: the
+# second arm() overwrites the first one's classes mid-batch and its predictions
+# come back decoded against the wrong class list. No exception, no wrong shape,
+# just wrong answers.
+#
+# Today that is hidden rather than fixed: sync FastAPI endpoints and
+# BackgroundTasks happen to serialise this work. The Go API will call this
+# service genuinely in parallel, so the serialisation has to become explicit
+# before it does.
+#
+# RLock, not Lock: a caller holding a batch's lock (see armed()) may reach
+# extract_embedding() on the same thread, which takes it again.
+# ponytail: one lock per checkpoint, held across a whole batch. It costs
+# nothing today -- one GPU cannot run two passes at once anyway. Give each
+# project its own model instance if that stops being true.
+_arm_locks: dict[str, threading.RLock] = {}
+_arm_locks_guard = threading.Lock()
+
+
+def model_lock(model_id: str) -> threading.RLock:
+    with _arm_locks_guard:
+        return _arm_locks.setdefault(model_id, threading.RLock())
 
 
 def get_model(model_id: str = model_registry.DEFAULT_MODEL_ID) -> YOLOE:
@@ -47,11 +75,15 @@ def _get_predictor(model_id: str, model: YOLOE) -> YOLOEVPSegPredictor:
 def extract_embedding(image_bgr, boxes: list[list[float]],
                        model_id: str = model_registry.DEFAULT_MODEL_ID) -> torch.Tensor:
     """boxes: list of [x1, y1, x2, y2] in pixel coords, all treated as the
-    same class -> one averaged embedding for this labeling action."""
+    same class -> one averaged embedding for this labeling action.
+
+    set_prompts() writes to the shared predictor and get_vpe() reads it back,
+    so the pair has to be atomic per checkpoint -- see model_lock()."""
     model = get_model(model_id)
     predictor = _get_predictor(model_id, model)
-    predictor.set_prompts(dict(bboxes=[list(b) for b in boxes], cls=[0] * len(boxes)))
-    return predictor.get_vpe(image_bgr)
+    with model_lock(model_id):
+        predictor.set_prompts(dict(bboxes=[list(b) for b in boxes], cls=[0] * len(boxes)))
+        return predictor.get_vpe(image_bgr)
 
 
 def arm(names: list[str], combined_vpe: torch.Tensor,
@@ -77,6 +109,25 @@ def arm(names: list[str], combined_vpe: torch.Tensor,
     if getattr(model, "predictor", None) is not None:
         model.predictor.model.names = model.model.names
     return model
+
+
+@contextmanager
+def armed(names: list[str], combined_vpe: torch.Tensor,
+          model_id: str = model_registry.DEFAULT_MODEL_ID):
+    """arm() plus exclusive use of the checkpoint for as long as the caller
+    needs it:
+
+        with armed(names, combined, model_id) as model:
+            for path in paths:
+                predict_one(model, names, path, conf)
+
+    The lock has to span the whole loop, not each predict: arm() sets the class
+    list once and every prediction after it is decoded against that list, so
+    releasing between images lets another project re-arm halfway through and
+    silently relabel the rest of the batch. Callers that arm and predict must
+    use this rather than calling arm() directly."""
+    with model_lock(model_id):
+        yield arm(names, combined_vpe, model_id)
 
 
 def predict_one(model: YOLOE, names: list[str], image_path: str,

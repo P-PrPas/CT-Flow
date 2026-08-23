@@ -89,6 +89,12 @@ def delete_project(input_dir: str) -> None:
 
 
 def demo():
+    # Create the schema first. Every other entry point that touches this module
+    # does (the API applies it at boot, smoke_test calls init_schema), so
+    # running against an already-populated database hid the omission -- and CI
+    # hands us an empty PostgreSQL, which is the honest starting state.
+    init_schema()
+
     missing = "/nonexistent/project/for/selfcheck"
     assert _project_id(missing) is None
     assert get_classes(missing, "pool") == []

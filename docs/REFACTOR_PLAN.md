@@ -452,3 +452,37 @@ CT-Flow/
 - [ ] image `api` เล็กกว่า 50 MB
 - [ ] `README.md`, `docs/ARCHITECTURE.md`, `docs/API_REFERENCE.md`, `docs/PROJECT_STATUS.md`, `.env.example` อัปเดตตรงกับของจริง
 - [ ] `frontend/` มี 0 บรรทัดที่เปลี่ยน (`git diff --stat main -- frontend/` ว่างเปล่า)
+
+---
+
+## 10. บันทึกความคืบหน้าจริง (ปรับปรุงระหว่างทำ)
+
+เอกสารข้างบนคือแผนที่เขียนไว้ก่อนเริ่ม ส่วนนี้บันทึกสิ่งที่ทำจริงและจุดที่ต่างจากแผน
+
+### เฟส 0 — parity harness ✅ (2026-08-23)
+
+- `_smoke_test.py` รับ `SMOKE_BASE_URL` แล้ว ยิงใส่ backend ตัวไหนก็ได้ · ทดสอบผ่านครบ 3 โหมด (in-process, HTTP+auth off+vm, HTTP+auth on+local)
+- **เกินแผน:** ต้องสร้าง `_dbcheck.py` เพิ่ม (harness เดิม import `annotations_db` ซึ่งจะถูกลบในเฟส 3 — harness ที่ import โค้ดที่ตัวเองตรวจ ใช้ตรวจ Go ไม่ได้)
+- **เกินแผน:** upload size cap กับ auth section เดิมพึ่ง monkeypatch/env ของ process เดียวกัน → เปลี่ยนเป็นถาม server จริง (`cfg["mode"]`, `/api/auth/me`) ได้ coverage **เพิ่มขึ้น**: T-13's vm-mode refusal ถูก assert จริงแล้ว จากเดิมที่ไม่เคยทดสอบ
+- golden vectors 4 ชุดใน `backend/testdata/` + `_gen_testdata.py --check` เข้า CI แล้ว · ยืนยันว่าจับ regression จริงด้วยการขยับ IoU threshold เป็น 0.4
+- `_parity.py` 43 เคส · ยืนยันสองทาง: 43/43 เมื่อชี้ที่ server เดียวกัน, และรายงาน diff ระดับฟิลด์เมื่อชี้ที่ server ที่ตั้ง mode ต่างกัน
+
+### เฟส 1 — แยก vpe sidecar ✅ (2026-08-23)
+
+- `vpe_service.py` (6 endpoint) + `services/vpe_client.py` + `Dockerfile.vpe` + compose service `vpe`
+- **ยืนยัน R1 เป็นของจริง** — `arm()` race ที่หัวข้อ 4.1 ทำนายไว้มีอยู่จริงในโค้ดเดิม แก้ด้วย `RLock` ต่อ `model_id` + `armed()` context manager ที่ถือ lock ทั้ง batch
+- **เกินแผน:** ต้องแยก `services/history.py` ออกจาก `bank.py` — ไม่งั้น API service ยังลาก torch เข้ามาเพราะ `read_history` อยู่ในไฟล์เดียวกับ `Bank`
+- **เกินแผน:** ต้องทำ `backend/models.json` — sidecar ต้องใช้ `checkpoint_path()` ⇒ `models.py` ลบไม่ได้ ⇒ ถ้าไม่แยกเป็นไฟล์ข้อมูลจะได้ catalog สองชุดที่ไม่ตรงกันได้ (แผนเดิมข้อ 2.1 บอกให้ port `models.py` ไป Go เฉย ๆ ซึ่งผิด)
+- **เกินแผน:** ย้าย bank unit test ออกเป็น `_bank_test.py` — smoke test ต้องรันได้โดยไม่มี torch เพราะเฟส 2 มันต้องขับ Go binary
+- **Divergence ที่ยอมรับ 1 จุด:** `"cannot read image"` ไม่ได้มาก่อน `"no boxes"`/test-set refusal อีกต่อไป (decode ย้ายไป sidecar) — แต่ละเงื่อนไขเดี่ยว ๆ ยังตอบเหมือนเดิมเป๊ะ
+- **ผลลัพธ์:** API image **12.3 GB → 573 MB** · parity 43/43 เทียบกับ monolith ก่อนแยก (รัน 80f652e คู่กันจริง)
+
+### เฟส 2.1+2.2 — Go: config/browse/image + auth ✅ (2026-08-23)
+
+- `cmd/api` + `internal/{config,models,images,auth,api}` · strangler proxy ไป service `legacy`
+- **ต่างจากแผน:** รวมกลุ่ม 2.1 กับ 2.2 เป็น commit เดียว — ถ้า port `/api/browse` ไป Go ก่อนมี middleware จะเกิดช่วงที่ endpoint นั้นเข้าถึงได้โดยไม่ต้อง login บน deployment ที่เปิด auth
+- ยืนยัน R2: test ชุด path safety **fail จริง** เมื่อเปลี่ยนเป็น `strings.HasPrefix` (`/opt/mount/projectX` หลุด)
+- ยืนยัน R3 สองทาง: golden vectors (Python → Go) และ live test (cookie ที่ Go ออก → Python ยอมรับผ่าน proxy)
+- **บทเรียน:** ห้ามตั้งชื่อไฟล์ `Dockerfile.go` — `go vet ./...` พยายาม parse เป็น Go source (เปลี่ยนเป็น `Dockerfile.api`)
+- compose ตอนนี้: `db` · `vpe` · `legacy` (FastAPI) · `api` (Go, **35.5 MB**) · `web`
+- ยืนยัน: smoke test ผ่านผ่าน Go front door · parity 43/43 · UI ที่ :3000 ใช้งานได้ครบ

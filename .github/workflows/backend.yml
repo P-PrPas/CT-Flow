@@ -51,6 +51,13 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U labeltool" --health-interval 5s
           --health-timeout 5s --health-retries 10
+    env:
+      # services/models.py::is_available() checks this exact dir (see
+      # config.py) -- the cache path and the download destination below both
+      # have to agree with it, or `available` reads False even after a
+      # successful download.
+      MODELS_DIR: ${{ github.workspace }}/models
+      DATABASE_URL: postgresql://labeltool:labeltool@localhost:5432/labeltool
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,18 +70,26 @@ jobs:
           pip uninstall -y opencv-python
           pip install opencv-python-headless
 
-      # The weight is not in the repo (28 MB). Naming it without a directory
-      # makes ultralytics fetch it into the working dir on first use.
       - name: Cache model weight
+        id: cache-weight
         uses: actions/cache@v4
         with:
-          path: yoloe-11s-seg.pt
+          path: ${{ env.MODELS_DIR }}/yoloe-11s-seg.pt
           key: yoloe-11s-seg
+
+      # actions/cache only restores an existing cache -- it never fetches
+      # anything on a miss (e.g. the very first run, or a cache eviction).
+      # Ultralytics knows how to resolve this exact filename to a download
+      # URL (ultralytics.utils.downloads.GITHUB_ASSETS_NAMES); running from
+      # inside MODELS_DIR makes it land where is_available() looks.
+      - name: Download model weight (cache miss)
+        if: steps.cache-weight.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$MODELS_DIR"
+          cd "$MODELS_DIR" && python -c "from ultralytics import YOLOE; YOLOE('yoloe-11s-seg.pt')"
 
       - name: Smoke test
         env:
-          MODEL_PATH: yoloe-11s-seg.pt
           YOLO_CONFIG_DIR: /tmp
           MPLCONFIGDIR: /tmp
-          DATABASE_URL: postgresql://labeltool:labeltool@localhost:5432/labeltool
         run: python -m backend._smoke_test

@@ -41,3 +41,7 @@
 **`checked_path()` / path safety** ตัวตรวจสอบกลางที่ทุก path จาก browser ต้องผ่านก่อนแตะดิสก์จริง ป้องกันไม่ให้ browser ขอเข้าถึงไฟล์นอกขอบเขตที่อนุญาต (โดยเฉพาะสำคัญใน `vm` mode)
 
 **`ponytail:`** convention คอมเมนต์ที่พบในโค้ดของ repo นี้ — ใช้ทำเครื่องหมายจุดที่ตั้งใจเลือกวิธีง่ายที่สุดที่ยังใช้งานได้ พร้อมระบุขีดจำกัดและแนวทางอัพเกรดถ้าจำเป็นในอนาคต (เช่นใน `bank.py`'s mean-pooling และ `job_tracker.py`'s in-memory storage)
+
+**Annotation storage (T-21)** ตั้งแต่ 2026-08-21 ป้าย/กล่อง/สถานะ label ทั้งหมด (สิ่งที่เคยเป็น `labels/*.txt`, `classes.txt`, `testset.json`) ย้ายจากไฟล์ไปตาราง PostgreSQL แล้ว (`services/annotations_db.py`) เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกัน — **prompt bank (embedding) ไม่ย้าย ยังเป็นไฟล์เหมือนเดิม** เพราะเป็นคนละปัญหากัน (ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md))
+
+**Export** การดาวน์โหลด annotation ของโปรเจกต์เป็นไฟล์ในรูปแบบที่เลือกได้ (`GET /api/export`) — YOLO (กลับไปเป็น `labels/*.txt` + `classes.txt` แบบเดิม), COCO (JSON เดียว), หรือ Pascal VOC (XML ต่อภาพ) แทนที่การมีไฟล์ YOLO ติดอยู่บนดิสก์ตลอดเวลาแบบเดิมก่อน T-21

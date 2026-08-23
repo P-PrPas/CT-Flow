@@ -1,6 +1,6 @@
 # Label Tool — แผนย้าย annotation storage ไป PostgreSQL + Export format selection
 
-> **สถานะ:** ฉบับร่างสำหรับวางแผน — ยังไม่ implement ยังไม่มีบรรทัดโค้ดไหนถูกแก้เพื่อเอกสารนี้ รอคำสั่งเริ่มงานจริง
+> **สถานะ: implement แล้ว (T-21–T-24 เสร็จ, T-25 เขียน config แล้วแต่ยังไม่ได้ build image จริง)** — ดูหัวข้อ 10 "สถานะการ implement จริง" ท้ายเอกสารสำหรับรายละเอียดว่าทำอะไรไปแล้วบ้าง ต่างจากแผนเดิมตรงไหน และทดสอบผ่านอะไรมาบ้าง เอกสารด้านล่างนี้คือแผนเดิมที่เขียนไว้ก่อนเริ่มงาน คงไว้เป็นบริบท ไม่ได้แก้ย้อนหลังทุกจุด
 >
 > **ที่มา:** งานแทรกที่ตกลงกับทีม (2026-08-21) แรงจูงใจหลักคือ (1) ต้องการรองรับหลายคนแก้ project เดียวกันพร้อมกัน โดยมีแผนทำระบบ login + workspace ในอนาคตแบบ Label Studio และ (2) ทีม infra อยากวาง DB เป็นรากฐานสำหรับอนาคต ส่วน scope ที่ตกลงกันคือ **ย้ายเฉพาะ label/box metadata (สิ่งที่ตอนนี้เป็น YOLO txt) ไปเป็นตาราง — `embeddings.pt` (prompt bank) ยังเป็นไฟล์เหมือนเดิม**
 >
@@ -198,3 +198,30 @@ db:
 - **เกณฑ์ยอมรับ:** `docker compose up` จาก clean state ได้ DB พร้อม schema, `api` รอ `db` healthy ก่อน serve, ตัวแปร `POSTGRES_PASSWORD` มาจาก `.env` เท่านั้น (ไม่ commit ลง repo)
 
 **ลำดับ:** T-21 → T-22 → T-23 (คู่ขนานกับ T-24 ได้ เพราะ export ไม่ผูกกับ migration script) → T-25 ปิดท้าย
+
+---
+
+## 10. สถานะการ implement จริง (2026-08-21)
+
+T-21–T-24 ทำเสร็จและทดสอบผ่านจริงแล้ว (`_smoke_test.py` เต็มรูปแบบ รวม `/api/label`, `/api/relabel`, `/api/testset/*`, `/api/evaluate`, `/api/autolabel`, model lock, reembed, auth — ผ่านทั้งหมดกับ PostgreSQL จริงในเครื่อง + `services/annotations_db.py`, `services/db.py`, `_migrate_to_db.py` มี self-check ของตัวเองที่รันผ่านแล้วเช่นกัน) T-25 เขียน config ครบแล้ว (docker-compose.yml + .env.example + CI) แต่ **ยังไม่ได้ build image `api` จริงเพื่อยืนยัน runtime** — ตรวจแค่ `docker compose config` (syntax/interpolation ถูกต้อง) และเปิด service `db` เดี่ยว ๆ ผ่าน compose แล้วเห็น healthcheck เริ่มทำงาน
+
+### สิ่งที่ต่างจากแผนเดิมที่เขียนไว้ก่อนเริ่มงาน (แก้ระหว่าง implement)
+
+- **`Bank.classes` (`services/bank.py`) ไม่ต้องเปลี่ยนเลย** — หัวข้อ 4.2 ของแผนเดิมเข้าใจผิดว่า `Bank.classes` ต้องย้ายไปอ่านจาก DB เพื่อรักษา sync กับ label storage แต่พอไล่โค้ดจริงแล้วพบว่า `Bank.classes` (= `list(self.embeddings.keys())`) เป็นคำถาม **"บอทสอนคลาสนี้จาก embedding หรือยัง"** ล้วน ๆ (ใช้ตัดสิน `/api/relabel`'s unknown-class check และเป็น `names` ที่ป้อนเข้า `set_classes()`) ซึ่งเป็นคนละคำถามกับ "DB มีคลาสนี้ในตาราง label หรือยัง" — โดยธรรมชาติของ flow (`bank.add()` เพิ่ม embedding ก่อน แล้ว `annotations_db.write_boxes()` ค่อยสร้างแถวคลาสใน DB ทีหลังในคำขอเดียวกันเสมอ) DB pool classes จะเป็น subset ของ `bank.embeddings.keys()` เสมอ ไม่มีทางเห็นคลาสที่ DB มีแต่ embeddings ไม่มี — จึงไม่ต้องผูกสองระบบเข้าด้วยกัน ปล่อยให้ `bank.py` ไม่ต้องรู้จัก DB เรื่อง classes เลยก็ยังถูกต้อง (ยัง import `annotations_db` เพื่อใช้แค่ `list_by_status()` ใน `summary()` เท่านั้น)
+- **ตัด column `annotations.source`** ('manual'/'auto') ออกจาก schema ที่ร่างไว้ตอนแรก — ไล่โค้ดเดิมแล้วพบว่าไม่มี endpoint ไหนอ่านค่าระดับกล่องแบบนี้เลย ระบบเดิม track แค่ระดับ "ภาพ" (`bank.labeled`/`bank.auto`) ซึ่งยังคงอยู่ (ย้ายเป็น `images.status`) — คอลัมน์นี้เป็นการเผื่ออนาคตที่ไม่มีใครขอ ตัดตาม YAGNI
+- **`created_by`** เก็บไว้ (ต่างจาก `source`) เพราะผูกตรงกับเหตุผลหลักของงานนี้ (multi-user) และมี pattern เดิมรองรับอยู่แล้ว (`labeled_by` ใน bank instances, FR-31)
+- **`classes.project_id` และ `images.project_id` ใส่ `ON DELETE CASCADE`** เพิ่มจากแผนเดิม (ตอนร่างลืมใส่ที่ตารางนี้) — จำเป็นสำหรับให้ `annotations.class_id ... ON DELETE CASCADE` ทำงานถูกต้องตอนลบทั้ง project (ใช้ใน test/migration cleanup, `annotations_db.delete_project()`)
+- **driver: `psycopg2-binary` ไม่ใช่ `psycopg[binary]` (v3)** ตามที่แผนเดิมเสนอ — สภาพแวดล้อมที่ implement มี `psycopg2-binary` ติดตั้งไว้ล่วงหน้าอยู่แล้ว และ syntax แทบไม่ต่างกันสำหรับการใช้งานแบบ plain SQL ที่นี่ ไม่กระทบดีไซน์
+- **`groundtruth.py` และ `yolo_labels.py` ไม่ได้ลบทิ้ง** ต่างจากที่คิดไว้ตอนแรกว่าจะกลายเป็น dead code — พบว่า `backend/_experiment_conf.py` (สคริปต์ทดลอง T-01) ยังพึ่ง `metrics.load_ground_truth()` (เวอร์ชันไฟล์เดิม) อ่านโฟลเดอร์ YOLO ดิบ (`data/conveyor_pvc/test`) ที่ไม่ใช่ `.ctflow` project เลย จึงคงฟังก์ชันเดิมไว้ครบ (ไม่แตะ) แล้วเพิ่ม `metrics.load_ground_truth_db(input_dir)` เป็นฟังก์ชันใหม่แยกต่างหากให้ `/api/evaluate` เรียกแทน — สองฟังก์ชันอยู่คู่กันโดยเจตนา ไม่ใช่ความสับสน
+- **เลิก mirror `labels/*.txt`/`classes.txt`/`testset.json` ไปดิสก์ตามที่ Q1 เสนอไว้เป็นค่าเริ่มต้น** — ยืนยันแล้วว่าไม่มีใครค้าน ทำจริงตามนั้น: หลัง label ผ่าน `/api/label`/`/api/relabel`/`/api/testset/label` จะไม่มีไฟล์ label เขียนลงดิสก์อีกต่อไป มีแต่ `_bank/embeddings.pt` + `_bank/metadata.json` (prompt bank) เท่านั้นที่ยังเป็นไฟล์ ต้องใช้ `/api/export` เพื่อได้ไฟล์ YOLO/COCO/VOC กลับมา
+
+### ไฟล์ที่เพิ่ม/แก้จริง
+
+**ใหม่:** `backend/schema.sql`, `backend/services/db.py`, `backend/services/annotations_db.py`, `backend/routers/export.py`, `backend/_migrate_to_db.py`
+**แก้:** `backend/services/bank.py` (ตัด `mark_labeled`/`mark_auto`/`write_yolo_labels`/`self.labeled`/`self.auto`, เพิ่ม `self.input_dir` + DB-backed `summary()`), `backend/services/metrics.py` (เพิ่ม `load_ground_truth_db`), `backend/routers/pool.py`, `backend/routers/testset.py` (เขียนใหม่ทั้งไฟล์), `backend/routers/jobs.py` (evaluate/autolabel), `backend/deps.py` (ตัด `test_dir()` ที่ไม่ใช้แล้ว), `backend/app.py` (startup hook เรียก `db.init_schema()`, เพิ่ม export router), `backend/_smoke_test.py`, `backend/requirements.txt`, `docker-compose.yml`, `.env.example`, `.github/workflows/backend.yml`
+
+### สิ่งที่ยังไม่ทำ / ยังไม่ยืนยัน
+
+- **`docker compose build api` ยังไม่ได้รันจริง** ในรอบ implement นี้ (torch cu126 build ใช้เวลานาน) — โค้ด backend ทดสอบผ่านนอก Docker แล้วด้วย Python 3.13 + torch/torchvision CPU + PostgreSQL จริง (`docker run postgres:16-alpine`) ไม่ใช่ผ่าน container `api` ที่ build จาก `backend/Dockerfile` โดยตรง — ความเสี่ยงที่เหลือคือเรื่อง build/packaging เท่านั้น (dependency ติดตั้งสำเร็จไหมใน image, non-root user เขียน schema ได้ไหม) ไม่ใช่ความถูกต้องของ logic
+- **Frontend ไม่ถูกแตะเลย** ตามที่ตกลง scope ไว้ (backend/infra เท่านั้นในรอบนี้) — `/api/export` ยังไม่มีปุ่มเลือก format บน UI, และ endpoint response ทุกตัวมีรูปร่างเหมือนเดิมทุกประการ (ไม่ควรกระทบ frontend ที่มีอยู่แล้ว เพราะ contract ไม่เปลี่ยน) แต่ยังไม่ได้ทดสอบกับ frontend จริง
+- **Migration script (`_migrate_to_db.py`) ยังไม่ได้รันกับโปรเจกต์เก่าจริง** (เช่น `iron_ore`, `conveyor_pvc` ที่กล่าวถึงในเอกสารอื่น) — ทดสอบแค่กับ fixture จำลองใน self-check เท่านั้น เพราะไม่มีโปรเจกต์เก่าเหล่านั้นอยู่ใน environment ที่ implement

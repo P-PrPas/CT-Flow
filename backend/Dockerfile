@@ -37,13 +37,13 @@ COPY backend/ backend/
 
 ENV MODELS_DIR=/models \
     LABEL_TOOL_MODE=vm \
-    LABEL_TOOL_VM_ROOT=/data \
+    LABEL_TOOL_VM_ROOT=/opt/mount/project \
     YOLO_CONFIG_DIR=/tmp \
     MPLCONFIGDIR=/tmp \
     PYTHONUNBUFFERED=1
 
 # NFR-07 -- not root. The UID has to match whoever owns the host folder you
-# bind-mount at /data, or the container cannot write labels into it:
+# bind-mount at /opt/mount/project, or the container cannot write labels into it:
 #   docker compose build --build-arg APP_UID=$(id -u) api
 # Docker Desktop on Windows/macOS ignores mount ownership, so the default is
 # only a real decision on Linux hosts.

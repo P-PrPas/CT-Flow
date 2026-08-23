@@ -11,19 +11,24 @@ from fastapi.testclient import TestClient
 
 from .app import app
 from .routers import uploads
+from .services import annotations_db
 from .services import auth
+from .services import db as db_conn
 from .services import models as model_registry
 from .services.bank import Bank
 
 HERE = Path(__file__).parent
 POOL = str(HERE / "test_pool")
-# input_dir is now the only path a client ever sends -- the bank and the
-# test-set manifest both live in a fixed .ctflow subfolder of it (see
-# backend/deps.py), nested inside the fixture pool itself rather than beside it.
+# input_dir is now the only path a client ever sends -- the bank still lives
+# in a fixed .ctflow subfolder of it (see backend/deps.py); labels and the
+# test-set manifest live in PostgreSQL, keyed by this same POOL path (see
+# services/annotations_db.py).
 OUT = Path(POOL) / ".ctflow"
 TEST = OUT / "testset"
 if OUT.exists():
     shutil.rmtree(OUT)
+db_conn.init_schema()
+annotations_db.delete_project(POOL)
 
 c = TestClient(app)
 
@@ -78,13 +83,14 @@ r = c.post("/api/label", json={
 assert r.status_code == 409, r.text
 print("model lock: mismatched model_id on an existing bank rejected (409)")
 
-label_file = OUT / "labels" / (Path(target).stem + ".txt")
-assert label_file.exists() and label_file.read_text().startswith("0 "), label_file
-print("yolo label:", label_file.read_text())
+saved0 = annotations_db.read_boxes(POOL, "pool", target)
+assert saved0 and saved0[0]["cls"] == "test_item", saved0
+print("annotation stored in DB:", saved0)
 
-# reload from disk -- bank must round-trip
+# reload from disk -- bank must round-trip (embeddings/classes are still a file)
 reloaded = Bank(str(OUT))
-assert reloaded.classes == ["test_item"] and reloaded.labeled == [target]
+assert reloaded.classes == ["test_item"]
+assert annotations_db.list_by_status(POOL, "pool")["labeled"] == [target]
 
 r = c.post("/api/score", json={"input_dir": POOL, "images": images[1:]})
 assert r.status_code == 200, r.text
@@ -134,6 +140,10 @@ assert r.status_code == 200, r.text
 r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 still_correct = r.json()["boxes"]
 assert still_correct and still_correct[0]["cls"] == "test_item", still_correct
+# T-21: the DB-backed class registry (services/annotations_db.py) must keep
+# the same append-only ordering the old classes.txt guaranteed.
+assert annotations_db.get_classes(POOL, "pool") == ["test_item", "aaa_new_class"], \
+    annotations_db.get_classes(POOL, "pool")
 print("class order stable after adding 'aaa_new_class':", still_correct)
 
 # /api/relabel: fix a generated label directly -- no new embeddings, unlike /api/label
@@ -378,7 +388,7 @@ b.add("a", _torch.zeros(1, 4), "img1.jpg", [0, 0, 1, 1])
 b.add("a", _torch.ones(1, 4), "img2.jpg", [0, 0, 1, 1])
 b.add("b", _torch.full((1, 4), 2.0), "img3.jpg", [0, 0, 1, 1])
 b.lock_model("yoloe-11s-seg")
-labels_before, instances_before = b.labeled, json.loads(json.dumps(b.instances))  # deep copy for comparison
+instances_before = json.loads(json.dumps(b.instances))  # deep copy for comparison
 
 new = {"a": [_torch.full((1, 4), 9.0), _torch.full((1, 4), 8.0)], "b": [_torch.full((1, 4), 7.0)]}
 b.reembed("yoloe-11m-seg", new)
@@ -386,7 +396,7 @@ assert b.model == "yoloe-11m-seg"
 assert [t.tolist() for t in b.embeddings["a"]] == [[[9.0] * 4], [[8.0] * 4]]
 assert [t.tolist() for t in b.embeddings["b"]] == [[[7.0] * 4]]
 assert b.classes == ["a", "b"]  # insertion order survived the swap
-assert b.labeled == labels_before and b.instances == instances_before  # provenance/labels untouched
+assert b.instances == instances_before  # provenance untouched
 assert Bank(str(LOCK)).model == "yoloe-11m-seg"  # persisted, not just in-memory
 
 try:
@@ -487,4 +497,5 @@ assert c.get("/api/auth/me").json() == {"enabled": False, "user": None}
 assert c.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
 shutil.rmtree(OUT)
+annotations_db.delete_project(POOL)
 print("SMOKE TEST OK")

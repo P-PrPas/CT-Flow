@@ -6,7 +6,7 @@
 
 - **รูปแบบ error:** ทุก endpoint คืน `HTTPException` ของ FastAPI เมื่อผิดพลาด → body เป็น `{"detail": "<ข้อความ>"}` ฝั่ง frontend (`lib/api.ts`) จับคู่กับสิ่งนี้โดยตรงใน `request()`: โยน `Error(data.detail)` เมื่อ response ไม่ ok
 - **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, รูปภาพ) ต้องผ่าน `deps.checked_path()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.path_allowed()` (นอกขอบเขต `vm` mode) จะได้ `403`
-- **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank, ป้าย YOLO, และ test-set manifest ทั้งหมดอยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()` / `deps.test_dir()`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
+- **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank อยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()`) ส่วนป้ายและ test-set membership อยู่ใน PostgreSQL คีย์ด้วย `input_dir` เดียวกัน (T-21, ดู `services/annotations_db.py`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
 - **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
 - **Auth:** ถ้าตั้ง `LABEL_TOOL_USERS` ไว้ ทุก endpoint **ยกเว้น** `GET /api/config` และ `/api/auth/*` ต้องมี session cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้ง ระบบไม่มี login เลยและทุก endpoint เปิดเหมือนเดิม (ดู `services/auth.py`)
@@ -90,7 +90,7 @@
 - **Response:** `{"boxes": [Box...]}`
 
 ### `POST /api/label`
-บันทึกป้าย: สกัด SAVPE embedding เข้า bank ต่อคลาส, mark ภาพว่า labeled, เขียนไฟล์ label YOLO format
+บันทึกป้าย: สกัด SAVPE embedding เข้า bank ต่อคลาส, mark ภาพว่า labeled, เขียนกล่องลง PostgreSQL (T-21)
 
 - **Body:** `{"input_dir": str, "image": str, "boxes": [Box...], "model_id": str, "mode": "replace"|"update"}` (`mode` default `"replace"`, `model_id` default คือ `default_model` จาก `GET /api/config`)
 - **Response:** `{"bank": BankSummary}`
@@ -133,7 +133,7 @@
 
 ## Test set (`routers/testset.py`, prefix `/api/testset`)
 
-Ground truth สำหรับวัดผล ตั้งใจให้แยกขาดจาก prompt bank โดยสิ้นเชิง — **ไม่มีการคัดลอกไฟล์ภาพ**: test set คือภาพในพูลที่ถูก "แปะป้าย" ไว้ใน manifest (`<input_dir>/.ctflow/testset/testset.json`, ดู `services/groundtruth.py`) ดังนั้น path ของภาพ test set กับภาพในพูลคือ path เดียวกันเป๊ะ ๆ ไม่มี `/api/testset/session` แยกอีกต่อไป — `POST /api/session` (`routers/pool.py`) คืน state ของ test set มาให้พร้อมกันแล้ว
+Ground truth สำหรับวัดผล ตั้งใจให้แยกขาดจาก prompt bank โดยสิ้นเชิง — **ไม่มีการคัดลอกไฟล์ภาพ**: test set คือภาพในพูลที่ถูก "แปะป้าย" ไว้เป็นแถวแยกใน PostgreSQL (`kind='testset'`, ดู `services/annotations_db.py`, T-21) ดังนั้น path ของภาพ test set กับภาพในพูลคือ path เดียวกันเป๊ะ ๆ ไม่มี `/api/testset/session` แยกอีกต่อไป — `POST /api/session` (`routers/pool.py`) คืน state ของ test set มาให้พร้อมกันแล้ว
 
 ### `POST /api/testset/import`
 แปะป้ายภาพจากพูลว่าเป็น test set (ไม่คัดลอกไฟล์ — ข้ามภาพที่แปะป้ายอยู่แล้ว)
@@ -185,7 +185,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 - **ผลลัพธ์ (`result`):** `metrics.evaluate(gt, pred)` รวมกับ `{"conf": conf, "conf_by_class": {...}}` — ดูรูปแบบเต็มในหัวข้อ `services/metrics.py` ของ [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ### `POST /api/autolabel`
-เขียนป้าย YOLO ให้ภาพที่ระบุโดยตรงจาก bank (background)
+เขียนป้ายลง PostgreSQL ให้ภาพที่ระบุโดยตรงจาก bank (background)
 
 - **Body:** `{"input_dir": str, "images": [path...], "conf": float, "conf_by_class": {cls: float}}` (`conf` default `0.25`)
 - **Response:** `{"job_id": str, "total": int}`
@@ -200,7 +200,19 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 - **Response:** `{"job_id": str, "total": int}` — `total` คือจำนวน instance รวมทุกคลาส (ไม่ใช่จำนวนภาพ)
 - **400** ถ้า bank ยังไม่มีโมเดล (`bank.model is None` — ยังไม่เคยบันทึกกล่องแรกเลย ไม่มีอะไรให้ reembed), ถ้า `model_id` เท่ากับโมเดลปัจจุบันอยู่แล้ว, หรือ `model_id` ไม่อยู่ใน catalog
 - **พฤติกรรม:** วน `bank.instances` ทุกคลาสทุก instance → อ่าน `source_image` ใหม่จากดิสก์ → `extract_embedding(img, [bbox], model_id)` ทีละตัว → เมื่อครบทุก instance แล้วค่อยเรียก `bank.reembed(model_id, new_embeddings)` ครั้งเดียวเพื่อ commit แบบ atomic (แทนที่ embedding ทั้งหมด + สลับ `bank.model` พร้อมกัน) — ถ้า job ล้มเหลวกลางทาง (เช่นภาพต้นทางถูกย้าย/ลบ) bank เดิมจะไม่ถูกแตะเลย เพราะ commit เกิดครั้งเดียวตอนจบเท่านั้น
-- **ไม่แตะ:** `labels/*.txt`, `classes.txt`, `bank.instances` (provenance), `bank.labeled`/`bank.auto` — เปลี่ยนแค่เวกเตอร์ใน `embeddings.pt` กับ `bank.model`
+- **ไม่แตะ:** PostgreSQL (labels, class order, image status), `bank.instances` (provenance) — เปลี่ยนแค่เวกเตอร์ใน `embeddings.pt` กับ `bank.model`
 - **ผลลัพธ์ (`result`):** `{"bank": BankSummary}`
 
 **สัญญาร่วมของ background job ทั้งสี่ตัว:** สร้างผ่าน `job_tracker.create(total)` → tick progress ทีละหน่วยงาน → `finish(result)` เมื่อสำเร็จ หรือ `fail(error)` เมื่อ exception — ฝั่ง frontend ใช้ `lib/api.ts`'s `runJob()` POST ไปเริ่ม job แล้ว poll `/api/jobs/{id}` ทุก 400ms จนกว่า `finished` · "arm โมเดล" ใน predict/score/evaluate/autolabel หมายถึง `vpe.arm(names, combined, bank.model_or_default)` เสมอ ไม่มี body ตัวไหนรับ `model_id` จาก client ไปกำหนดว่าจะ arm ด้วยโมเดลไหน — **ยกเว้น `/api/reembed`** ที่ `model_id` ใน body คือเป้าหมายที่ตั้งใจจะเปลี่ยนไปโดยตรง (ตรวจสอบแล้วว่าไม่ใช่ค่าเดิมและอยู่ใน catalog ก่อนเริ่ม job)
+
+---
+
+## Export (`routers/export.py`, T-24)
+
+ดาวน์โหลด annotation ของโปรเจกต์เป็น format ที่เลือกได้ อ่านตรงจาก PostgreSQL (`services/annotations_db.py`) ไม่ใช่ background job (ไม่มี inference, เร็วพอที่จะ synchronous ได้) — ไม่ใช้ตัวไหนแก้ state ทั้งสิ้น
+
+### `GET /api/export`
+- **Query:** `input_dir` (str), `format` (`"yolo"` default | `"coco"` | `"voc"`), `kind` (`"pool"` default | `"testset"`)
+- **Response:** ไฟล์แนบ (`Content-Disposition: attachment`) — `application/zip` (yolo: `classes.txt` + `labels/*.txt`, voc: หนึ่ง XML ต่อภาพ) หรือ `application/json` (coco: `{images, annotations, categories}` เดียว)
+- **400** ถ้า `format`/`kind` ไม่รู้จัก, หรือไม่มีอะไรให้ export (`kind` นั้นว่างเปล่า)
+- พิกัดในตารางเป็น pixel อยู่แล้ว (ไม่เหมือน YOLO txt เดิมที่ normalize) — yolo/voc export ต้องเปิดภาพเพื่ออ่านขนาดตอนแปลงกลับเป็น normalized/แสดงใน XML เท่านั้น ภาพที่ถูกย้าย/ลบไปแล้วจะถูกข้าม ไม่ทำให้ export ทั้งก้อนล้มเหลว

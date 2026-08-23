@@ -17,22 +17,18 @@ def checked_path(path: str) -> Path:
 
 
 # A project is just the one folder of images the user picks -- everything
-# else (prompt bank, labels, test-set manifest) lives in a fixed subfolder of
-# it, so nothing needs a second or third folder selection and nothing
-# duplicates an image byte (see services/groundtruth.py). Callers pass an
-# already-checked_path()'d input_dir; a subfolder of an allowed path is
-# always itself allowed, so these never need their own vm-mode check.
+# else lives in a fixed subfolder of it (the prompt bank) or in PostgreSQL
+# (labels, test-set membership -- see services/annotations_db.py), so
+# nothing needs a second or third folder selection and nothing duplicates an
+# image byte. Callers pass an already-checked_path()'d input_dir; a
+# subfolder of an allowed path is always itself allowed, so state_dir never
+# needs its own vm-mode check.
 STATE_DIRNAME = ".ctflow"
 
 
 def state_dir(input_dir: Path) -> Path:
-    """Bank.__init__'s `output_dir` -- labels/, _bank/, classes.txt."""
+    """Bank.__init__'s `output_dir` -- _bank/ (embeddings + their provenance)."""
     return input_dir / STATE_DIRNAME
-
-
-def test_dir(input_dir: Path) -> Path:
-    """groundtruth.py's `test_dir` -- testset.json, labels/, classes.txt."""
-    return state_dir(input_dir) / "testset"
 
 
 def current_user(request: Request) -> str | None:

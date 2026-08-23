@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .routers import auth as auth_router
-from .routers import jobs, pool, system, testset, uploads
-from .services import auth
+from .routers import export, jobs, pool, system, testset, uploads
+from .services import auth, db
 
 TAGS = [
     {"name": "system", "description": "Environment info and the server-side folder picker. "
@@ -32,6 +32,8 @@ TAGS = [
      "-- these flags and their labels must never reach the prompt bank."},
     {"name": "upload", "description": "Drag-and-drop image intake for someone without filesystem "
      "access to the server. Refuses to run on a `vm`-mode deployment until auth is turned on."},
+    {"name": "export", "description": "T-24 -- download this project's annotations in a format a "
+     "training pipeline actually wants (YOLO/COCO/Pascal VOC), read straight out of PostgreSQL."},
 ]
 
 app = FastAPI(
@@ -55,6 +57,13 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+
+@app.on_event("startup")
+def _init_db():
+    """T-21 -- idempotent (CREATE TABLE IF NOT EXISTS), safe to run on every
+    boot rather than requiring a separate migration step."""
+    db.init_schema()
+
 # Reachable without a session: the UI needs both before it can even draw a
 # login box. Everything else is gated, so a route added later is protected by
 # default rather than by remembering to protect it.
@@ -77,3 +86,4 @@ app.include_router(pool.router)
 app.include_router(testset.router)
 app.include_router(jobs.router)
 app.include_router(uploads.router)
+app.include_router(export.router)

@@ -3,9 +3,13 @@ the output dir IS the project:
 
     <output_dir>/
         _bank/embeddings.pt    per-class list of instance embeddings
-        _bank/metadata.json    per-instance provenance + which images are done
-        labels/<stem>.txt      YOLO-format labels (the actual deliverable)
-        classes.txt            class index -> name, matches the label files
+        _bank/metadata.json    per-instance provenance + model lock
+
+Labels, classes.txt and the labeled/auto status that used to live here moved
+to PostgreSQL (T-21/T-22) -- see services/annotations_db.py and
+docs/DB_MIGRATION_PLAN.md. Only the prompt bank itself -- embeddings and
+their provenance -- is still a file; there's no pain point DB storage would
+fix there, and torch tensors don't belong in a relational column.
 
 Per-instance embeddings are kept (not just a running mean) so a future
 nearest-neighbour matcher can use the same bank without relabeling.
@@ -17,8 +21,8 @@ from pathlib import Path
 import torch
 from filelock import FileLock
 
+from . import annotations_db
 from . import models as model_registry
-from . import yolo_labels
 
 HISTORY_MAX = 200
 
@@ -53,9 +57,14 @@ def append_history(output_dir: str, point: dict) -> list[dict]:
 class Bank:
     def __init__(self, output_dir: str):
         self.dir = Path(output_dir)
+        # output_dir is always <input_dir>/.ctflow (see deps.state_dir) --
+        # only used by summary()'s DB-backed labeled/auto lookup, so a bank
+        # built against some other directory (as a couple of smoke-test
+        # fixtures do, to exercise embeddings in isolation) just never calls
+        # summary().
+        self.input_dir = self.dir.parent
         self.bank_dir = self.dir / "_bank"
         self.bank_dir.mkdir(parents=True, exist_ok=True)
-        (self.dir / "labels").mkdir(exist_ok=True)
         self.emb_path = self.bank_dir / "embeddings.pt"
         self.meta_path = self.bank_dir / "metadata.json"
         self.lock = FileLock(str(self.bank_dir / ".lock"))
@@ -103,8 +112,6 @@ class Bank:
             if self.meta_path.exists() else {}
         )
         self.instances: dict[str, list[dict]] = meta.get("instances", {})
-        self.labeled: list[str] = meta.get("labeled", [])
-        self.auto: list[str] = meta.get("auto", [])  # written by the model, not a human
         # None = no embedding has ever landed in this bank yet, so any model
         # is still fair game. Once set it never changes -- see lock_model().
         self.model: str | None = meta.get("model")
@@ -112,12 +119,10 @@ class Bank:
     def _save(self):
         torch.save(self.embeddings, self.emb_path)
         self.meta_path.write_text(
-            json.dumps({"instances": self.instances, "labeled": self.labeled,
-                        "auto": self.auto, "model": self.model},
+            json.dumps({"instances": self.instances, "model": self.model},
                        indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        (self.dir / "classes.txt").write_text("\n".join(self.classes), encoding="utf-8")
 
     def lock_model(self, model_id: str) -> str:
         """Every embedding in a bank has to come out of the same model's
@@ -194,10 +199,11 @@ class Bank:
         return len(self.embeddings.get(name, []))
 
     def summary(self) -> dict:
+        status = annotations_db.list_by_status(str(self.input_dir), "pool")
         return {
             "classes": [{"name": n, "count": self.count(n)} for n in self.classes],
-            "labeled": self.labeled,
-            "auto": self.auto,
+            "labeled": status["labeled"],
+            "auto": status["auto"],
             "model": self.model,  # null until the first box is saved -- model picker stays open until then
         }
 
@@ -215,31 +221,6 @@ class Bank:
                  "labeled_by": labeled_by}
             )
             self._save()
-
-    def mark_labeled(self, image_path: str):
-        with self.lock:
-            self._load()
-            if image_path not in self.labeled:
-                self.labeled.append(image_path)
-            self._save()
-
-    def mark_auto(self, image_paths: list[str]):
-        with self.lock:
-            self._load()
-            for p in image_paths:
-                if p not in self.auto and p not in self.labeled:
-                    self.auto.append(p)
-            self._save()
-
-    def write_yolo_labels(self, image_path: str, boxes: list[dict], width: int, height: int,
-                          merge: bool = False):
-        """boxes: [{"cls": name, "box": [x1,y1,x2,y2]}] in pixel coords. By
-        default this replaces the image's entire label file; merge=True reads
-        what's already there first and writes the union, for adding a box to
-        an already-labeled image without retyping the rest."""
-        if merge:
-            boxes = yolo_labels.read_boxes(str(self.dir), image_path, self.classes) + boxes
-        yolo_labels.write_boxes(str(self.dir), image_path, boxes, width, height, self.classes)
 
     def mean_vpe(self) -> tuple[list[str], torch.Tensor] | None:
         """One averaged embedding per class -- the prototype fed to

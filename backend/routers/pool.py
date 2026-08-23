@@ -6,9 +6,9 @@ from fastapi.responses import FileResponse
 
 from .. import deps
 from ..deps import checked_path, current_user
+from ..services import annotations_db
 from ..services import bank as bank_store
 from ..services import events as event_log
-from ..services import groundtruth
 from ..services import models as model_registry
 from ..services.bank import Bank
 from ..services.images import list_images
@@ -19,9 +19,10 @@ router = APIRouter(prefix="/api", tags=["pool"])
 
 @router.post("/session")
 def open_session(req: dict):
-    """Opens the one folder a project needs: the pool. Labels, the prompt
-    bank, and the test-set manifest all live in a fixed subfolder of it (see
-    deps.state_dir/test_dir) -- nothing else to browse for. Bundles the
+    """Opens the one folder a project needs: the pool. The prompt bank lives
+    in a fixed subfolder of it (see deps.state_dir); labels and the test-set
+    manifest live in PostgreSQL, keyed by this same input_dir (see
+    services/annotations_db.py) -- nothing else to browse for. Bundles the
     test-set state in the same response so the UI never has to make a second
     "did you forget the test set" round trip."""
     inp = checked_path(req["input_dir"])
@@ -31,14 +32,13 @@ def open_session(req: dict):
     if not images:
         raise HTTPException(400, f"no images in {inp}")
     bank = Bank(str(deps.state_dir(inp)))
-    td = str(deps.test_dir(inp))
     return {
         "images": images,
         "bank": bank.summary(),
         "testset": {
-            "images": groundtruth.list_test_images(td),
-            "labeled": sorted(groundtruth.labeled_stems(td)),
-            "classes": groundtruth.load_classes(td),
+            "images": annotations_db.list_test_images(str(inp)),
+            "labeled": sorted(annotations_db.labeled_stems(str(inp))),
+            "classes": annotations_db.get_classes(str(inp), "testset"),
         },
     }
 
@@ -58,23 +58,23 @@ def get_image(path: str):
 def get_boxes(input_dir: str, image: str, kind: str = "pool"):
     """Boxes already saved for this image, so revisiting it shows what's
     there instead of a blank canvas. `kind=pool` reads the bank's labels,
-    `kind=test` reads the test set's ground truth -- both use the labels/ +
-    classes.txt layout."""
+    `kind=test` reads the test set's ground truth."""
     inp = checked_path(input_dir)
-    d = deps.test_dir(inp) if kind == "test" else deps.state_dir(inp)
     img = checked_path(image)
-    return {"boxes": groundtruth.read_boxes(str(d), str(img))}
+    db_kind = "testset" if kind == "test" else "pool"
+    return {"boxes": annotations_db.read_boxes(str(inp), db_kind, str(img))}
 
 
 @router.post("/label")
 def save_label(req: dict, user: str | None = Depends(current_user)):
     """Extract embeddings for `boxes` and add them to the prompt bank (one
     embedding per distinct class in `boxes`, averaged over however many boxes
-    of that class this image has), then write the YOLO label file. `409` if
-    `model_id` doesn't match a model this bank is already locked to -- see
-    `POST /api/reembed` to change it deliberately instead. `400` if `image`
-    is flagged in the test set -- teaching the bank from a held-out image
-    would make /api/evaluate measure memorization instead of generalization."""
+    of that class this image has), then write the label into PostgreSQL.
+    `409` if `model_id` doesn't match a model this bank is already locked to
+    -- see `POST /api/reembed` to change it deliberately instead. `400` if
+    `image` is flagged in the test set -- teaching the bank from a held-out
+    image would make /api/evaluate measure memorization instead of
+    generalization."""
     inp = checked_path(req["input_dir"])
     img = cv2.imread(str(checked_path(req["image"])))
     if img is None:
@@ -82,7 +82,7 @@ def save_label(req: dict, user: str | None = Depends(current_user)):
     boxes = req["boxes"]
     if not boxes:
         raise HTTPException(400, "no boxes")
-    if groundtruth.is_test(str(deps.test_dir(inp)), req["image"]):
+    if annotations_db.is_test(str(inp), req["image"]):
         raise HTTPException(400, "this image is in the test set -- it can never be taught to the model")
     bank = Bank(str(deps.state_dir(inp)))
     try:
@@ -95,10 +95,10 @@ def save_label(req: dict, user: str | None = Depends(current_user)):
         by_class.setdefault(b["cls"], []).append(b["box"])
     for cls_name, cls_boxes in by_class.items():
         bank.add(cls_name, extract_embedding(img, cls_boxes, model_id), req["image"], cls_boxes[0], user)
-    bank.mark_labeled(req["image"])
 
-    h, w = img.shape[:2]
-    bank.write_yolo_labels(req["image"], boxes, w, h, merge=(req.get("mode", "replace") == "update"))
+    annotations_db.write_boxes(str(inp), "pool", req["image"], boxes, created_by=user,
+                                merge=(req.get("mode", "replace") == "update"))
+    annotations_db.mark_labeled(str(inp), "pool", req["image"])
     return {"bank": bank.summary()}
 
 
@@ -160,14 +160,14 @@ def get_events(input_dir: str):
 
 
 @router.post("/relabel")
-def relabel(req: dict):
-    """Rewrite this image's YOLO label file directly -- no embedding
-    extraction, no bank.add, no mark_labeled. For fixing generated labels
-    (delete an over-prediction, drag in a box the model missed) without the
-    correction being treated as a new visual prompt. `boxes` may be empty --
-    that's a legitimate "the model was wrong about everything here"."""
+def relabel(req: dict, user: str | None = Depends(current_user)):
+    """Rewrite this image's label directly -- no embedding extraction, no
+    bank.add, no mark_labeled. For fixing generated labels (delete an
+    over-prediction, drag in a box the model missed) without the correction
+    being treated as a new visual prompt. `boxes` may be empty -- that's a
+    legitimate "the model was wrong about everything here"."""
     inp = checked_path(req["input_dir"])
-    if groundtruth.is_test(str(deps.test_dir(inp)), req["image"]):
+    if annotations_db.is_test(str(inp), req["image"]):
         raise HTTPException(400, "this image is in the test set -- it can never be taught to the model")
     bank = Bank(str(deps.state_dir(inp)))
     boxes = req["boxes"]
@@ -176,9 +176,8 @@ def relabel(req: dict):
         raise HTTPException(
             400, f"unknown class(es) {sorted(unknown)} -- use Save to bank to teach a new class"
         )
-    img = cv2.imread(str(checked_path(req["image"])))
-    if img is None:
+    if cv2.imread(str(checked_path(req["image"]))) is None:
         raise HTTPException(400, "cannot read image")
-    h, w = img.shape[:2]
-    bank.write_yolo_labels(req["image"], boxes, w, h, merge=(req.get("mode", "replace") == "update"))
+    annotations_db.write_boxes(str(inp), "pool", req["image"], boxes, created_by=user,
+                                merge=(req.get("mode", "replace") == "update"))
     return {"bank": bank.summary()}

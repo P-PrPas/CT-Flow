@@ -77,7 +77,7 @@
 
 - **บริบท:** ทำงานหน้าไลน์ผลิต รู้ทันทีว่าชิ้นไหนมีตำหนิ แต่ไม่รู้จัก YOLO/embedding
 - **ความคาดหวัง:** เปิดเว็บ ลากไฟล์ภาพเข้ามา วาดกรอบ กด save จบ
-- **Pain point ปัจจุบัน:** ใช้ไม่ได้เลย — ต้องมีคนเอาภาพไปวางใน `/data` ให้ก่อน และคำศัพท์บนหน้าจอ (bank, embedding, rescore) ไม่สื่อความหมายกับเธอ
+- **Pain point ปัจจุบัน:** ใช้ไม่ได้เลย — ต้องมีคนเอาภาพไปวางใน `/opt/mount/project` ให้ก่อน และคำศัพท์บนหน้าจอ (bank, embedding, rescore) ไม่สื่อความหมายกับเธอ
 
 ### Persona C — "โจ" Tech Lead
 
@@ -196,9 +196,9 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| FR-40 | ย้าย label/box metadata (`labels/*.txt`, `classes.txt`, `testset.json`, สถานะ `labeled`/`auto`) จากไฟล์ไปตาราง PostgreSQL | ❌ | แผนเต็มที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) · `_bank/embeddings.pt` ไม่อยู่ใน scope นี้ ยังเป็นไฟล์เหมือนเดิม |
-| FR-41 | รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันจริง (ไม่ใช่แค่กันเขียนชนกันแบบ `filelock`) | ❌ | ต้องการ DB transaction ล็อกระดับแถวตอนสร้างคลาสใหม่ (race condition เดิมที่ file lock แก้ได้ไม่ดีพอ) ดู DB_MIGRATION_PLAN.md หัวข้อ 4.1 |
-| FR-42 | Export annotation เลือก format ได้ (YOLO/COCO/Pascal VOC) แทนที่จะได้แค่ YOLO txt | ❌ | `GET /api/export` — ดู DB_MIGRATION_PLAN.md หัวข้อ 6 |
+| FR-40 | ย้าย label/box metadata (`labels/*.txt`, `classes.txt`, `testset.json`, สถานะ `labeled`/`auto`) จากไฟล์ไปตาราง PostgreSQL | ✅ | `services/annotations_db.py` + `schema.sql` · implement แล้ว 2026-08-21 ทดสอบผ่าน `_smoke_test.py` เต็มรูปแบบกับ PostgreSQL จริง · `_bank/embeddings.pt` ไม่อยู่ใน scope นี้ ยังเป็นไฟล์เหมือนเดิมตามแผน · ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 10 |
+| FR-41 | รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันจริง (ไม่ใช่แค่กันเขียนชนกันแบบ `filelock`) | ✅ | DB transaction ล็อกระดับแถวตอนสร้างคลาสใหม่ (`annotations_db._get_or_create_class`) แทน `filelock` — ดู DB_MIGRATION_PLAN.md หัวข้อ 4.1, ทดสอบ concurrency จริงใน `annotations_db.py`'s self-check |
+| FR-42 | Export annotation เลือก format ได้ (YOLO/COCO/Pascal VOC) แทนที่จะได้แค่ YOLO txt | ✅ | `GET /api/export` (`routers/export.py`) — ทดสอบผ่านทั้งสาม format จริง ดู DB_MIGRATION_PLAN.md หัวข้อ 6 · **ยังไม่มี UI ให้เลือก format** (backend เท่านั้น เหมือน pattern เดิมของ T-12/T-13) |
 
 **แรงจูงใจ:** ทีมมีแผนทำระบบ login + workspace แบบ Label Studio ในอนาคต และทีม infra ต้องการวาง PostgreSQL เป็นรากฐาน — งานกลุ่มนี้เตรียมทางไว้ (เช่น `annotations.created_by`, `projects.id` ที่ future user/workspace table จะอ้างอิง) แต่**ไม่ได้สร้างระบบ login/workspace จริงในรอบนี้**
 
@@ -354,12 +354,12 @@
 | T-19 · Retrain closed-set detector | FR-35 | หลังพิสูจน์ว่า label สะสมพอและคุ้มกว่าใช้ prompt bank ต่อ |
 | T-20 · ✅ เลือกโมเดล YOLOE ได้หลายเวอร์ชัน/ขนาด | FR-36 | ทำแล้ว — รายละเอียดที่ FR-36 · เอาการพึ่งพา `poc/yoloe-11s-seg.pt` นอก repo ออกไปพร้อมกัน (checkpoint ทุกตัว auto-download เข้า `MODELS_DIR` แทน) |
 
-### Phase 6 — Multi-user & DB-backed annotation storage (ตกลง scope กับทีมแล้ว 2026-08-21, ยังไม่เริ่ม)
+### Phase 6 — Multi-user & DB-backed annotation storage (✅ T-21–T-24 เสร็จ 2026-08-21, T-25 config เขียนแล้วยังไม่ build)
 
-งานแทรกที่ตัดสินใจแล้วว่าจะทำ — ย้าย label/box metadata จากไฟล์ YOLO txt ไปตาราง PostgreSQL เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกันจริง (เตรียมทางสำหรับ login + workspace แบบ Label Studio ในอนาคต) พร้อมเพิ่ม export ที่เลือก format ได้ — แผนแบบละเอียด (schema, concurrency, migration script, ผลกระทบต่อ `bank.py`/`yolo_labels.py`/`groundtruth.py`, คำถามเปิดที่ต้องตัดสินใจก่อนเริ่ม) อยู่ที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) — สรุปงานย่อย T-21 ถึง T-25 อยู่ในเอกสารนั้น (ต่อเลขจาก T-20 ด้านบน)
+ย้าย label/box metadata จากไฟล์ YOLO txt ไปตาราง PostgreSQL เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกันจริง (เตรียมทางสำหรับ login + workspace แบบ Label Studio ในอนาคต) พร้อม export ที่เลือก format ได้ — implement และทดสอบผ่านแล้ว (`_smoke_test.py` เต็มรูปแบบกับ PostgreSQL จริง) รายละเอียดสิ่งที่ต่างจากแผนเดิม + สิ่งที่ยังไม่ยืนยัน (docker build image จริง, frontend UI) อยู่ที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 10
 
 - **เชื่อมโยง:** FR-40, FR-41, FR-42
-- **เงื่อนไขเริ่มงาน:** รอคำสั่งเริ่ม implement — เอกสารนี้เป็นแผนเท่านั้น
+- **เหลือ:** `docker compose build api` ยังไม่ได้รันจริง (build/packaging risk เท่านั้น), export format picker บน frontend UI
 
 ---
 

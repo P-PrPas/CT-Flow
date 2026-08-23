@@ -8,21 +8,9 @@ name: backend
 
 on:
   push:
-    paths:
-      - "backend/**"
-      - "cmd/**"
-      - "internal/**"
-      - "go.mod"
-      - "go.sum"
-      - ".github/workflows/backend.yml"
+    paths: ["backend/**", ".github/workflows/backend.yml"]
   pull_request:
-    paths:
-      - "backend/**"
-      - "cmd/**"
-      - "internal/**"
-      - "go.mod"
-      - "go.sum"
-      - ".github/workflows/backend.yml"
+    paths: ["backend/**", ".github/workflows/backend.yml"]
   workflow_dispatch:
 
 jobs:
@@ -46,21 +34,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.26", cache: true }
-      - run: go vet ./...
+        with: { go-version: "1.26", cache: true, cache-dependency-path: backend/go.sum }
+      - name: go vet
+        working-directory: backend
+        run: go vet ./...
       # gofmt is not advisory here: a formatting-only diff in a later PR buries
       # the change that PR is actually about.
       - name: gofmt
+        working-directory: backend
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
             echo "not gofmt'd:"; echo "$unformatted"; exit 1
           fi
-      - run: go test ./... -count=1
-      - run: go build ./...
+      - name: go test
+        working-directory: backend
+        run: go test ./... -count=1
+      - name: go build
+        working-directory: backend
+        run: go build ./...
 
   # What is left of the Python: the inference sidecar's own checks, plus the one
-  # golden-vector file whose producer still exists (see backend/_gen_testdata.py).
+  # golden-vector file whose producer still exists (see backend/tests/gen_testdata.py).
   python:
     runs-on: ubuntu-latest
     services:
@@ -78,15 +73,15 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
       # No torch: none of these load a model.
-      - run: pip install -r backend/requirements-harness.txt
-      - run: python -m backend.services.models
-      - run: python -m backend.services.metrics
-      - run: python -m backend.services.groundtruth
-      - run: python -m backend._dbcheck
-      # If this fails, services/metrics.py moved without internal/metrics moving
-      # with it -- and the readiness number the whole tool turns on now depends
-      # on which implementation you asked.
-      - run: python -m backend._gen_testdata --check
+      - run: pip install -r backend/tests/requirements.txt
+      - run: python -m backend.inference.models
+      - run: python -m backend.tools.metrics
+      - run: python -m backend.tools.groundtruth
+      - run: python -m backend.tests.dbcheck
+      # If this fails, tools/metrics.py moved without internal/core/metrics
+      # moving with it -- and the readiness number the whole tool turns on now
+      # depends on which implementation you asked.
+      - run: python -m backend.tests.gen_testdata --check
 
   smoke:
     runs-on: ubuntu-latest
@@ -101,13 +96,13 @@ jobs:
           --health-cmd "pg_isready -U labeltool" --health-interval 5s
           --health-timeout 5s --health-retries 10
     env:
-      # services/models.py and internal/models both resolve checkpoints against
+      # inference/models.py and internal/platform/models both resolve checkpoints against
       # this exact directory -- the cache path and the download destination below
       # have to agree with it, or `available` reads false after a successful
       # download.
       MODELS_DIR: ${{ github.workspace }}/models
       MODELS_CATALOG: ${{ github.workspace }}/backend/models.json
-      SCHEMA_PATH: ${{ github.workspace }}/backend/schema.sql
+      SCHEMA_PATH: ${{ github.workspace }}/backend/db/schema.sql
       DATABASE_URL: postgresql://labeltool:labeltool@localhost:5432/labeltool
       VPE_URL: http://127.0.0.1:8001
       YOLO_CONFIG_DIR: /tmp
@@ -118,16 +113,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.26", cache: true }
+        with: { go-version: "1.26", cache: true, cache-dependency-path: backend/go.sum }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
 
       - name: Install (CPU torch -- the CUDA wheel is ~2.5 GB)
         run: |
           pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-            -r backend/requirements-vpe.txt
-          pip install -r backend/requirements-harness.txt
-          # requirements-vpe pulls in the GUI build for ultralytics' sake; a
+            -r backend/inference/requirements.txt
+          pip install -r backend/tests/requirements.txt
+          # the sidecar's requirements pull in the GUI build for ultralytics' sake; a
           # runner has no display, and the two packages cannot coexist.
           pip uninstall -y opencv-python
           pip install opencv-python-headless
@@ -153,11 +148,11 @@ jobs:
       # reembed's atomic commit). Needs torch but loads no checkpoint, so a
       # broken bank fails in seconds rather than after a full pass.
       - name: Bank unit checks
-        run: python -m backend._bank_test
+        run: python -m backend.tests.bank_test
 
       - name: Start the inference sidecar
         run: |
-          uvicorn backend.vpe_service:app --port 8001 --log-level warning &
+          uvicorn backend.inference.service:app --port 8001 --log-level warning &
           # /vpe/health loads no model, so this is up in about a second; a
           # checkpoint is only loaded by the first request that needs one.
           for _ in $(seq 1 30); do
@@ -167,7 +162,7 @@ jobs:
 
       - name: Start the API
         run: |
-          go build -o /tmp/ctflow-api ./cmd/api
+          (cd backend && go build -o /tmp/ctflow-api ./cmd/api)
           /tmp/ctflow-api &
           for _ in $(seq 1 30); do
             curl -fs http://127.0.0.1:8000/api/config >/dev/null && break
@@ -180,4 +175,4 @@ jobs:
       - name: Smoke test
         env:
           SMOKE_BASE_URL: http://127.0.0.1:8000
-        run: python -m backend._smoke_test
+        run: python -m backend.tests.smoke_test

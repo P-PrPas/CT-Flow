@@ -85,71 +85,54 @@ pool.
 
 ```
 label_tool/                     repo root
-├── cmd/api/main.go             the API service: env -> deps -> routes -> serve
-├── internal/                   Go, one package per concern
-│   ├── config/                   LABEL_TOOL_MODE / VM_ROOT / PathAllowed — the path-safety gate
-│   ├── api/                      HTTP layer — request in, package call, response out
-│   │   ├── system.go               GET /api/config, /api/browse, /api/image
-│   │   ├── pool.go                 session, boxes
-│   │   ├── label.go                label, relabel, predict
-│   │   ├── testset.go              /api/testset/*
-│   │   ├── jobs.go                 /api/jobs/{id}, score, evaluate, autolabel, reembed
-│   │   ├── auth.go                 /api/auth/*  + the login middleware
-│   │   ├── upload.go               POST /api/upload
-│   │   └── export.go               GET /api/export
-│   ├── store/                    PostgreSQL: projects / classes / images / annotations
-│   ├── vpe/                      client for the inference sidecar
-│   ├── metrics/                  precision/recall/F1 against ground truth
-│   ├── auth/                     pbkdf2 hashing + signed session cookies
-│   ├── events/                   append-only usage-metrics log
-│   ├── history/                  eval-run history behind the learning curve
-│   ├── export/                   YOLO / COCO / Pascal VOC writers
-│   ├── models/                   the selectable-checkpoint catalog
-│   ├── images/                   listing images in a folder
-│   └── jobs/                     in-memory progress tracking for background jobs
-├── backend/                    Python: the inference sidecar, and nothing else
-│   ├── vpe_service.py            the sidecar's six endpoints
-│   ├── models.json               checkpoint catalog, shared with internal/models
-│   ├── schema.sql                database schema, applied by the Go service at boot
-│   ├── services/
-│   │   ├── vpe.py                   YOLOE wrapper — armed() / predict_one() / extract_embedding()
-│   │   ├── bank.py                  the prompt bank (embeddings + labeled_by provenance)
-│   │   ├── models.py                resolves a model_id to a weight file
-│   │   ├── metrics.py               ┐ kept for _experiment_conf.py, which reads raw
-│   │   ├── groundtruth.py           ├ YOLO folders that were never .ctflow projects
-│   │   └── yolo_labels.py           ┘
-│   ├── Dockerfile.vpe
-│   ├── requirements-vpe.txt      the sidecar's dependencies
-│   ├── requirements-harness.txt  the test harness's (ships in no image)
-│   ├── _smoke_test.py            the one end-to-end check, see Testing below
-│   ├── _parity.py                diffs two running backends, see Testing below
-│   ├── _bank_test.py             prompt-bank unit checks
-│   ├── testdata/                 cross-language golden vectors
-│   └── _experiment_conf.py       T-01 conf-threshold sweep, see Datasets below
-├── frontend/                   Next.js 15 App Router UI
-│   ├── app/
-│   │   ├── page.tsx               chrome + tab nav only, all state lives in lib/session.ts
-│   │   ├── panels/                 one file per tab
-│   │   │   ├── PoolPanel.tsx         Label tab
-│   │   │   ├── TestsetPanel.tsx      Test set tab
-│   │   │   ├── ReportPanel.tsx       Report tab — per-image eval breakdown
-│   │   │   └── InsightsPanel.tsx     Progress tab — learning curves, next-action advice
-│   │   ├── components/             BoxCanvas, DirPicker, EvalOverlay, LearningCurve,
-│   │   │                           ProgressBar, SetupCard, ShortcutsDialog, Confirm
-│   │   ├── lib/
-│   │   │   ├── session.ts            all labeling state + mutations (useSession)
-│   │   │   ├── api.ts                every fetch call in the app lives here
-│   │   │   ├── history.ts            eval-run history → learning curve + readiness verdict
-│   │   │   ├── ui.tsx                icons, formatting, shared constants (READY_F1 = 0.75)
-│   │   │   └── types.ts              shapes shared across the above
-│   │   └── api/[...path]/route.ts  runtime proxy to the backend (cookies + multipart safe)
-│   └── Dockerfile
-├── docs/                        design + requirements docs (Thai), see the index below
-├── certs/                       root CAs trusted at image-build time (corporate TLS proxies)
-├── .github/workflows/backend.yml
-├── Dockerfile.api               the Go service (~35 MB)
-├── docker-compose.yml
-└── .env.example
+├── backend/                    the whole backend: Go API + Python inference sidecar
+│   ├── go.mod                    module root -- Go lives under backend/, like everything else backend
+│   ├── cmd/api/main.go           the API binary: env -> deps -> routes -> serve
+│   ├── internal/                 layered, so what a package *is* is visible from its path
+│   │   ├── transport/httpapi/      HTTP only: handlers, middleware, request/response shapes
+│   │   │     system.go               GET /api/config, /api/browse, /api/image
+│   │   │     pool.go · label.go      session, boxes, label, relabel, predict
+│   │   │     testset.go              /api/testset/*
+│   │   │     jobs.go                 /api/jobs/{id}, score, evaluate, autolabel, reembed
+│   │   │     auth.go                 /api/auth/*  + the login middleware
+│   │   │     upload.go · export.go   POST /api/upload, GET /api/export
+│   │   │     project.go              history + events
+│   │   ├── core/                   pure logic, no I/O -- testable with plain values
+│   │   │   ├── metrics/              precision/recall/F1 at IoU 0.5
+│   │   │   └── export/               YOLO / COCO / Pascal VOC writers
+│   │   ├── infra/                  adapters over something outside the process
+│   │   │   ├── store/                PostgreSQL: projects/classes/images/annotations
+│   │   │   ├── vpe/                  client for the inference sidecar
+│   │   │   ├── events/               append-only usage-metrics log
+│   │   │   ├── history/              eval-run history behind the learning curve
+│   │   │   └── images/               listing images in a folder
+│   │   ├── platform/               cross-cutting, used by every layer
+│   │   │   ├── config/               env + PathAllowed, the path-safety gate
+│   │   │   ├── auth/                 pbkdf2 hashing + signed session cookies
+│   │   │   ├── jobs/                 in-memory progress tracking
+│   │   │   └── models/               the selectable-checkpoint catalog
+│   │   └── testsupport/            locating shared fixtures from any package depth
+│   ├── inference/                the Python sidecar -- everything that needs torch
+│   │   ├── service.py              its six endpoints (JSON, and NDJSON for long passes)
+│   │   ├── vpe.py                  YOLOE wrapper: armed() / predict_one() / extract_embedding()
+│   │   ├── bank.py                 the prompt bank (embeddings + labeled_by provenance)
+│   │   ├── models.py               resolves a model_id to a weight file
+│   │   ├── requirements.txt
+│   │   └── Dockerfile
+│   ├── tools/                    one-off scripts, and the code only they still use
+│   │   ├── experiment_conf.py      T-01 conf-threshold sweep, see Datasets below
+│   │   └── metrics.py · groundtruth.py · yolo_labels.py
+│   ├── tests/                    the harness -- ships in no image
+│   │   ├── smoke_test.py           the end-to-end check, see Testing below
+│   │   ├── parity.py               diffs two running backends, see Testing below
+│   │   ├── bank_test.py            prompt-bank unit checks
+│   │   ├── dbcheck.py              read-only PostgreSQL assertions
+│   │   ├── gen_testdata.py         the cross-language golden vectors
+│   │   ├── testdata/ · fixtures/pool/
+│   │   └── requirements.txt
+│   ├── db/schema.sql             applied by the API at boot; idempotent
+│   ├── models.json               checkpoint catalog, read by both services
+│   └── Dockerfile                the Go API image (~48 MB)
 ```
 
 **Why two backends.** Everything that needs torch — YOLOE inference and the
@@ -162,8 +145,8 @@ owns nothing else: no database, no uploads, no auth. Full reasoning and the
 migration record: [`docs/REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md).
 
 A handler never touches the database directly and no package under `internal/`
-imports `net/http` except `internal/api` — that split is what lets
-`backend/_smoke_test.py` drive the whole app over HTTP while `internal/store`'s
+imports `net/http` except `internal/transport/httpapi` — that split is what lets
+`backend/tests/smoke_test.py` drive the whole app over HTTP while `internal/infra/store`'s
 tests hit a real PostgreSQL to check what actually landed. The same split exists
 on the frontend: `session.ts` owns every mutation, panels only render a slice of
 it — a panel takes one `s` prop instead of forty.
@@ -282,7 +265,7 @@ with the other.
 
 Each option carries a 🟢/🔴 dot: whether the checkpoint's weight file is
 already on the server (`GET /api/config`'s `available` field, backed by
-`internal/models`'s `IsAvailable()` checking `MODELS_DIR` on disk) or still
+`internal/platform/models`'s `IsAvailable()` checking `MODELS_DIR` on disk) or still
 needs an auto-download from GitHub the first time it's used — which can be
 slow or fail outright with no route to `github.com`. `yoloe-11s-seg` (the
 default), `yoloe-26s-seg`, and `yoloe-26x-seg` are pre-cached.
@@ -405,12 +388,12 @@ from the repo root so `backend` resolves as a package.
 docker compose up -d db
 
 # 2. inference sidecar -- needs torch + ultralytics
-pip install -r backend/requirements-vpe.txt
-uvicorn backend.vpe_service:app --port 8001 --reload
+pip install -r backend/inference/requirements.txt
+uvicorn backend.inference.service:app --port 8001 --reload
 
 # 3. API
 export DATABASE_URL=postgresql://labeltool:<password>@localhost:5433/labeltool
-go run ./cmd/api                    # :8000, VPE_URL defaults to 127.0.0.1:8001
+cd backend && go run ./cmd/api      # :8000, VPE_URL defaults to 127.0.0.1:8001
 
 cd frontend && npm run dev          # needs API_URL if not 127.0.0.1:8000
 ```
@@ -426,12 +409,12 @@ hardcodes a device.
 
 ```bash
 # T-01 conf-threshold sweep -- still Python, needs data/conveyor_pvc
-python -m backend._experiment_conf 20
+python -m backend.tools.experiment_conf 20
 ```
 
 ## Testing & CI
 
-**`backend/_smoke_test.py` is the end-to-end check**, and it drives whatever is
+**`backend/tests/smoke_test.py` is the end-to-end check**, and it drives whatever is
 listening on `SMOKE_BASE_URL` rather than importing the app — session, label,
 predict (including a mid-process class-count change, the regression guard for a
 real bug found once), evaluate, auto-label, review, upload, auth, history and
@@ -440,33 +423,34 @@ indirection is what let the Go port be held to the same assertions the FastAPI
 service passed, one command, no second suite to drift.
 
 ```bash
-go test ./...                                   # Go unit tests (store needs DATABASE_URL)
-pip install -r backend/requirements-harness.txt
+cd backend && go test ./...              # Go unit tests (store needs DATABASE_URL)
 
-SMOKE_BASE_URL=http://localhost:8000 python -m backend._smoke_test
-python -m backend._bank_test                    # prompt-bank unit checks (needs torch)
-python -m backend._gen_testdata --check         # golden vectors vs. services/metrics.py
-python -m backend.services.models               # checkpoint catalog self-check
-python -m backend.services.metrics              # precision/recall/F1 self-check
-python -m backend.services.groundtruth          # file-based ground-truth self-check
+# the rest run from the repo root, so `backend` resolves as a package
+pip install -r backend/tests/requirements.txt
+SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test
+python -m backend.tests.bank_test              # prompt-bank unit checks (needs torch)
+python -m backend.tests.gen_testdata --check   # golden vectors vs. tools/metrics.py
+python -m backend.inference.models             # checkpoint catalog self-check
+python -m backend.tools.metrics                # precision/recall/F1 self-check
+python -m backend.tools.groundtruth            # file-based ground-truth self-check
 ```
 
-`backend/testdata/` holds cross-language golden vectors — pbkdf2 hashes, signed
+`backend/tests/testdata/` holds cross-language golden vectors — pbkdf2 hashes, signed
 cookies, F1 results, COCO/VOC/YOLO output — that Go's unit tests reproduce
 exactly. Most were generated by Python that no longer exists, which is what
 makes them the record of the behaviour the port had to match.
 
-`backend/_parity.py` diffs two running backends endpoint by endpoint, floats to
+`backend/tests/parity.py` diffs two running backends endpoint by endpoint, floats to
 1e-9. It was the gate for every step of the port and is still the tool for
 "did this change anything a client can see":
 
 ```bash
-python -m backend._parity --a http://localhost:8100 --b http://localhost:8000 \
+python -m backend.tests.parity --a http://localhost:8100 --b http://localhost:8000 \
     --pool-a /data/_parity_a --pool-b /data/_parity_b
 ```
 
-`.github/workflows/backend.yml` runs three jobs on every push/PR touching the
-backend: `go` (vet, gofmt, tests against a real PostgreSQL), `python` (the
+`.github/workflows/backend.yml` runs three jobs on every push/PR touching
+`backend/**` — which is now the whole backend, Go included: `go` (vet, gofmt, tests against a real PostgreSQL), `python` (the
 sidecar's self-checks), and `smoke`, which starts a real API and a real sidecar
 and drives them over HTTP, caching the 28 MB weight between runs.
 

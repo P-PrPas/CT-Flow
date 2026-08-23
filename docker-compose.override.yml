@@ -13,7 +13,7 @@ services:
   vpe:
     volumes:
       - ./backend:/app/backend
-    command: ["uvicorn", "backend.vpe_service:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    command: ["uvicorn", "backend.inference.service:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
 
   api:
     # Published so the smoke test, curl and the API docs' examples can reach it

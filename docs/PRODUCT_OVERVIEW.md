@@ -34,7 +34,7 @@ PostgreSQL (services/annotations_db.py):
 
 ## สิ่งที่ยังไม่เสร็จ (work-in-progress)
 
-- **Bank ใช้ mean-pooling ต่อคลาส ไม่ใช่ NN-matching ต่อ instance.** เอกสารออกแบบเดิม (`../docs/yoloe-auto-label-tool-design.md`) ตั้งใจให้ bank แยกแยะ variation ภายในคลาสเดียวกันด้วยการ match แบบ nearest-neighbor แต่ implementation จริงเฉลี่ย embedding ทุกตัวในคลาสให้เหลือตัวแทนเดียว (`services/bank.py`, `mean_vpe()`) — เพียงพอสำหรับคลาสที่รูปลักษณ์ค่อนข้างสม่ำเสมอ แต่จะเริ่มด้อยลงถ้าคลาสมีความหลากหลายสูง (multi-modal)
+- **Bank ใช้ mean-pooling ต่อคลาส ไม่ใช่ NN-matching ต่อ instance.** เอกสารออกแบบเดิม (`../docs/yoloe-auto-label-tool-design.md`) ตั้งใจให้ bank แยกแยะ variation ภายในคลาสเดียวกันด้วยการ match แบบ nearest-neighbor แต่ implementation จริงเฉลี่ย embedding ทุกตัวในคลาสให้เหลือตัวแทนเดียว (`inference/bank.py`, `mean_vpe()`) — เพียงพอสำหรับคลาสที่รูปลักษณ์ค่อนข้างสม่ำเสมอ แต่จะเริ่มด้อยลงถ้าคลาสมีความหลากหลายสูง (multi-modal)
 - **ไม่มี active-learning selector จริง** สิ่งที่ใกล้เคียงที่สุดคือการเรียงภาพในพูลจาก "confidence ต่ำสุดก่อน" บนหน้า UI ซึ่งเป็นการประมาณ ไม่ใช่ตัวเลือกภาพเชิงกลยุทธ์ตามที่เอกสารออกแบบเดิมตั้งใจ
 - **ไม่มีระบบ authentication/login** ใด ๆ ในแอปทั้งหมด
 - **ไม่มีปุ่มอัปโหลดไฟล์** การนำภาพเข้าโฟลเดอร์ `/opt/mount/project` เป็นเรื่อง filesystem หรือ network share ที่อยู่นอกขอบเขตของแอป (ออกแบบมาให้รันบนเซิร์ฟเวอร์ที่แชร์ ไม่ใช่เครื่องส่วนตัว)

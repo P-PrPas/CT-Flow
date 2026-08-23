@@ -10,7 +10,7 @@
 
 **SAVPE (Semantic-Aware Visual Prompt Encoding)** เวอร์ชันของ VPE ที่ YOLOE ใช้จริงในเครื่องมือนี้ ผ่าน `YOLOEVPSegPredictor.get_vpe()` — คือสิ่งที่ทำให้กล่องที่ผู้ใช้วาดกลายเป็นตัวเลข (embedding) ที่โมเดลนำไปเทียบกับภาพอื่นได้
 
-**Prompt bank** ที่เก็บ embedding สะสมของทุกคลาสที่ผู้ใช้เคย label ไว้ด้วยมือ เก็บที่ `<input_dir>/.ctflow/_bank/` ยิ่งสะสมมาก โมเดลยิ่งแยกแยะคลาสนั้นได้แม่นขึ้น (implement เป็น class `Bank` ใน `services/bank.py`)
+**Prompt bank** ที่เก็บ embedding สะสมของทุกคลาสที่ผู้ใช้เคย label ไว้ด้วยมือ เก็บที่ `<input_dir>/.ctflow/_bank/` ยิ่งสะสมมาก โมเดลยิ่งแยกแยะคลาสนั้นได้แม่นขึ้น (implement เป็น class `Bank` ใน `inference/bank.py`)
 
 **Mean-pooling** วิธีที่ bank ปัจจุบันสรุป embedding หลายตัวของคลาสเดียวกันให้เหลือตัวแทนเดียว — เอาค่าเฉลี่ยของทุก instance ในคลาสนั้น เป็นวิธีง่ายที่สุดที่ใช้งานได้ แต่ด้อยลงถ้าคลาสมีความหลากหลายสูง (ดู `mean_vpe()` ใน `bank.py`)
 
@@ -40,12 +40,12 @@
 
 **`checkedPath()` / path safety** ตัวตรวจสอบกลางที่ทุก path จาก browser ต้องผ่านก่อนแตะดิสก์จริง ป้องกันไม่ให้ browser ขอเข้าถึงไฟล์นอกขอบเขตที่อนุญาต (โดยเฉพาะสำคัญใน `vm` mode) — resolve symlink แล้วเทียบเป็น path component ไม่ใช่ prefix ของ string
 
-**`ponytail:`** convention คอมเมนต์ที่พบในโค้ดของ repo นี้ — ใช้ทำเครื่องหมายจุดที่ตั้งใจเลือกวิธีง่ายที่สุดที่ยังใช้งานได้ พร้อมระบุขีดจำกัดและแนวทางอัพเกรดถ้าจำเป็นในอนาคต (เช่นใน `bank.py`'s mean-pooling และ `internal/jobs`'s in-memory storage)
+**`ponytail:`** convention คอมเมนต์ที่พบในโค้ดของ repo นี้ — ใช้ทำเครื่องหมายจุดที่ตั้งใจเลือกวิธีง่ายที่สุดที่ยังใช้งานได้ พร้อมระบุขีดจำกัดและแนวทางอัพเกรดถ้าจำเป็นในอนาคต (เช่นใน `bank.py`'s mean-pooling และ `internal/platform/jobs`'s in-memory storage)
 
-**Inference sidecar (`vpe`)** service Python ที่เหลืออยู่หลัง port backend เป็น Go — ถือ YOLOE, torch และ prompt bank ไว้ทั้งหมด (`backend/vpe_service.py`) API service ที่เป็น Go คุยกับมันผ่าน HTTP (JSON สำหรับงานสั้น, NDJSON สำหรับ inference pass ยาว ๆ เพื่อรายงาน progress ทีละภาพ) เหตุผลที่แยกไม่ได้: SAVPE head ไม่มีของเทียบเท่าใน Go และ `embeddings.pt` เป็น `torch.save` ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)
+**Inference sidecar (`vpe`)** service Python ที่เหลืออยู่หลัง port backend เป็น Go — ถือ YOLOE, torch และ prompt bank ไว้ทั้งหมด (`backend/inference/service.py`) API service ที่เป็น Go คุยกับมันผ่าน HTTP (JSON สำหรับงานสั้น, NDJSON สำหรับ inference pass ยาว ๆ เพื่อรายงาน progress ทีละภาพ) เหตุผลที่แยกไม่ได้: SAVPE head ไม่มีของเทียบเท่าใน Go และ `embeddings.pt` เป็น `torch.save` ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)
 
-**Golden vector** ไฟล์ใน `backend/testdata/` ที่บันทึกผลลัพธ์ของฟังก์ชัน pure ฝั่ง Python ไว้ (pbkdf2 hash, cookie ที่เซ็นแล้ว, ค่า F1, ไฟล์ COCO/VOC/YOLO) เพื่อให้ unit test ฝั่ง Go ต้อง reproduce ให้ตรงเป๊ะ — วิธีเดียวที่ใช้ได้จริงในการยืนยันว่าโค้ดสองภาษาให้คำตอบเดียวกัน ส่วนใหญ่ถูก "แช่แข็ง" แล้วเพราะ Python ที่สร้างมันถูกลบไปตอนจบ port
+**Golden vector** ไฟล์ใน `backend/tests/testdata/` ที่บันทึกผลลัพธ์ของฟังก์ชัน pure ฝั่ง Python ไว้ (pbkdf2 hash, cookie ที่เซ็นแล้ว, ค่า F1, ไฟล์ COCO/VOC/YOLO) เพื่อให้ unit test ฝั่ง Go ต้อง reproduce ให้ตรงเป๊ะ — วิธีเดียวที่ใช้ได้จริงในการยืนยันว่าโค้ดสองภาษาให้คำตอบเดียวกัน ส่วนใหญ่ถูก "แช่แข็ง" แล้วเพราะ Python ที่สร้างมันถูกลบไปตอนจบ port
 
-**Annotation storage (T-21)** ตั้งแต่ 2026-08-21 ป้าย/กล่อง/สถานะ label ทั้งหมด (สิ่งที่เคยเป็น `labels/*.txt`, `classes.txt`, `testset.json`) ย้ายจากไฟล์ไปตาราง PostgreSQL แล้ว (`internal/store` ตั้งแต่ port เป็น Go, เดิมคือ `services/annotations_db.py`) เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกัน — **prompt bank (embedding) ไม่ย้าย ยังเป็นไฟล์เหมือนเดิม** เพราะเป็นคนละปัญหากัน (ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md))
+**Annotation storage (T-21)** ตั้งแต่ 2026-08-21 ป้าย/กล่อง/สถานะ label ทั้งหมด (สิ่งที่เคยเป็น `labels/*.txt`, `classes.txt`, `testset.json`) ย้ายจากไฟล์ไปตาราง PostgreSQL แล้ว (`internal/infra/store` ตั้งแต่ port เป็น Go, เดิมคือ `services/annotations_db.py`) เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกัน — **prompt bank (embedding) ไม่ย้าย ยังเป็นไฟล์เหมือนเดิม** เพราะเป็นคนละปัญหากัน (ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md))
 
 **Export** การดาวน์โหลด annotation ของโปรเจกต์เป็นไฟล์ในรูปแบบที่เลือกได้ (`GET /api/export`) — YOLO (กลับไปเป็น `labels/*.txt` + `classes.txt` แบบเดิม), COCO (JSON เดียว), หรือ Pascal VOC (XML ต่อภาพ) แทนที่การมีไฟล์ YOLO ติดอยู่บนดิสก์ตลอดเวลาแบบเดิมก่อน T-21

@@ -24,7 +24,7 @@ services:
   vpe:
     build:
       context: .                       # needs certs/ too
-      dockerfile: backend/Dockerfile.vpe
+      dockerfile: backend/inference/Dockerfile
       args:
         APP_UID: ${APP_UID:-1000}      # must match api's -- both write under DATA_DIR
     image: ct-flow-vpe
@@ -42,7 +42,7 @@ services:
     # Requires an NVIDIA GPU + driver + the NVIDIA Container Toolkit on the
     # host (`docker info` should list an `nvidia` runtime). No GPU available?
     # Delete this block and rebuild with TORCH_INDEX_URL=.../whl/cpu instead
-    # (see backend/Dockerfile.vpe) -- inference still runs, just on CPU.
+    # (see backend/inference/Dockerfile) -- inference still runs, just on CPU.
     deploy:
       resources:
         reservations:
@@ -56,7 +56,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile.api
+      dockerfile: backend/Dockerfile
       args:
         APP_UID: ${APP_UID:-1000}
     image: ct-flow-api

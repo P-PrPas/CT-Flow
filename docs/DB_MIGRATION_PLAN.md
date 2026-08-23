@@ -1,5 +1,8 @@
 # Label Tool — แผนย้าย annotation storage ไป PostgreSQL + Export format selection
 
+> **หมายเหตุ 2026-08-23:** backend ถูก port เป็น Go แล้ว (ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)) — ชื่อไฟล์ที่อ้างถึงในเอกสารนี้เป็นชื่อ ณ เวลาที่เขียน และ**ไม่ได้แก้ย้อนหลัง** ตัวที่ยังอยู่ย้ายที่แล้ว (`services/*` → `inference/`, `tools/`, หรือ `internal/*` ฝั่ง Go) ส่วน `app.py`, `deps.py`, `routers/*`, `services/{annotations_db,db,auth,events,images,job_tracker}.py` และ `_migrate_to_db.py` ถูกลบไปแล้ว หาได้จาก git history
+
+
 > **สถานะ: implement แล้ว (T-21–T-24 เสร็จ, T-25 เขียน config แล้วแต่ยังไม่ได้ build image จริง)** — ดูหัวข้อ 10 "สถานะการ implement จริง" ท้ายเอกสารสำหรับรายละเอียดว่าทำอะไรไปแล้วบ้าง ต่างจากแผนเดิมตรงไหน และทดสอบผ่านอะไรมาบ้าง เอกสารด้านล่างนี้คือแผนเดิมที่เขียนไว้ก่อนเริ่มงาน คงไว้เป็นบริบท ไม่ได้แก้ย้อนหลังทุกจุด
 >
 > **ที่มา:** งานแทรกที่ตกลงกับทีม (2026-08-21) แรงจูงใจหลักคือ (1) ต้องการรองรับหลายคนแก้ project เดียวกันพร้อมกัน โดยมีแผนทำระบบ login + workspace ในอนาคตแบบ Label Studio และ (2) ทีม infra อยากวาง DB เป็นรากฐานสำหรับอนาคต ส่วน scope ที่ตกลงกันคือ **ย้ายเฉพาะ label/box metadata (สิ่งที่ตอนนี้เป็น YOLO txt) ไปเป็นตาราง — `embeddings.pt` (prompt bank) ยังเป็นไฟล์เหมือนเดิม**

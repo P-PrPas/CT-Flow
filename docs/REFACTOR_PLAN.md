@@ -30,20 +30,20 @@
 | ของเดิม | บรรทัด | ไปเป็น |
 |---|---|---|
 | `app.py` (routers + auth middleware + CORS) | 89 | `main.go` + `middleware.go` |
-| `config.py`, `deps.py` (path safety) | 92 | `internal/config` |
-| `routers/system.py` | 44 | `internal/api/system.go` |
-| `routers/pool.py` | 183 | `internal/api/pool.go` |
-| `routers/testset.py` | 64 | `internal/api/testset.go` |
-| `routers/jobs.py` | 222 | `internal/api/jobs.go` |
-| `routers/auth.py` | 48 | `internal/api/auth.go` |
-| `routers/uploads.py` | 80 | `internal/api/upload.go` |
-| `routers/export.py` | 128 | `internal/export` |
-| `services/annotations_db.py`, `db.py`, `schema.sql` | 457 | `internal/store` (pgx, SQL เดิมทุกตัวอักษร) |
-| `services/metrics.py` (IoU, greedy match, P/R/F1) | 167 | `internal/metrics` |
-| `services/auth.py` (pbkdf2 + signed cookie) | 135 | `internal/auth` |
-| `services/events.py` (jsonl + summary) | 138 | `internal/events` |
-| `services/models.py` (catalog + `is_available`) | 76 | `internal/models` |
-| `services/images.py`, `bank.py`'s `*_history` | 63 | `internal/images`, `internal/history` |
+| `config.py`, `deps.py` (path safety) | 92 | `internal/platform/config` |
+| `routers/system.py` | 44 | `internal/transport/httpapi/system.go` |
+| `routers/pool.py` | 183 | `internal/transport/httpapi/pool.go` |
+| `routers/testset.py` | 64 | `internal/transport/httpapi/testset.go` |
+| `routers/jobs.py` | 222 | `internal/transport/httpapi/jobs.go` |
+| `routers/auth.py` | 48 | `internal/transport/httpapi/auth.go` |
+| `routers/uploads.py` | 80 | `internal/transport/httpapi/upload.go` |
+| `routers/export.py` | 128 | `internal/core/export` |
+| `services/annotations_db.py`, `db.py`, `schema.sql` | 457 | `internal/infra/store` (pgx, SQL เดิมทุกตัวอักษร) |
+| `tools/metrics.py` (IoU, greedy match, P/R/F1) | 167 | `internal/core/metrics` |
+| `services/auth.py` (pbkdf2 + signed cookie) | 135 | `internal/platform/auth` |
+| `services/events.py` (jsonl + summary) | 138 | `internal/infra/events` |
+| `inference/models.py` (catalog + `is_available`) | 76 | `internal/platform/models` |
+| `services/images.py`, `bank.py`'s `*_history` | 63 | `internal/infra/images`, `internal/infra/history` |
 
 รวม ~1,986 บรรทัด Python → คาด ~3,000–3,500 บรรทัด Go
 
@@ -51,8 +51,8 @@
 
 | ไฟล์ | บรรทัด | เหตุผล |
 |---|---|---|
-| `services/vpe.py` | 114 | ultralytics `YOLOEVPSegPredictor.get_vpe()` / `set_classes()` — ไม่มีของเทียบเท่าใน Go และจะไม่มี |
-| `services/bank.py` | 233 | `embeddings.pt` คือ `torch.save` ของ `dict[str, list[Tensor]]` · `mean_vpe()` คือ `torch.stack`/`mean`/`cat` · Go อ่านไฟล์นี้ไม่ได้และไม่ควรพยายาม |
+| `inference/vpe.py` | 114 | ultralytics `YOLOEVPSegPredictor.get_vpe()` / `set_classes()` — ไม่มีของเทียบเท่าใน Go และจะไม่มี |
+| `inference/bank.py` | 233 | `embeddings.pt` คือ `torch.save` ของ `dict[str, list[Tensor]]` · `mean_vpe()` คือ `torch.stack`/`mean`/`cat` · Go อ่านไฟล์นี้ไม่ได้และไม่ควรพยายาม |
 
 **กติกาที่ตัดสิน scope นี้: prompt bank กับ torch แยกจากกันไม่ได้** ถ้า Go ถือ `metadata.json` (model lock + instances) แต่ Python ถือ `embeddings.pt` เราจะได้ two-writer problem บนโฟลเดอร์เดียวกัน และ `Bank.lock_model()`/`reembed()` ที่ commit แบบ atomic ใต้ `FileLock` เดียวจะพังทันที ดังนั้น **sidecar เป็นเจ้าของทั้งโฟลเดอร์ `.ctflow/_bank/` แต่ผู้เดียว** — Go ไม่แตะไฟล์ในนั้นเลย ยกเว้น `eval_history.json` และ `events.jsonl` ซึ่งไม่เกี่ยวกับ bank (ดูหัวข้อ 4.6)
 
@@ -61,7 +61,7 @@
 - **frontend ทั้งหมด** — proxy (`app/api/[...path]/route.ts`) ชี้ที่ `API_URL` อยู่แล้ว เปลี่ยนปลายทางคือจบ ไม่มีไฟล์ frontend ไหนต้องแก้แม้แต่บรรทัดเดียว
 - **PostgreSQL schema + ข้อมูลทั้งหมด** — Go รัน `schema.sql` ไฟล์เดิม (embed เข้า binary) SQL ทุก statement คัดลอกมาตรง ๆ
 - **`embeddings.pt`, `metadata.json`, `eval_history.json`, `events.jsonl`** — format เดิมทุกไบต์
-- **`_experiment_conf.py`, `_migrate_to_db.py`, `groundtruth.py`, `yolo_labels.py`** — สคริปต์ทดลอง/ย้ายข้อมูลครั้งเดียว ไม่ใช่ runtime path ปล่อยไว้เป็น Python
+- **`tools/experiment_conf.py`, `tools/migrate_to_db.py`, `groundtruth.py`, `yolo_labels.py`** — สคริปต์ทดลอง/ย้ายข้อมูลครั้งเดียว ไม่ใช่ runtime path ปล่อยไว้เป็น Python
 
 **ผลรวม: refactor นี้ไม่มี data migration** rollback = ชี้ compose กลับไปที่ image เดิม ข้อมูลอ่านต่อได้ทันที นี่คือคุณสมบัติที่สำคัญที่สุดของแผนนี้ อย่าทำอะไรที่ทำลายมัน
 
@@ -127,28 +127,28 @@ flowchart LR
 
 **นี่คือขั้นที่คุ้มที่สุดในแผนทั้งหมด อย่าข้าม**
 
-`backend/_smoke_test.py` วันนี้ยิงผ่าน `TestClient(app)` — ซึ่ง**คือ `httpx.Client` ที่ผูกกับ ASGI app** เปลี่ยนให้รับ base URL แทน แล้วสคริปต์เดิมทั้ง 501 บรรทัดจะยิงใส่ backend ตัวไหนก็ได้:
+`backend/tests/smoke_test.py` วันนี้ยิงผ่าน `TestClient(app)` — ซึ่ง**คือ `httpx.Client` ที่ผูกกับ ASGI app** เปลี่ยนให้รับ base URL แทน แล้วสคริปต์เดิมทั้ง 501 บรรทัดจะยิงใส่ backend ตัวไหนก็ได้:
 
 ```python
-# backend/_smoke_test.py
+# backend/tests/smoke_test.py
 BASE = os.getenv("SMOKE_BASE_URL")
 c = httpx.Client(base_url=BASE) if BASE else TestClient(app)
 ```
 
-จากนั้น `SMOKE_BASE_URL=http://localhost:8000 python -m backend._smoke_test` คือ **acceptance test ของทุกเฟสถัดไป** — Python ผ่าน, Go ต้องผ่านเหมือนกัน
+จากนั้น `SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test` คือ **acceptance test ของทุกเฟสถัดไป** — Python ผ่าน, Go ต้องผ่านเหมือนกัน
 
 **งานย่อย:**
 
-1. เปลี่ยน `_smoke_test.py` ให้รับ base URL (ไม่กี่บรรทัด — `TestClient` มี API เดียวกับ `httpx.Client`)
+1. เปลี่ยน `tests/smoke_test.py` ให้รับ base URL (ไม่กี่บรรทัด — `TestClient` มี API เดียวกับ `httpx.Client`)
 2. แยก assertion ที่เรียก `Bank(...)`/`annotations_db.*` ตรง ๆ (ตรวจสถานะดิสก์/DB) ออกเป็น helper — พวกนี้ยังใช้ได้ในโหมด HTTP เพราะ smoke test รันบนเครื่องเดียวกับ backend
-3. **สร้าง golden vectors** — dump ผลลัพธ์จาก Python ปัจจุบันลง `backend/testdata/` เพื่อให้ Go test เทียบได้ข้ามภาษา:
-   - `auth_vectors.json` — คู่ (password, hash) 3 คู่ + cookie ที่ `issue()` สร้าง 3 ใบ (valid / tampered / expired) → `internal/auth` ต้อง verify ผ่าน/ไม่ผ่านตรงกันทุกใบ
+3. **สร้าง golden vectors** — dump ผลลัพธ์จาก Python ปัจจุบันลง `backend/tests/testdata/` เพื่อให้ Go test เทียบได้ข้ามภาษา:
+   - `auth_vectors.json` — คู่ (password, hash) 3 คู่ + cookie ที่ `issue()` สร้าง 3 ใบ (valid / tampered / expired) → `internal/platform/auth` ต้อง verify ผ่าน/ไม่ผ่านตรงกันทุกใบ
    - `metrics_cases.json` — input `gt`/`pred` 5 เคส + output ของ `metrics.evaluate()` เต็ม ๆ รวม `per_image`
    - `events_log.jsonl` + `events_summary.json` — log ตัวอย่าง + `summary()` ที่ควรได้
    - `export_yolo.zip`, `export_coco.json`, `export_voc.zip` — จาก project ตัวอย่างชุดเดียว
-4. เขียน `backend/_parity.py` — สคริปต์ที่ยิง endpoint ชุดเดียวกันใส่ **สอง** base URL แล้ว diff response ทีละ endpoint (ตัวเลข float เทียบด้วย tolerance `1e-9` ไม่ใช่ string equality) นี่คือของที่ใช้ตอนเฟส 2 ตอนที่มี Python กับ Go รันคู่กันจริง
+4. เขียน `backend/tests/parity.py` — สคริปต์ที่ยิง endpoint ชุดเดียวกันใส่ **สอง** base URL แล้ว diff response ทีละ endpoint (ตัวเลข float เทียบด้วย tolerance `1e-9` ไม่ใช่ string equality) นี่คือของที่ใช้ตอนเฟส 2 ตอนที่มี Python กับ Go รันคู่กันจริง
 
-**Definition of done:** `SMOKE_BASE_URL=... python -m backend._smoke_test` ผ่านกับ backend Python ที่รันด้วย uvicorn จริง (ไม่ใช่ TestClient) · `backend/testdata/` มีครบ 4 ชุด · `_parity.py` diff Python-กับ-Python ได้ 0 ความต่าง
+**Definition of done:** `SMOKE_BASE_URL=... python -m backend.tests.smoke_test` ผ่านกับ backend Python ที่รันด้วย uvicorn จริง (ไม่ใช่ TestClient) · `backend/tests/testdata/` มีครบ 4 ชุด · `tests/parity.py` diff Python-กับ-Python ได้ 0 ความต่าง
 
 **Rollback:** ไม่มีอะไรให้ rollback — เฟสนี้เพิ่มไฟล์เทสต์อย่างเดียว ไม่แตะ runtime path
 
@@ -160,16 +160,16 @@ c = httpx.Client(base_url=BASE) if BASE else TestClient(app)
 
 **งานย่อย:**
 
-1. สร้าง `backend/vpe_service.py` — FastAPI app เล็ก ๆ เสิร์ฟ 6 endpoint ตามตารางหัวข้อ 2 เรียก `services/vpe.py` + `services/bank.py` ที่มีอยู่แล้ว **ไม่แก้สองไฟล์นี้เลย** ยกเว้นสองจุด:
+1. สร้าง `backend/inference/service.py` — FastAPI app เล็ก ๆ เสิร์ฟ 6 endpoint ตามตารางหัวข้อ 2 เรียก `inference/vpe.py` + `inference/bank.py` ที่มีอยู่แล้ว **ไม่แก้สองไฟล์นี้เลย** ยกเว้นสองจุด:
    - `Bank.summary()` แยกเป็น `Bank.classes_summary()` (ไม่แตะ DB, sidecar ใช้) — ตัวเดิมยังอยู่ให้ router เดิมใช้ระหว่างเฟสนี้
    - เพิ่ม mutex รอบ `arm()`+`predict` (ดูหัวข้อ 4.1 — เรื่องนี้สำคัญกว่าที่เห็น)
 2. เพิ่ม `_signature()` (8×8 grayscale thumbnail) เข้า sidecar ย้ายมาจาก `routers/jobs.py` — **จงใจให้อยู่ฝั่ง Python เพื่อ parity เป๊ะ** `cv2.INTER_AREA` กับ resize ของ Go ให้ตัวเลขไม่ตรงกัน และ FR-18 ไม่ควรเปลี่ยนพฤติกรรมเพราะ refactor
 3. แก้ router เดิมทั้ง 4 จุดที่เรียก vpe/bank ให้ยิง HTTP ไปที่ sidecar แทน import ตรง (`pool.py::save_label`, `pool.py::predict`, `pool.py::relabel`'s unknown-class check, `jobs.py` ทั้งไฟล์)
-4. compose: เพิ่ม service `vpe` (build จาก `backend/Dockerfile.vpe` — เอา `psycopg2-binary`/`python-multipart` ออกจาก requirements ของมัน), `api` ได้ env `VPE_URL=http://vpe:8001`, `models` volume ย้ายไป `vpe` (Go/api mount แบบ `:ro`)
+4. compose: เพิ่ม service `vpe` (build จาก `backend/inference/Dockerfile` — เอา `psycopg2-binary`/`python-multipart` ออกจาก requirements ของมัน), `api` ได้ env `VPE_URL=http://vpe:8001`, `models` volume ย้ายไป `vpe` (Go/api mount แบบ `:ro`)
 
-**Definition of done:** smoke test ผ่านเต็ม · `_parity.py` diff "Python เดิม (commit ก่อนหน้า)" กับ "Python แยก sidecar" ได้ 0 ความต่าง · `docker compose up` ขึ้นครบ 4 service
+**Definition of done:** smoke test ผ่านเต็ม · `tests/parity.py` diff "Python เดิม (commit ก่อนหน้า)" กับ "Python แยก sidecar" ได้ 0 ความต่าง · `docker compose up` ขึ้นครบ 4 service
 
-**Rollback:** revert commit เดียว — `services/vpe.py`/`bank.py` ไม่ถูกแก้ ไฟล์บนดิสก์ไม่เปลี่ยน
+**Rollback:** revert commit เดียว — `inference/vpe.py`/`bank.py` ไม่ถูกแก้ ไฟล์บนดิสก์ไม่เปลี่ยน
 
 ---
 
@@ -187,16 +187,16 @@ web :3000 ──> Go :8000 ──┬──> route ที่ port แล้ว  (
 
 | # | กลุ่ม | endpoint | ทำไมอยู่ตรงนี้ |
 |---|---|---|---|
-| 2.1 | รากฐาน | `internal/config` (path safety), `internal/models` (catalog), `internal/images`, `GET /api/config`, `GET /api/browse`, `GET /api/image` | อ่านอย่างเดียว ไม่มี state · path safety เป็นด่านความปลอดภัยที่ทุกอย่างพึ่ง ต้องถูกก่อน (ดู 4.2) |
-| 2.2 | auth | `internal/auth`, middleware, `/api/auth/*` | ไม่มี state ในโค้ด แต่ต้อง **ผ่าน golden vectors ทั้งหมด** ก่อนเดินต่อ — ถ้า cookie format เพี้ยน ทุกคนหลุด session (ดู 4.3) |
-| 2.3 | ไฟล์เล็ก | `internal/history`, `internal/events`, `GET/POST/DELETE /api/history`, `GET/POST /api/events` | อ่าน-เขียน JSON/JSONL ธรรมดา · เทียบ golden ได้ตรง ๆ |
-| 2.4 | store | `internal/store` (pgx) + `GET /api/boxes`, `POST /api/session`, `/api/testset/*` | SQL คัดลอกมาทั้งดุ้น รวม `FOR UPDATE` (ดู 4.4) · smoke test มี concurrency assertion อยู่แล้วให้ยืม |
-| 2.5 | export | `internal/export` + `GET /api/export` | เทียบ zip/json กับ golden ไบต์ต่อไบต์ได้ |
+| 2.1 | รากฐาน | `internal/platform/config` (path safety), `internal/platform/models` (catalog), `internal/infra/images`, `GET /api/config`, `GET /api/browse`, `GET /api/image` | อ่านอย่างเดียว ไม่มี state · path safety เป็นด่านความปลอดภัยที่ทุกอย่างพึ่ง ต้องถูกก่อน (ดู 4.2) |
+| 2.2 | auth | `internal/platform/auth`, middleware, `/api/auth/*` | ไม่มี state ในโค้ด แต่ต้อง **ผ่าน golden vectors ทั้งหมด** ก่อนเดินต่อ — ถ้า cookie format เพี้ยน ทุกคนหลุด session (ดู 4.3) |
+| 2.3 | ไฟล์เล็ก | `internal/infra/history`, `internal/infra/events`, `GET/POST/DELETE /api/history`, `GET/POST /api/events` | อ่าน-เขียน JSON/JSONL ธรรมดา · เทียบ golden ได้ตรง ๆ |
+| 2.4 | store | `internal/infra/store` (pgx) + `GET /api/boxes`, `POST /api/session`, `/api/testset/*` | SQL คัดลอกมาทั้งดุ้น รวม `FOR UPDATE` (ดู 4.4) · smoke test มี concurrency assertion อยู่แล้วให้ยืม |
+| 2.5 | export | `internal/core/export` + `GET /api/export` | เทียบ zip/json กับ golden ไบต์ต่อไบต์ได้ |
 | 2.6 | upload | `POST /api/upload` | multipart + image decode · มี divergence ที่รับได้หนึ่งจุด (ดู 4.5) |
 | 2.7 | teach | `POST /api/label`, `POST /api/relabel` | จุดแรกที่ Go เรียก sidecar · ลำดับการเรียกต้องเหมือนเดิมเป๊ะ (ดู 4.6) |
-| 2.8 | **jobs (ก้อนเดียว)** | `internal/jobs` + `GET /api/jobs/{id}` + `/api/score` `/api/evaluate` `/api/autolabel` `/api/reembed` + `internal/metrics` | **ต้องย้ายพร้อมกันทั้งหมด** — job tracker เป็น map ใน memory ถ้าแยกครึ่ง Go ครึ่ง Python จะได้ `job_id` ที่อีกฝั่งตอบ 404 (ดู 4.7) |
+| 2.8 | **jobs (ก้อนเดียว)** | `internal/platform/jobs` + `GET /api/jobs/{id}` + `/api/score` `/api/evaluate` `/api/autolabel` `/api/reembed` + `internal/core/metrics` | **ต้องย้ายพร้อมกันทั้งหมด** — job tracker เป็น map ใน memory ถ้าแยกครึ่ง Go ครึ่ง Python จะได้ `job_id` ที่อีกฝั่งตอบ 404 (ดู 4.7) |
 
-**Definition of done ของแต่ละกลุ่ม:** Go test ของกลุ่มนั้นผ่าน · `_parity.py` diff endpoint กลุ่มนั้นระหว่าง Go:8000 กับ FastAPI:8100 ได้ 0 ความต่าง · smoke test เต็มผ่าน · commit เดียวจบต่อกลุ่ม
+**Definition of done ของแต่ละกลุ่ม:** Go test ของกลุ่มนั้นผ่าน · `tests/parity.py` diff endpoint กลุ่มนั้นระหว่าง Go:8000 กับ FastAPI:8100 ได้ 0 ความต่าง · smoke test เต็มผ่าน · commit เดียวจบต่อกลุ่ม
 
 **Rollback ระดับกลุ่ม:** ลบ route ออกจาก mux ของ Go หนึ่งบรรทัด → proxy ตกกลับไป FastAPI ทันที ไม่ต้อง revert โค้ด ไม่ต้อง redeploy อย่างอื่น **นี่คือเหตุผลทั้งหมดที่ใช้ strangler แทนการเขียนใหม่ทีเดียว**
 
@@ -205,8 +205,8 @@ web :3000 ──> Go :8000 ──┬──> route ที่ port แล้ว  (
 ### เฟส 3 — เก็บกวาด (ประมาณ 2 วัน)
 
 1. **ลบ:** `backend/app.py`, `backend/deps.py`, `backend/config.py`, `backend/routers/` ทั้งโฟลเดอร์, `services/{annotations_db,db,auth,events,models,images,job_tracker}.py`
-   **เก็บไว้:** `services/{vpe,bank}.py` (sidecar ใช้) · `services/{groundtruth,yolo_labels,metrics}.py` + `_experiment_conf.py` (หัวข้อ 8 ข้อ 5 — ยังต้องรันได้) · `vpe_service.py`, `schema.sql` (Go embed), `_smoke_test.py`, `_parity.py`, `_migrate_to_db.py`
-   ⚠️ `services/metrics.py` **ห้ามลบ** ถึงแม้จะ port ไป Go แล้ว — `_experiment_conf.py` เรียก `metrics.evaluate()` และ `metrics.load_ground_truth()` โดยตรง · `config.py` ถูกลบ แต่ `groundtruth.py`/`images.py` import `config.IMAGE_EXTS` ⇒ ย้ายค่านั้นไปเป็น const ใน `groundtruth.py` แทน (ตรวจด้วย `python -m backend.services.groundtruth` และ `python -m backend.services.metrics`)
+   **เก็บไว้:** `services/{vpe,bank}.py` (sidecar ใช้) · `services/{groundtruth,yolo_labels,metrics}.py` + `tools/experiment_conf.py` (หัวข้อ 8 ข้อ 5 — ยังต้องรันได้) · `inference/service.py`, `schema.sql` (Go embed), `tests/smoke_test.py`, `tests/parity.py`, `tools/migrate_to_db.py`
+   ⚠️ `tools/metrics.py` **ห้ามลบ** ถึงแม้จะ port ไป Go แล้ว — `tools/experiment_conf.py` เรียก `metrics.evaluate()` และ `metrics.load_ground_truth()` โดยตรง · `config.py` ถูกลบ แต่ `groundtruth.py`/`images.py` import `config.IMAGE_EXTS` ⇒ ย้ายค่านั้นไปเป็น const ใน `groundtruth.py` แทน (ตรวจด้วย `python -m backend.tools.groundtruth` และ `python -m backend.tools.metrics`)
 2. ลบ reverse-proxy fallback ออกจาก Go และลบ service `legacy` ออกจาก compose
 3. `.github/workflows/backend.yml` — job `go` (`go vet ./... && go test ./... && go build`) + job `smoke` ที่ยิง `SMOKE_BASE_URL` ใส่ compose ที่ยกขึ้นจริง · เก็บ job `checks` ไว้เฉพาะ self-check ที่ยังเป็น Python
 4. อัปเดตเอกสาร: `README.md` (badge, repository layout, local development), `docs/ARCHITECTURE.md` (tech stack, system diagram, deploy), `docs/API_REFERENCE.md` (เฉพาะย่อหน้า convention ที่อ้าง FastAPI/`HTTPException`), `docs/PROJECT_STATUS.md`, `.env.example`
@@ -322,7 +322,7 @@ Go ต้องรักษาลำดับนี้ทั้งหมด โ�
 
 - `lib/api.ts` โยน `Error(data.detail)` ทุกครั้งที่ response ไม่ ok → **ทุก error ต้องเป็น `{"detail": "<string>"}`** เขียน helper `httpError(w, code, msg)` ตัวเดียวแล้วใช้ทุกที่ ห้ามให้ `panic` หลุดออกไปเป็น HTML 500 (มี recovery middleware ที่แปลงเป็น `{"detail": "internal error"}` + log)
 - **ข้อความ error ต้องเหมือนเดิมทุกตัวอักษร** ในจุดที่ smoke test assert หรือ UI แสดง เช่น `"this image is in the test set -- it can never be taught to the model"`, `"prompt bank is empty -- label something first"` — grep เอาจาก `HTTPException(` ทุกจุดแล้วทำเป็น const ใน Go
-- **float ใน JSON:** Python `json.dumps(0.1)` → `0.1`, Go `encoding/json` → `0.1` เหมือนกัน แต่ `precision/recall/f1` ที่ได้จากการหารอาจได้ตัวสุดท้ายต่างกันในบิตที่ 17 → `_parity.py` เทียบตัวเลขด้วย tolerance ไม่ใช่ string
+- **float ใน JSON:** Python `json.dumps(0.1)` → `0.1`, Go `encoding/json` → `0.1` เหมือนกัน แต่ `precision/recall/f1` ที่ได้จากการหารอาจได้ตัวสุดท้ายต่างกันในบิตที่ 17 → `tests/parity.py` เทียบตัวเลขด้วย tolerance ไม่ใช่ string
 - **`GET /api/jobs/{id}` คืน `now`** จากนาฬิกา server เพื่อให้ `ProgressBar.tsx` คำนวณ ETA โดยไม่โดน clock skew — `float64` unix seconds เหมือนเดิม ไม่ใช่ RFC3339
 - **`GET /api/image`** คืน `FileResponse` → `http.ServeFile` (ได้ Range request + ETag ฟรี ซึ่งดีกว่าเดิม ไม่กระทบ `<img src>`)
 
@@ -332,7 +332,7 @@ Go ต้องรักษาลำดับนี้ทั้งหมด โ�
   **ตัดสินใจแล้ว: ลบทิ้ง** (หัวข้อ 8 ข้อ 2) ไม่เขียน openapi spec ด้วยมือและไม่เพิ่ม swagger generator — `docs/API_REFERENCE.md` ละเอียดกว่า OpenAPI ที่ generate จาก `req: dict` อยู่แล้ว (ซึ่ง generate ออกมาได้แค่ `body: object`)
   **เฟส 3 ต้องทำสามอย่าง ไม่ใช่แค่หยุดเสิร์ฟ:** เอา `ports: ["${API_PORT:-8000}:8000"]` ออกจาก service `api`, ลบ `API_PORT` + คอมเมนต์ที่อ้าง `/docs` จาก `.env.example`, และลบย่อหน้าที่อ้าง Swagger ใน `docker-compose.yml`
 - **`--reload` ที่เร็ว ~1 วินาที** ของ uvicorn → Go ต้อง recompile (~2–5 วินาทีสำหรับ codebase ขนาดนี้) ยอมรับได้ · `docker-compose.override.yml` ปรับเป็น `go run ./cmd/api` + bind mount
-- **`python -m backend.services.<name>` self-check** ที่ CI ใช้อยู่ 7 ตัว → กลายเป็น `go test ./...` ซึ่งดีกว่า แต่ต้องแปลงให้ครบ ไม่ใช่ทิ้ง: `auth`, `events`, `metrics`, `models`, `db`, `annotations_db` มี assertion ที่มีค่า อ่านแล้ว port มาเป็น `_test.go` ทีละตัว (`groundtruth` ยังเป็น Python เพราะ `_experiment_conf.py` ใช้)
+- **`python -m backend.services.<name>` self-check** ที่ CI ใช้อยู่ 7 ตัว → กลายเป็น `go test ./...` ซึ่งดีกว่า แต่ต้องแปลงให้ครบ ไม่ใช่ทิ้ง: `auth`, `events`, `metrics`, `models`, `db`, `annotations_db` มี assertion ที่มีค่า อ่านแล้ว port มาเป็น `_test.go` ทีละตัว (`groundtruth` ยังเป็น Python เพราะ `tools/experiment_conf.py` ใช้)
 
 ---
 
@@ -368,7 +368,7 @@ CT-Flow/
 │   ├── _parity.py                 diff สอง backend (ของใหม่)
 │   ├── _experiment_conf.py        ไม่แก้
 │   ├── _migrate_to_db.py          ไม่แก้
-│   ├── Dockerfile.api             ← ลบตอนเฟส 3
+│   ├── backend/Dockerfile             ← ลบตอนเฟส 3
 │   └── Dockerfile.vpe             torch + ultralytics เท่านั้น
 ├── Dockerfile.go                  multi-stage: golang:1.26 -> distroless/static
 ├── frontend/                      ไม่แตะเลยแม้แต่บรรทัดเดียว
@@ -387,7 +387,7 @@ CT-Flow/
 
 **`APP_UID` ต้องตรงกันทั้ง `api` และ `vpe`** — ทั้งคู่เขียนลง `DATA_DIR` (`api` เขียน uploads/history/events, `vpe` เขียน `_bank/`) ปัญหา root-owned files ที่ PROJECT_STATUS.md บันทึกไว้ (~4,377 ไฟล์) จะกลับมาทันทีถ้า UID ไม่ตรง — เพิ่มบรรทัดเตือนใน `.env.example`
 
-**`models` volume:** `vpe` mount แบบเขียนได้ (ultralytics auto-download), `api` mount `:ro` (แค่ `is_available()` ที่ `stat` ไฟล์) · การ bake 3 checkpoint เข้า image ย้ายจาก `Dockerfile.api` ไป `Dockerfile.vpe`
+**`models` volume:** `vpe` mount แบบเขียนได้ (ultralytics auto-download), `api` mount `:ro` (แค่ `is_available()` ที่ `stat` ไฟล์) · การ bake 3 checkpoint เข้า image ย้ายจาก `backend/Dockerfile` ไป `Dockerfile.vpe`
 
 ---
 
@@ -408,7 +408,7 @@ CT-Flow/
 | 3 | เก็บกวาด, CI, เอกสาร, compose | ~2 วัน | 3 |
 | | **รวม** | **~15.5 วัน** (คนเดียว) | **15** |
 
-ทุก commit ในเฟส 2 ต้องมี smoke test เขียว และ `_parity.py` diff เป็น 0 ก่อน merge · ระบบใช้งานได้ตลอดทุก commit ไม่มีช่วงที่ branch พัง
+ทุก commit ในเฟส 2 ต้องมี smoke test เขียว และ `tests/parity.py` diff เป็น 0 ก่อน merge · ระบบใช้งานได้ตลอดทุก commit ไม่มีช่วงที่ branch พัง
 
 ---
 
@@ -434,8 +434,8 @@ CT-Flow/
 2. **Swagger UI / ReDoc / `openapi.json`** → **ลบทิ้ง** ไม่เขียน spec ด้วยมือและไม่เพิ่ม generator · เฟส 3 ต้องเอา `API_PORT` ออกจาก compose + แก้คอมเมนต์ใน `.env.example` ที่อ้างถึง `/docs` ด้วย ไม่ใช่แค่หยุดเสิร์ฟ (ดู 4.9)
 3. **job tracker** → **ไม่แตะ** map + Mutex แปลงตรง ๆ ไม่ใส่ TTL/persistence แม้จะรู้ว่าควร แยกเป็นงานหลัง refactor จบ (ดู 4.7)
 4. **ภาษาใน Go code comment** → **อังกฤษทั้งหมด** ตามโค้ด Python ปัจจุบัน · คง convention `ponytail:` ไว้ · เอกสารใน `docs/` ยังเป็นไทยเหมือนเดิม
-5. **`_experiment_conf.py`** → **ต้องรันได้ต่อ** ⇒ `services/groundtruth.py` และ `services/yolo_labels.py` **ห้ามลบ** ในเฟส 3 (สคริปต์นี้อ่านโฟลเดอร์ YOLO ดิบที่ไม่ใช่ `.ctflow` project จึงพึ่ง `metrics.load_ground_truth()` เวอร์ชันไฟล์)
-   ⚠️ **ข้อควรระวัง:** `metrics.py` ถูก port ไป Go (กลุ่ม 2.8) แต่ `_experiment_conf.py` เรียก `metrics.evaluate()` ฝั่ง Python ⇒ **เฟส 3 ต้องคง `services/metrics.py` ฝั่ง Python ไว้ด้วย** กลายเป็นโค้ดสองภาษาที่ทำเรื่องเดียวกัน ซึ่งยอมรับได้เพราะ `metrics.evaluate()` เป็นฟังก์ชัน pure ที่นิ่งมาก และ golden vectors (`backend/testdata/metrics_cases.json`) คุ้มครองไม่ให้สองฝั่งเพี้ยนจากกัน — self-check `python -m backend.services.metrics` ต้องอยู่ใน CI ต่อไป
+5. **`tools/experiment_conf.py`** → **ต้องรันได้ต่อ** ⇒ `tools/groundtruth.py` และ `tools/yolo_labels.py` **ห้ามลบ** ในเฟส 3 (สคริปต์นี้อ่านโฟลเดอร์ YOLO ดิบที่ไม่ใช่ `.ctflow` project จึงพึ่ง `metrics.load_ground_truth()` เวอร์ชันไฟล์)
+   ⚠️ **ข้อควรระวัง:** `metrics.py` ถูก port ไป Go (กลุ่ม 2.8) แต่ `tools/experiment_conf.py` เรียก `metrics.evaluate()` ฝั่ง Python ⇒ **เฟส 3 ต้องคง `tools/metrics.py` ฝั่ง Python ไว้ด้วย** กลายเป็นโค้ดสองภาษาที่ทำเรื่องเดียวกัน ซึ่งยอมรับได้เพราะ `metrics.evaluate()` เป็นฟังก์ชัน pure ที่นิ่งมาก และ golden vectors (`backend/tests/testdata/metrics_cases.json`) คุ้มครองไม่ให้สองฝั่งเพี้ยนจากกัน — self-check `python -m backend.tools.metrics` ต้องอยู่ใน CI ต่อไป
 
 **หลักการที่ครอบทุกข้อข้างบน (จากที่มาของงาน):** ส่วนไหนคงเป็น Python service ได้ ให้คงไว้ ไม่ต้องฝืนย้าย
 
@@ -444,9 +444,9 @@ CT-Flow/
 ## 9. Definition of done ของทั้งโปรเจกต์
 
 - [ ] `docker compose up --build` จากเครื่องเปล่า → UI ที่ :3000 ใช้งานได้ครบ workflow (label → score → evaluate → autolabel → review → export)
-- [ ] `SMOKE_BASE_URL=http://localhost:8000 python -m backend._smoke_test` ผ่านทุก assertion
+- [ ] `SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test` ผ่านทุก assertion
 - [ ] `go vet ./... && go test ./...` เขียว รวม concurrency test ของ `_get_or_create_class`
-- [ ] `_parity.py` diff Go กับ FastAPI (commit สุดท้ายก่อนเฟส 3) ได้ 0 ความต่าง — รันครั้งสุดท้ายก่อนลบ FastAPI
+- [ ] `tests/parity.py` diff Go กับ FastAPI (commit สุดท้ายก่อนเฟส 3) ได้ 0 ความต่าง — รันครั้งสุดท้ายก่อนลบ FastAPI
 - [ ] เปิด project เก่าที่มีอยู่แล้ว (`.ctflow/_bank/` + แถวใน Postgres จาก T-21) แล้ว label/evaluate ต่อได้ **โดยไม่มี migration step ใด ๆ**
 - [ ] CI มี job `go` + `smoke` และ smoke ยังจับ regression ได้จริง (ทดสอบด้วยการจงใจใส่ `sort.Strings()` ใน class order เหมือนที่เคยทดสอบฝั่ง Python)
 - [ ] image `api` เล็กกว่า 50 MB
@@ -461,19 +461,19 @@ CT-Flow/
 
 ### เฟส 0 — parity harness ✅ (2026-08-23)
 
-- `_smoke_test.py` รับ `SMOKE_BASE_URL` แล้ว ยิงใส่ backend ตัวไหนก็ได้ · ทดสอบผ่านครบ 3 โหมด (in-process, HTTP+auth off+vm, HTTP+auth on+local)
-- **เกินแผน:** ต้องสร้าง `_dbcheck.py` เพิ่ม (harness เดิม import `annotations_db` ซึ่งจะถูกลบในเฟส 3 — harness ที่ import โค้ดที่ตัวเองตรวจ ใช้ตรวจ Go ไม่ได้)
+- `tests/smoke_test.py` รับ `SMOKE_BASE_URL` แล้ว ยิงใส่ backend ตัวไหนก็ได้ · ทดสอบผ่านครบ 3 โหมด (in-process, HTTP+auth off+vm, HTTP+auth on+local)
+- **เกินแผน:** ต้องสร้าง `tests/dbcheck.py` เพิ่ม (harness เดิม import `annotations_db` ซึ่งจะถูกลบในเฟส 3 — harness ที่ import โค้ดที่ตัวเองตรวจ ใช้ตรวจ Go ไม่ได้)
 - **เกินแผน:** upload size cap กับ auth section เดิมพึ่ง monkeypatch/env ของ process เดียวกัน → เปลี่ยนเป็นถาม server จริง (`cfg["mode"]`, `/api/auth/me`) ได้ coverage **เพิ่มขึ้น**: T-13's vm-mode refusal ถูก assert จริงแล้ว จากเดิมที่ไม่เคยทดสอบ
-- golden vectors 4 ชุดใน `backend/testdata/` + `_gen_testdata.py --check` เข้า CI แล้ว · ยืนยันว่าจับ regression จริงด้วยการขยับ IoU threshold เป็น 0.4
-- `_parity.py` 43 เคส · ยืนยันสองทาง: 43/43 เมื่อชี้ที่ server เดียวกัน, และรายงาน diff ระดับฟิลด์เมื่อชี้ที่ server ที่ตั้ง mode ต่างกัน
+- golden vectors 4 ชุดใน `backend/tests/testdata/` + `_gen_testdata.py --check` เข้า CI แล้ว · ยืนยันว่าจับ regression จริงด้วยการขยับ IoU threshold เป็น 0.4
+- `tests/parity.py` 43 เคส · ยืนยันสองทาง: 43/43 เมื่อชี้ที่ server เดียวกัน, และรายงาน diff ระดับฟิลด์เมื่อชี้ที่ server ที่ตั้ง mode ต่างกัน
 
 ### เฟส 1 — แยก vpe sidecar ✅ (2026-08-23)
 
-- `vpe_service.py` (6 endpoint) + `services/vpe_client.py` + `Dockerfile.vpe` + compose service `vpe`
+- `inference/service.py` (6 endpoint) + `services/vpe_client.py` + `Dockerfile.vpe` + compose service `vpe`
 - **ยืนยัน R1 เป็นของจริง** — `arm()` race ที่หัวข้อ 4.1 ทำนายไว้มีอยู่จริงในโค้ดเดิม แก้ด้วย `RLock` ต่อ `model_id` + `armed()` context manager ที่ถือ lock ทั้ง batch
 - **เกินแผน:** ต้องแยก `services/history.py` ออกจาก `bank.py` — ไม่งั้น API service ยังลาก torch เข้ามาเพราะ `read_history` อยู่ในไฟล์เดียวกับ `Bank`
 - **เกินแผน:** ต้องทำ `backend/models.json` — sidecar ต้องใช้ `checkpoint_path()` ⇒ `models.py` ลบไม่ได้ ⇒ ถ้าไม่แยกเป็นไฟล์ข้อมูลจะได้ catalog สองชุดที่ไม่ตรงกันได้ (แผนเดิมข้อ 2.1 บอกให้ port `models.py` ไป Go เฉย ๆ ซึ่งผิด)
-- **เกินแผน:** ย้าย bank unit test ออกเป็น `_bank_test.py` — smoke test ต้องรันได้โดยไม่มี torch เพราะเฟส 2 มันต้องขับ Go binary
+- **เกินแผน:** ย้าย bank unit test ออกเป็น `tests/bank_test.py` — smoke test ต้องรันได้โดยไม่มี torch เพราะเฟส 2 มันต้องขับ Go binary
 - **Divergence ที่ยอมรับ 1 จุด:** `"cannot read image"` ไม่ได้มาก่อน `"no boxes"`/test-set refusal อีกต่อไป (decode ย้ายไป sidecar) — แต่ละเงื่อนไขเดี่ยว ๆ ยังตอบเหมือนเดิมเป๊ะ
 - **ผลลัพธ์:** API image **12.3 GB → 573 MB** · parity 43/43 เทียบกับ monolith ก่อนแยก (รัน 80f652e คู่กันจริง)
 
@@ -483,7 +483,7 @@ CT-Flow/
 - **ต่างจากแผน:** รวมกลุ่ม 2.1 กับ 2.2 เป็น commit เดียว — ถ้า port `/api/browse` ไป Go ก่อนมี middleware จะเกิดช่วงที่ endpoint นั้นเข้าถึงได้โดยไม่ต้อง login บน deployment ที่เปิด auth
 - ยืนยัน R2: test ชุด path safety **fail จริง** เมื่อเปลี่ยนเป็น `strings.HasPrefix` (`/opt/mount/projectX` หลุด)
 - ยืนยัน R3 สองทาง: golden vectors (Python → Go) และ live test (cookie ที่ Go ออก → Python ยอมรับผ่าน proxy)
-- **บทเรียน:** ห้ามตั้งชื่อไฟล์ `Dockerfile.go` — `go vet ./...` พยายาม parse เป็น Go source (เปลี่ยนเป็น `Dockerfile.api`)
+- **บทเรียน:** ห้ามตั้งชื่อไฟล์ `Dockerfile.go` — `go vet ./...` พยายาม parse เป็น Go source (เปลี่ยนเป็น `backend/Dockerfile`)
 - compose ตอนนี้: `db` · `vpe` · `legacy` (FastAPI) · `api` (Go, **35.5 MB**) · `web`
 - ยืนยัน: smoke test ผ่านผ่าน Go front door · parity 43/43 · UI ที่ :3000 ใช้งานได้ครบ
 
@@ -493,7 +493,7 @@ CT-Flow/
 |---|---|
 | 2.3 history/events | **`round()` ของ Python เป็น banker's rounding** — `math.Round(v*1000)/1000` ให้คำตอบต่างกันบน input ที่เกิดขึ้นจริง (1 fix / 16 auto-label = 0.0625 → Python ได้ 0.062, Go แบบ naive ได้ 0.063) แก้ด้วย `pyRound` บน `big.Rat` + เพิ่ม tie case เข้า golden vectors |
 | 2.4 store | SQL คัดลอกมาทั้งดุ้น · **แต่พบว่า `TestConcurrentNewClasses` ผ่านแม้ลบ `FOR UPDATE` ออก** เพราะ upsert ของ `getOrCreateProject` ถือ row lock อยู่แล้ว — เขียนไว้ในคอมเมนต์ของ test ตรง ๆ ว่ามันพิสูจน์อะไรและไม่พิสูจน์อะไร ดีกว่าปล่อยให้เข้าใจผิด |
-| 2.5 export | zip เทียบ byte ไม่ได้ (embed mtime) → แก้ `_parity.py` ให้เทียบ *เนื้อใน* zip ซึ่งเป็นการเทียบที่ถูกต้องกว่าอยู่แล้ว · COCO image id นับตำแหน่ง ไม่ใช่ภาพที่ออกจริง (ภาพที่ถูกลบกิน id ไปแล้วเว้นช่อง) — คัดลอกพฤติกรรมมา |
+| 2.5 export | zip เทียบ byte ไม่ได้ (embed mtime) → แก้ `tests/parity.py` ให้เทียบ *เนื้อใน* zip ซึ่งเป็นการเทียบที่ถูกต้องกว่าอยู่แล้ว · COCO image id นับตำแหน่ง ไม่ใช่ภาพที่ออกจริง (ภาพที่ถูกลบกิน id ไปแล้วเว้นช่อง) — คัดลอกพฤติกรรมมา |
 | 2.6 upload | `filepath.Base` ไม่ตัด backslash บน Linux ต้องเช็คเพิ่มเอง |
 | 2.7 label | `conf` ต้องเป็น `*float64` — FR-33 ยิง `conf: 0.0` จริง ถ้าใช้ zero value จะกลายเป็น default 0.25 เงียบ ๆ |
 | 2.8 jobs | **ต้องใช้ `context.Background()` ไม่ใช่ `r.Context()`** — request context ถูก cancel ทันทีที่ตอบกลับ ซึ่งคือจังหวะที่ job เพิ่งเริ่ม (R5 ในตารางความเสี่ยง เกิดขึ้นจริงตามคาด) |
@@ -502,8 +502,8 @@ CT-Flow/
 
 - ลบ FastAPI + strangler proxy + `legacy` service ออกหมด · compose เหลือ `db` · `vpe` · `api` · `web`
 - **เกินแผน:** `services/auth.py` เป็นเครื่องมือสร้าง `LABEL_TOOL_USERS` ด้วย ลบทิ้งเฉย ๆ จะไม่เหลือวิธีตั้งค่า auth เลย → เพิ่ม flag `-hash-password` ให้ binary Go
-- **เกินแผน:** `_gen_testdata.py` regenerate ได้แค่ `metrics_cases.json` แล้ว (Python ที่สร้างอีกสามไฟล์ถูกลบไป) → เปลี่ยนสถานะสามไฟล์นั้นเป็น "frozen" และเขียนเหตุผลไว้ในไฟล์
-- **ต่างจากแผน:** ลบ `_migrate_to_db.py` ด้วย (แผนเดิมบอกให้เก็บ) เพราะมันพึ่ง `annotations_db.py` ทั้งก้อน — เก็บไว้แปลว่าต้องเก็บโค้ด storage ที่ตายแล้ว ~400 บรรทัด migration T-21 รันไปแล้วตั้งแต่ 2026-08-21 ใครมี project ก่อน T-21 ให้ checkout commit ก่อนหน้ามารัน
+- **เกินแผน:** `tests/gen_testdata.py` regenerate ได้แค่ `metrics_cases.json` แล้ว (Python ที่สร้างอีกสามไฟล์ถูกลบไป) → เปลี่ยนสถานะสามไฟล์นั้นเป็น "frozen" และเขียนเหตุผลไว้ในไฟล์
+- **ต่างจากแผน:** ลบ `tools/migrate_to_db.py` ด้วย (แผนเดิมบอกให้เก็บ) เพราะมันพึ่ง `annotations_db.py` ทั้งก้อน — เก็บไว้แปลว่าต้องเก็บโค้ด storage ที่ตายแล้ว ~400 บรรทัด migration T-21 รันไปแล้วตั้งแต่ 2026-08-21 ใครมี project ก่อน T-21 ให้ checkout commit ก่อนหน้ามารัน
 - CI เป็น 3 job: `go` (vet + gofmt + test กับ Postgres จริง) · `python` (self-check ที่เหลือ) · `smoke` (ยก API + sidecar จริงแล้วยิง HTTP)
 
 ### ผลลัพธ์รวม
@@ -523,6 +523,42 @@ CT-Flow/
 
 ทั้งสามข้อนี้อยู่นอก scope ตั้งแต่ต้น และ Go ไม่ได้ช่วยข้อไหนเลย — ดูหัวข้อ 0:
 
-1. Job tracker ยังอยู่ใน memory ไม่มี TTL ไม่ persist (`internal/jobs`)
-2. VRAM ไม่มี eviction — โมเดลที่โหลดแล้วอยู่ยาวจนจบ process (`services/vpe.py`)
+1. Job tracker ยังอยู่ใน memory ไม่มี TTL ไม่ persist (`internal/platform/jobs`)
+2. VRAM ไม่มี eviction — โมเดลที่โหลดแล้วอยู่ยาวจนจบ process (`inference/vpe.py`)
 3. ยังไม่มีหน้า login บน UI (backend พร้อมมานานแล้ว)
+
+---
+
+## 11. จัดโครงไฟล์ใหม่ (2026-08-23, หลัง port เสร็จ)
+
+**ปัญหาที่พบหลัง port:** Go ไปอยู่ที่ `cmd/` + `internal/` ระดับ repo root ข้าง ๆ `backend/` (Python) กับ `frontend/` ซึ่งขัดกับ convention ของ repo เองที่ top level แบ่งตามส่วนของระบบ ไม่ใช่ตามภาษา · และ `backend/` เองก็มีไฟล์ `.py` หลุดอยู่ที่ root 8 ไฟล์
+
+### โครงใหม่
+
+```
+backend/                     backend ทั้งหมด ไม่ว่าภาษาอะไร
+├── go.mod                   module root
+├── cmd/api/                 binary
+├── internal/
+│   ├── transport/httpapi/   HTTP เท่านั้น: handler, middleware, request/response
+│   ├── core/                ตรรกะล้วน ไม่มี I/O — metrics, export
+│   ├── infra/               adapter ไปหาของนอก process — store, vpe, events, history, images
+│   ├── platform/            ใช้ข้ามชั้น — config, auth, jobs, models
+│   └── testsupport/         หา fixture ร่วมจาก package ที่ลึกเท่าไหร่ก็ได้
+├── inference/               Python sidecar (service.py, vpe.py, bank.py, models.py)
+├── tools/                   สคริปต์ครั้งเดียว + โค้ดที่มีแต่มันใช้ (experiment_conf, metrics, groundtruth, yolo_labels)
+├── tests/                   harness (smoke_test, parity, bank_test, dbcheck, gen_testdata, testdata/, fixtures/)
+├── db/schema.sql
+├── models.json
+└── Dockerfile               Go API image (sidecar อยู่ที่ inference/Dockerfile)
+```
+
+### สิ่งที่เรียนรู้ระหว่างทำ
+
+- **`../../..` ใน test พัง**ทันทีที่ package ย้ายชั้น — แก้ถาวรด้วย `internal/testsupport` ที่เดินขึ้นไปหา `go.mod` แทนการนับ `..` จะได้ไม่ต้อง debug เรื่องเดิมสองรอบ
+- **`internal/transport/http` ตั้งชื่อ package ว่า `http` ไม่ได้** เพราะชนกับ `net/http` ที่ไฟล์พวกนี้ใช้หนักมาก จึงเป็น `internal/transport/httpapi` — ต่างจาก preview ที่อนุมัติไว้เล็กน้อย แต่จำเป็น
+- **ไล่ replace path แบบเหมารวมไปพังเอกสารประวัติศาสตร์** — `DB_MIGRATION_PLAN.md` ระบุเองว่า "คงไว้เป็นบริบท ไม่แก้ย้อนหลัง" การไล่แทนที่ทำให้มันอ้าง `tools/migrate_to_db.py` ซึ่งถูกลบไปแล้ว · revert แล้วใส่หมายเหตุลงวันที่ที่หัวเอกสารแทน ส่วนเอกสารที่ยังใช้อ้างอิงจริง (`REQUIREMENTS_STAKEHOLDER_ANALYSIS.md`, `PRODUCT_OVERVIEW.md`) ค่อยแก้ path เฉพาะไฟล์ที่ยังมีอยู่จริง
+
+### ยืนยัน
+
+รัน image **ก่อนย้าย** (commit `aa8b4db`) คู่กับ **หลังย้าย** บน network เดียวกัน แล้ว diff ทีละ endpoint: **43/43 เหมือนกันทุกฟิลด์ รวม background job ทั้งสี่** — การจัดโครงไม่เปลี่ยนพฤติกรรมที่ client มองเห็นแม้แต่ฟิลด์เดียว · `go test ./...` เขียว · smoke test เขียว · self-check ฝั่ง Python เขียวหมด · UI ที่ :3000 ใช้งานได้ครบ

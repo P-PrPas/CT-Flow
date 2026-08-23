@@ -52,13 +52,16 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
-  api:
+  # The FastAPI service, now behind the Go one. Every route Go has not taken
+  # over yet is proxied here (see cmd/api/main.go). It shrinks with each
+  # group ported and goes away entirely at the end of the port.
+  legacy:
     build:
       context: .                       # this repo's root
       dockerfile: backend/Dockerfile
       args:
         APP_UID: ${APP_UID:-1000}      # must own DATA_DIR on a Linux host
-    image: ct-flow-api
+    image: ct-flow-legacy
     environment:
       LABEL_TOOL_MODE: vm              # in a container the FS is always "the vm"
       LABEL_TOOL_VM_ROOT: /opt/mount/project
@@ -89,9 +92,35 @@ services:
       # it first, and this image has nothing at /models. depends_on above is
       # what guarantees `vpe` gets there first; don't drop it to speed up boot.
       - models:/models:ro
-    # Swagger UI (/docs), ReDoc (/redoc), and the raw spec (/openapi.json) --
-    # not proxied through `web` (its catch-all only forwards /api/*), so this
-    # is the only way to reach them against the Dockerized backend.
+    restart: unless-stopped
+
+  # The Go API service. Fronts everything: the browser reaches this, and it
+  # either answers or proxies to `legacy`.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      args:
+        APP_UID: ${APP_UID:-1000}
+    image: ct-flow-api
+    environment:
+      LABEL_TOOL_MODE: vm
+      LABEL_TOOL_VM_ROOT: /opt/mount/project
+      LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
+      # Both services verify the session cookie, so they have to sign it with
+      # the same key -- a login served by one and a request proxied to the
+      # other must agree. Leaving this unset gives each process its own random
+      # secret and every proxied request 401s.
+      LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
+      LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      LEGACY_URL: http://legacy:8000
+    depends_on:
+      legacy:
+        condition: service_healthy
+    volumes:
+      - ${DATA_DIR:-../data}:/opt/mount/project
+      # Read-only: only to report which checkpoints are already cached.
+      - models:/models:ro
     ports:
       - "${API_PORT:-8000}:8000"
     restart: unless-stopped

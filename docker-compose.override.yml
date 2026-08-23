@@ -5,7 +5,7 @@
 # needed again when a requirements file or a Dockerfile changes.
 # Don't want this? `docker compose -f docker-compose.yml up` skips it.
 services:
-  api:
+  legacy:
     volumes:
       - ./backend:/app/backend
     command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

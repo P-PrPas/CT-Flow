@@ -1,7 +1,7 @@
 // Package vpe is the client for the inference sidecar (backend/inference/service.py).
 //
 // Everything that needs a model or the prompt bank goes through here. Ported
-// from backend/inference/vpe_client.py, and deliberately just as thin: the less
+// from the FastAPI service's services/vpe_client.py, and deliberately just as thin: the less
 // judgement it carries the less there is that can disagree with the sidecar.
 //
 // A failure the sidecar reported comes back as *Error carrying the status it

@@ -156,6 +156,14 @@ it — a panel takes one `s` prop instead of forty.
 ```bash
 cp .env.example .env      # point DATA_DIR at the folder holding your datasets,
                            # and set POSTGRES_PASSWORD (required -- compose won't start without it)
+
+# Model weights are gitignored, and backend/inference/Dockerfile bakes three of
+# them into the image, so a fresh clone has to fetch them once before building.
+# Ultralytics resolves each filename to its own download URL:
+pip install ultralytics
+mkdir -p models && cd models && python -c "from ultralytics import YOLOE
+for m in ('yoloe-11s-seg', 'yoloe-26s-seg', 'yoloe-26x-seg'): YOLOE(m + '.pt')" && cd ..
+
 docker compose up --build # http://localhost:3000
 ```
 
@@ -270,13 +278,15 @@ needs an auto-download from GitHub the first time it's used — which can be
 slow or fail outright with no route to `github.com`. `yoloe-11s-seg` (the
 default), `yoloe-26s-seg`, and `yoloe-26x-seg` are pre-cached.
 
-Outside Docker that's just the repo-local `label_tool/models/` folder. In
-Docker, `/models` inside the `api` container is the `models` *named volume*
+Outside Docker that's just the repo-local `models/` folder. In Docker,
+`/models` inside the `vpe` container is the `models` *named volume*
 (`docker-compose.yml`), not the repo folder of the same name on the host —
-those are two different filesystems. A **named volume that has never been
-mounted before seeds itself from whatever's at that path in the image**
-(standard Docker behavior), so `backend/Dockerfile` bakes the same three
-`.pt` files into the image at `/models/` — a fresh volume (first
+those are two different filesystems. (`api` mounts the same volume read-only,
+purely to report which weights are present; `vpe` is the one that downloads
+into it.) A **named volume that has never been mounted before seeds itself
+from whatever's at that path in the image** (standard Docker behavior), so
+`backend/inference/Dockerfile` bakes the same three `.pt` files into the image
+at `/models/` — a fresh volume (first
 `docker compose up`, or after `docker compose down -v`) comes up already
 populated with no manual step. `docker cp`-ing a file into a *running*
 container only patches that one volume instance and gets lost the next time

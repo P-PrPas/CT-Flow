@@ -1,7 +1,7 @@
 // Package store is label/box storage backed by PostgreSQL (T-21/T-22) -- the
 // DB-native replacement for labels/*.txt + classes.txt + testset.json.
 //
-// Ported from the FastAPI annotations_db module and its db module. The SQL is
+// Ported from the FastAPI service's services/annotations_db.py and services/db.py. The SQL is
 // copied statement for statement rather than rewritten: this schema and these
 // queries are what the existing data was written by, and the concurrency
 // guarantee in getOrCreateClass is the entire reason label storage moved to a

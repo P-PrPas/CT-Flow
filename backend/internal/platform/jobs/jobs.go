@@ -4,7 +4,7 @@
 // A request starts a job and gets an id back immediately; the UI polls
 // GET /api/jobs/{id} for {done, total, ...} to drive a progress bar and an ETA.
 //
-// Ported from backend/inference/job_tracker.py, deliberately unchanged in
+// Ported from the FastAPI service's services/job_tracker.py, deliberately unchanged in
 // behaviour: a single map in this process, never pruned.
 //
 // ponytail: that is fine for one API instance serving a handful of people, and

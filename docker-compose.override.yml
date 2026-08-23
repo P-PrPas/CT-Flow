@@ -10,6 +10,13 @@ services:
       - ./backend:/app/backend
     command: ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
+  db:
+    # Published for the parity harness (backend/_parity.py, _smoke_test.py's
+    # DB assertions) and adminer -- both run on the host, not in a container.
+    # 5433 by default because a distro postgres commonly already holds 5432.
+    ports:
+      - "${DB_PORT:-5433}:5432"
+
   # Click-around DB browser -- no SQL needed. http://localhost:8080, system
   # "PostgreSQL", server "db", user/pass/db from POSTGRES_PASSWORD in .env.
   adminer:

@@ -1,36 +1,85 @@
-"""One runnable check: open a session, label a box, verify the bank + YOLO
-labels land in the project's state dir and survive a reload, then rescore
-the pool. Run from label_tool/: .venv\\Scripts\\python.exe -m backend._smoke_test"""
+"""One runnable check: open a session, label a box, verify the bank + the
+annotations in PostgreSQL land and survive a reload, then rescore the pool.
+
+Two ways to run it, and the second one is the point -- this is the parity
+harness for the Go port (docs/REFACTOR_PLAN.md phase 0), not only a Python test:
+
+    python -m backend._smoke_test                            # in-process (TestClient)
+    SMOKE_BASE_URL=http://localhost:8000 python -m backend._smoke_test
+
+The HTTP form drives whatever is listening on that port -- FastAPI today, the
+Go service tomorrow -- so "Go passes the same assertions Python does" stays one
+command instead of a second suite that drifts.
+
+Two things the HTTP form needs from its environment:
+  * the server must resolve the same filesystem paths this process does (run it
+    on the host, or bind-mount so SMOKE_POOL means the same thing on both
+    sides) -- input_dir crosses the wire as a plain string;
+  * torch has to be importable here too, because the bank assertions construct
+    Bank(...) directly to check what actually landed on disk.
+
+Environment: SMOKE_BASE_URL, SMOKE_POOL, SMOKE_USER/SMOKE_PASSWORD (only when
+the target server has LABEL_TOOL_USERS set), DATABASE_URL.
+"""
 import json
 import os
 import shutil
 import time
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-from .app import app
-from .routers import uploads
-from .services import annotations_db
-from .services import auth
-from .services import db as db_conn
+from . import _dbcheck
 from .services import models as model_registry
 from .services.bank import Bank
 
 HERE = Path(__file__).parent
-POOL = str(HERE / "test_pool")
-# input_dir is now the only path a client ever sends -- the bank still lives
-# in a fixed .ctflow subfolder of it (see backend/deps.py); labels and the
-# test-set manifest live in PostgreSQL, keyed by this same POOL path (see
-# services/annotations_db.py).
+# input_dir is the only path a client ever sends -- the bank lives in a fixed
+# .ctflow subfolder of it (see backend/deps.py); labels and test-set membership
+# live in PostgreSQL, keyed by this same POOL path.
+POOL = os.getenv("SMOKE_POOL") or str(HERE / "test_pool")
+# Scratch fixtures that get sent to the server as a path (input_dir, an
+# upload destination) have to sit where the server is allowed to look, which
+# is not necessarily next to this file -- a vm-mode target only accepts paths
+# under its own root. Siblings of the pool always qualify.
+SCRATCH = Path(POOL).parent
 OUT = Path(POOL) / ".ctflow"
 TEST = OUT / "testset"
+
+BASE_URL = os.getenv("SMOKE_BASE_URL")
+if BASE_URL:
+    import httpx
+
+    # 120s: an evaluate/autolabel pass over the fixture pool is a real
+    # inference run, and a cold model load on CPU is not fast.
+    c = httpx.Client(base_url=BASE_URL, timeout=120)
+    uploads = None  # in-process-only knob, see the upload section
+else:
+    from fastapi.testclient import TestClient
+
+    from .app import app
+    from .routers import uploads
+
+    c = TestClient(app)
+
 if OUT.exists():
     shutil.rmtree(OUT)
-db_conn.init_schema()
-annotations_db.delete_project(POOL)
+_dbcheck.init_schema()
+_dbcheck.delete_project(POOL)
 
-c = TestClient(app)
+# A server with auth turned on rejects every call below until we sign in, so
+# this has to happen before the first request, not in the auth section at the
+# bottom. AUTH_ON also decides which half of that section runs.
+AUTH_ON = False
+if BASE_URL:
+    AUTH_ON = c.get("/api/auth/me").json()["enabled"]
+    if AUTH_ON:
+        r = c.post("/api/auth/login", json={
+            "username": os.getenv("SMOKE_USER", "alice"),
+            "password": os.getenv("SMOKE_PASSWORD", "hunter2"),
+        })
+        assert r.status_code == 200, (
+            "target server has LABEL_TOOL_USERS set but SMOKE_USER/SMOKE_PASSWORD "
+            f"did not log in: {r.text}"
+        )
 
 
 def wait_job(job_id: str, timeout: float = 60) -> dict:
@@ -83,14 +132,14 @@ r = c.post("/api/label", json={
 assert r.status_code == 409, r.text
 print("model lock: mismatched model_id on an existing bank rejected (409)")
 
-saved0 = annotations_db.read_boxes(POOL, "pool", target)
+saved0 = _dbcheck.read_boxes(POOL, "pool", target)
 assert saved0 and saved0[0]["cls"] == "test_item", saved0
 print("annotation stored in DB:", saved0)
 
 # reload from disk -- bank must round-trip (embeddings/classes are still a file)
 reloaded = Bank(str(OUT))
 assert reloaded.classes == ["test_item"]
-assert annotations_db.list_by_status(POOL, "pool")["labeled"] == [target]
+assert _dbcheck.list_by_status(POOL, "pool")["labeled"] == [target]
 
 r = c.post("/api/score", json={"input_dir": POOL, "images": images[1:]})
 assert r.status_code == 200, r.text
@@ -142,8 +191,8 @@ still_correct = r.json()["boxes"]
 assert still_correct and still_correct[0]["cls"] == "test_item", still_correct
 # T-21: the DB-backed class registry (services/annotations_db.py) must keep
 # the same append-only ordering the old classes.txt guaranteed.
-assert annotations_db.get_classes(POOL, "pool") == ["test_item", "aaa_new_class"], \
-    annotations_db.get_classes(POOL, "pool")
+assert _dbcheck.get_classes(POOL, "pool") == ["test_item", "aaa_new_class"], \
+    _dbcheck.get_classes(POOL, "pool")
 print("class order stable after adding 'aaa_new_class':", still_correct)
 
 # /api/relabel: fix a generated label directly -- no new embeddings, unlike /api/label
@@ -277,7 +326,7 @@ assert all(d["cls"] in Bank(str(OUT)).classes and len(d["box"]) == 4 for d in dr
 print("predict:", len(drafts), "draft box(es)")
 
 # an empty bank must cost nothing rather than error
-EMPTY_POOL = HERE / "_smoke_empty"
+EMPTY_POOL = SCRATCH / "_smoke_empty"
 if EMPTY_POOL.exists():
     shutil.rmtree(EMPTY_POOL)
 r = c.post("/api/predict", json={"input_dir": str(EMPTY_POOL), "image": target})
@@ -334,7 +383,7 @@ meta = json.loads((OUT / "_bank" / "metadata.json").read_text(encoding="utf-8"))
 assert all("labeled_by" in i for insts in meta["instances"].values() for i in insts), meta
 
 # --- model lock, exercised directly (no HTTP, no model load needed) ---
-LOCK = HERE / "_smoke_lock"
+LOCK = SCRATCH / "_smoke_lock"
 if LOCK.exists():
     shutil.rmtree(LOCK)
 b = Bank(str(LOCK))
@@ -426,76 +475,126 @@ assert (OUT / "_bank" / "events.jsonl").exists()
 print("events:", stats)
 
 # --- FR-29 / T-13: upload ---
-UP = HERE / "_smoke_upload"
+UP = SCRATCH / "_smoke_upload"
 if UP.exists():
     shutil.rmtree(UP)
 jpeg = Path(images[0]).read_bytes()
 
-r = c.post("/api/upload", data={"dir": str(UP)},
-           files=[("files", ("fresh.jpg", jpeg, "image/jpeg"))])
-assert r.status_code == 200, r.text
-assert r.json()["saved"] == [str(UP / "fresh.jpg")], r.json()
+# T-13's precondition, enforced in code rather than left in a doc: a shared
+# (vm-mode) deployment with no users configured must refuse uploads outright.
+# Which of the two branches applies is a property of how the target server was
+# started, so ask it instead of assuming -- the same run has to work against a
+# local-mode dev server and a locked-down vm-mode container.
+if cfg["mode"] == "vm" and not c.get("/api/auth/me").json()["enabled"]:
+    r = c.post("/api/upload", data={"dir": str(UP)},
+               files=[("files", ("fresh.jpg", jpeg, "image/jpeg"))])
+    assert r.status_code == 403, r.text
+    assert not UP.exists(), "a refused upload must not have created its destination"
+    print("upload: refused on a vm-mode server with no users configured (T-13)")
+else:
 
-r = c.post("/api/upload", data={"dir": str(UP)}, files=[
-    ("files", ("notes.txt", b"not an image", "text/plain")),
-    ("files", ("fake.jpg", b"jpg in name only", "image/jpeg")),
-    ("files", ("fresh.jpg", jpeg, "image/jpeg")),
-    ("files", ("../escape.jpg", jpeg, "image/jpeg")),
-])
-why = {s["name"]: s["reason"] for s in r.json()["skipped"]}
-assert why.get("notes.txt") == "not an image file type", why
-assert why.get("fake.jpg") == "not a readable image", why
-assert why.get("fresh.jpg") == "already in this folder", why
-# The traversal is neutralised, not merely refused: the directory part is
-# dropped and the file lands inside the destination like any other.
-assert r.json()["saved"] == [str(UP / "escape.jpg")], r.json()
-assert not (HERE / "escape.jpg").exists()
+    r = c.post("/api/upload", data={"dir": str(UP)},
+               files=[("files", ("fresh.jpg", jpeg, "image/jpeg"))])
+    assert r.status_code == 200, r.text
+    assert r.json()["saved"] == [str(UP / "fresh.jpg")], r.json()
 
-real_cap, uploads.MAX_MB = uploads.MAX_MB, 0.000001
-r = c.post("/api/upload", data={"dir": str(UP)},
-           files=[("files", ("big.jpg", jpeg, "image/jpeg"))])
-uploads.MAX_MB = real_cap
-assert r.json()["saved"] == [] and "larger than" in r.json()["skipped"][0]["reason"], r.json()
+    r = c.post("/api/upload", data={"dir": str(UP)}, files=[
+        ("files", ("notes.txt", b"not an image", "text/plain")),
+        ("files", ("fake.jpg", b"jpg in name only", "image/jpeg")),
+        ("files", ("fresh.jpg", jpeg, "image/jpeg")),
+        ("files", ("../escape.jpg", jpeg, "image/jpeg")),
+    ])
+    why = {s["name"]: s["reason"] for s in r.json()["skipped"]}
+    assert why.get("notes.txt") == "not an image file type", why
+    assert why.get("fake.jpg") == "not a readable image", why
+    assert why.get("fresh.jpg") == "already in this folder", why
+    # The traversal is neutralised, not merely refused: the directory part is
+    # dropped and the file lands inside the destination like any other.
+    assert r.json()["saved"] == [str(UP / "escape.jpg")], r.json()
+    assert not (SCRATCH / "escape.jpg").exists()
 
-r = c.post("/api/upload", data={"dir": str(UP)},
-           files=[("files", ("   ", jpeg, "image/jpeg")), ("files", (".hidden.jpg", jpeg, "image/jpeg"))])
-assert r.json()["saved"] == [] and len(r.json()["skipped"]) == 2, r.json()
-print("upload: 1 saved, rejects non-images, oversize, duplicates and nameless files")
-shutil.rmtree(UP)
+    # The per-file size cap. In-process we can just move the cap under the running
+    # server; over HTTP there is nothing to reach into, so the run has to be
+    # configured with a small one and we send something bigger than it. Both sides
+    # read LABEL_TOOL_MAX_UPLOAD_MB from the environment, so harness and server
+    # agree on the number without a new endpoint to ask over.
+    if uploads is not None:
+        real_cap, uploads.MAX_MB = uploads.MAX_MB, 0.000001
+        r = c.post("/api/upload", data={"dir": str(UP)},
+                   files=[("files", ("big.jpg", jpeg, "image/jpeg"))])
+        uploads.MAX_MB = real_cap
+        assert r.json()["saved"] == [] and "larger than" in r.json()["skipped"][0]["reason"], r.json()
+    elif float(os.getenv("LABEL_TOOL_MAX_UPLOAD_MB", "25")) <= 2:
+        cap_bytes = int(float(os.environ["LABEL_TOOL_MAX_UPLOAD_MB"]) * 1024 * 1024)
+        # A real JPEG header followed by padding: the size check has to reject this
+        # before the decode check gets a chance to, which is the ordering under test.
+        oversize = jpeg + b"\0" * (cap_bytes + 1)
+        r = c.post("/api/upload", data={"dir": str(UP)},
+                   files=[("files", ("big.jpg", oversize, "image/jpeg"))])
+        assert r.json()["saved"] == [] and "larger than" in r.json()["skipped"][0]["reason"], r.json()
+    else:
+        print("upload: size-cap check skipped -- set LABEL_TOOL_MAX_UPLOAD_MB=1 on "
+              "both server and harness to exercise it over HTTP")
+
+    r = c.post("/api/upload", data={"dir": str(UP)},
+               files=[("files", ("   ", jpeg, "image/jpeg")), ("files", (".hidden.jpg", jpeg, "image/jpeg"))])
+    assert r.json()["saved"] == [] and len(r.json()["skipped"]) == 2, r.json()
+    print("upload: 1 saved, rejects non-images, oversize, duplicates and nameless files")
+    shutil.rmtree(UP)
 
 # --- T-12 / FR-30: with users configured, nothing works until you sign in ---
-os.environ["LABEL_TOOL_USERS"] = f"alice:{auth.hash_password('hunter2')}"
-try:
-    locked = TestClient(app)
-    assert locked.get("/api/config").status_code == 200          # public: UI needs it to boot
-    assert locked.post("/api/session", json={"input_dir": POOL}).status_code == 401
-    assert locked.get("/api/auth/me").json() == {"enabled": True, "user": None}
-    assert locked.post("/api/auth/login",
-                       json={"username": "alice", "password": "wrong"}).status_code == 401
-    assert locked.post("/api/auth/login",
-                       json={"username": "mallory", "password": "hunter2"}).status_code == 401
-    assert locked.post("/api/auth/login",
-                       json={"username": "alice", "password": "hunter2"}).status_code == 200
-    assert locked.get("/api/auth/me").json() == {"enabled": True, "user": "alice"}
-    assert locked.post("/api/session", json={"input_dir": POOL}).status_code == 200
+# In-process the harness configures the users itself. Over HTTP it can't touch
+# the server's environment, so the same assertions run against whatever the
+# target was started with: an auth-on server exercises the gate for real, an
+# auth-off one confirms the tool is wide open exactly as before.
+def check_auth(client, user: str, password: str, wrong_user: str = "mallory"):
+    assert client.get("/api/config").status_code == 200          # public: UI needs it to boot
+    assert client.post("/api/auth/logout").status_code == 200
+    assert client.post("/api/session", json={"input_dir": POOL}).status_code == 401
+    assert client.get("/api/auth/me").json() == {"enabled": True, "user": None}
+    assert client.post("/api/auth/login",
+                       json={"username": user, "password": "wrong"}).status_code == 401
+    assert client.post("/api/auth/login",
+                       json={"username": wrong_user, "password": password}).status_code == 401
+    assert client.post("/api/auth/login",
+                       json={"username": user, "password": password}).status_code == 200
+    assert client.get("/api/auth/me").json() == {"enabled": True, "user": user}
+    assert client.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
     # FR-31: the signed-in name lands on the instance this call creates
-    assert locked.post("/api/label", json={
+    assert client.post("/api/label", json={
         "input_dir": POOL, "image": images[2],
         "boxes": [{"cls": "test_item", "box": [10, 10, 60, 60]}],
     }).status_code == 200
     meta = json.loads((OUT / "_bank" / "metadata.json").read_text(encoding="utf-8"))
-    assert meta["instances"]["test_item"][-1]["labeled_by"] == "alice", meta["instances"]["test_item"][-1]
+    assert meta["instances"]["test_item"][-1]["labeled_by"] == user, meta["instances"]["test_item"][-1]
 
-    locked.post("/api/auth/logout")
-    assert locked.post("/api/session", json={"input_dir": POOL}).status_code == 401
-    print("auth: gated, logged in as alice, labeled_by recorded, logged out")
-finally:
-    del os.environ["LABEL_TOOL_USERS"]
+    client.post("/api/auth/logout")
+    assert client.post("/api/session", json={"input_dir": POOL}).status_code == 401
+    print(f"auth: gated, logged in as {user}, labeled_by recorded, logged out")
 
-assert c.get("/api/auth/me").json() == {"enabled": False, "user": None}
+
+if BASE_URL is None:
+    from .services import auth
+    from fastapi.testclient import TestClient as _TestClient
+
+    os.environ["LABEL_TOOL_USERS"] = f"alice:{auth.hash_password('hunter2')}"
+    try:
+        check_auth(_TestClient(app), "alice", "hunter2")
+    finally:
+        del os.environ["LABEL_TOOL_USERS"]
+    assert c.get("/api/auth/me").json() == {"enabled": False, "user": None}
+elif AUTH_ON:
+    check_auth(c, os.getenv("SMOKE_USER", "alice"), os.getenv("SMOKE_PASSWORD", "hunter2"))
+    c.post("/api/auth/login", json={"username": os.getenv("SMOKE_USER", "alice"),
+                                    "password": os.getenv("SMOKE_PASSWORD", "hunter2")})
+else:
+    assert c.get("/api/auth/me").json() == {"enabled": False, "user": None}
+    print("auth: target server has no users configured -- gate not exercised, "
+          "re-run against a server with LABEL_TOOL_USERS set to cover it")
+
 assert c.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
 shutil.rmtree(OUT)
-annotations_db.delete_project(POOL)
+_dbcheck.delete_project(POOL)
 print("SMOKE TEST OK")

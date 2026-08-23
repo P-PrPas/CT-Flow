@@ -70,10 +70,16 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
 
+      # Both halves in one environment: the smoke test drives the API service
+      # in-process while the sidecar runs for real on :8001, which is the only
+      # arrangement that exercises the seam between them.
       - name: Install (CPU torch -- the CUDA wheel is ~2.5 GB)
         run: |
+          pip install -r backend/requirements.txt
           pip install --extra-index-url https://download.pytorch.org/whl/cpu \
-            -r backend/requirements.txt
+            -r backend/requirements-vpe.txt
+          # requirements-vpe pulls the GUI build in for ultralytics' sake; a
+          # runner has no display, and the two packages cannot coexist.
           pip uninstall -y opencv-python
           pip install opencv-python-headless
 
@@ -95,8 +101,27 @@ jobs:
           mkdir -p "$MODELS_DIR"
           cd "$MODELS_DIR" && python -c "from ultralytics import YOLOE; YOLOE('yoloe-11s-seg.pt')"
 
+      # Prompt-bank bookkeeping (model lock, the pre-FR-36 self-heal, reembed's
+      # atomic commit). Needs torch but loads no checkpoint, so it runs first
+      # and fails in seconds if the bank is broken.
+      - name: Bank unit checks
+        env: { YOLO_CONFIG_DIR: /tmp, MPLCONFIGDIR: /tmp }
+        run: python -m backend._bank_test
+
+      - name: Start the inference sidecar
+        env: { YOLO_CONFIG_DIR: /tmp, MPLCONFIGDIR: /tmp }
+        run: |
+          uvicorn backend.vpe_service:app --port 8001 --log-level warning &
+          # /vpe/health loads no model, so this comes up in about a second --
+          # a checkpoint is only loaded by the first request that needs one.
+          for _ in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8001/vpe/health && break
+            sleep 1
+          done
+
       - name: Smoke test
         env:
           YOLO_CONFIG_DIR: /tmp
           MPLCONFIGDIR: /tmp
+          VPE_URL: http://127.0.0.1:8001
         run: python -m backend._smoke_test

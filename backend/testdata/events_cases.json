@@ -76,5 +76,48 @@
     "auto_written": 0,
     "corrections": 0,
     "correction_rate": null
+  },
+  "ties_log": [
+    {
+      "kind": "session",
+      "session": "s1",
+      "secs": null,
+      "written": 0
+    },
+    {
+      "kind": "auto",
+      "session": "s1",
+      "secs": null,
+      "written": 16
+    },
+    {
+      "kind": "fix",
+      "session": "s1",
+      "secs": null,
+      "written": 1
+    },
+    {
+      "kind": "label",
+      "session": "s1",
+      "secs": 12.2,
+      "written": 1
+    },
+    {
+      "kind": "label",
+      "session": "s1",
+      "secs": 12.3,
+      "written": 1
+    }
+  ],
+  "want_ties": {
+    "sessions": 1,
+    "sessions_reaching_autolabel": 1,
+    "abandonment": 0.0,
+    "manual_labels": 2,
+    "median_label_secs": 12.2,
+    "median_time_to_first_auto_secs": null,
+    "auto_written": 16,
+    "corrections": 1,
+    "correction_rate": 0.062
   }
 }

@@ -69,6 +69,12 @@ func routes(s *api.Server, log *slog.Logger) http.Handler {
 	mux.Handle("GET /api/browse", s.Handle(s.Browse))
 	mux.Handle("GET /api/image", s.Handle(s.GetImage))
 
+	mux.Handle("GET /api/history", s.Handle(s.GetHistory))
+	mux.Handle("POST /api/history", s.Handle(s.AddHistory))
+	mux.Handle("DELETE /api/history", s.Handle(s.DeleteHistory))
+	mux.Handle("GET /api/events", s.Handle(s.GetEvents))
+	mux.Handle("POST /api/events", s.Handle(s.AddEvent))
+
 	mux.Handle("GET /api/auth/me", s.Handle(s.AuthMe))
 	mux.Handle("POST /api/auth/login", s.Handle(s.AuthLogin))
 	mux.Handle("POST /api/auth/logout", s.Handle(s.AuthLogout))

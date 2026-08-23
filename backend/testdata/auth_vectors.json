@@ -5,22 +5,22 @@
   "verify": [
     {
       "password": "hunter2",
-      "stored": "pbkdf2$240000$85b1cb6565a1e72e45e7d54cee91e98d$a8006ade8e953b60528e9ed08393ac010b434a938339d7148906519b3e99c623",
+      "stored": "pbkdf2$240000$08b9c2afd8128c44c7b3b244d8ea4d35$dd228b80812b3663b0a520319a4e2c0d7301043b9547a02aae93845299971880",
       "expect": true
     },
     {
       "password": "hunter3",
-      "stored": "pbkdf2$240000$85b1cb6565a1e72e45e7d54cee91e98d$a8006ade8e953b60528e9ed08393ac010b434a938339d7148906519b3e99c623",
+      "stored": "pbkdf2$240000$08b9c2afd8128c44c7b3b244d8ea4d35$dd228b80812b3663b0a520319a4e2c0d7301043b9547a02aae93845299971880",
       "expect": false
     },
     {
       "password": "",
-      "stored": "pbkdf2$240000$85b1cb6565a1e72e45e7d54cee91e98d$a8006ade8e953b60528e9ed08393ac010b434a938339d7148906519b3e99c623",
+      "stored": "pbkdf2$240000$08b9c2afd8128c44c7b3b244d8ea4d35$dd228b80812b3663b0a520319a4e2c0d7301043b9547a02aae93845299971880",
       "expect": false
     },
     {
       "password": "correct horse battery staple",
-      "stored": "pbkdf2$240000$4f8dfb1e962bdc932efc44cd17f217af$46d851d834380454b5372af7cc7d00f15d9dcbee0cd73c267a5033b280a62d8c",
+      "stored": "pbkdf2$240000$c4d8cae7f96072065b24bc072e4c19a0$8f914c005c5ca5b600f4e25294e2f00e6dd6483f432ff2d03e7073d1b0ce878c",
       "expect": true
     },
     {

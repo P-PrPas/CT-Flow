@@ -153,6 +153,24 @@ def gen_events(tmp: Path) -> dict:
     empty = tmp / "events_empty"
     empty.mkdir(parents=True, exist_ok=True)
     both["want_empty"] = events.summary(str(empty))
+
+    # Rounding ties. Python's round() goes to the even digit on an exact tie and
+    # works on the float's true binary value; the obvious port (round(v*1000)/1000)
+    # does neither. One fix over sixteen auto-labels is exactly 0.0625, so the two
+    # disagree on a number a real project can produce -- 0.062 here, 0.063 there.
+    ties = [{"kind": "session", "session": "s1", "secs": None, "written": 0},
+            {"kind": "auto", "session": "s1", "secs": None, "written": 16},
+            {"kind": "fix", "session": "s1", "secs": None, "written": 1},
+            # median of an even count is the mean of the middle two: 12.2 and
+            # 12.3 average to 12.25, another exact tie at one decimal place.
+            {"kind": "label", "session": "s1", "secs": 12.2, "written": 1},
+            {"kind": "label", "session": "s1", "secs": 12.3, "written": 1}]
+    d2 = tmp / "events_ties"
+    (d2 / "_bank").mkdir(parents=True, exist_ok=True)
+    (d2 / "_bank" / "events.jsonl").write_text(
+        "".join(json.dumps(e) + "\n" for e in ties), encoding="utf-8")
+    both["ties_log"] = ties
+    both["want_ties"] = events.summary(str(d2))
     return both
 
 
@@ -243,6 +261,11 @@ def check():
         empty = Path(tmp) / "empty"
         empty.mkdir()
         assert events.summary(str(empty)) == ev["want_empty"]
+        t = Path(tmp) / "ties"
+        (t / "_bank").mkdir(parents=True)
+        (t / "_bank" / "events.jsonl").write_text(
+            "".join(json.dumps(e) + "\n" for e in ev["ties_log"]), encoding="utf-8")
+        assert events.summary(str(t)) == ev["want_ties"], events.summary(str(t))
 
     from .routers import export
 

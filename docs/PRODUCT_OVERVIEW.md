@@ -36,7 +36,7 @@ PostgreSQL (internal/infra/store):
 
 - **Bank ใช้ mean-pooling ต่อคลาส ไม่ใช่ NN-matching ต่อ instance.** เอกสารออกแบบเดิม (`../docs/yoloe-auto-label-tool-design.md`) ตั้งใจให้ bank แยกแยะ variation ภายในคลาสเดียวกันด้วยการ match แบบ nearest-neighbor แต่ implementation จริงเฉลี่ย embedding ทุกตัวในคลาสให้เหลือตัวแทนเดียว (`inference/bank.py`, `mean_vpe()`) — เพียงพอสำหรับคลาสที่รูปลักษณ์ค่อนข้างสม่ำเสมอ แต่จะเริ่มด้อยลงถ้าคลาสมีความหลากหลายสูง (multi-modal)
 - **ไม่มี active-learning selector จริง** สิ่งที่ใกล้เคียงที่สุดคือการเรียงภาพในพูลจาก "confidence ต่ำสุดก่อน" บนหน้า UI ซึ่งเป็นการประมาณ ไม่ใช่ตัวเลือกภาพเชิงกลยุทธ์ตามที่เอกสารออกแบบเดิมตั้งใจ
-- **มี authentication ฝั่ง backend แบบ opt-in** (`/api/auth/*` + session middleware) แต่ยังไม่มีหน้า login บน UI — งานถัดไปคือ OIDC Login System
+- **มี OIDC authentication แบบเดียวกับ `corpus-core` ครบทั้ง backend/frontend** พร้อม login, callback, HttpOnly session, logout และ local username/password fallback
 - **ไม่มีปุ่มอัปโหลดไฟล์** การนำภาพเข้าโฟลเดอร์ `/opt/mount/project` เป็นเรื่อง filesystem หรือ network share ที่อยู่นอกขอบเขตของแอป (ออกแบบมาให้รันบนเซิร์ฟเวอร์ที่แชร์ ไม่ใช่เครื่องส่วนตัว)
 - **การ retrain closed-set detector จากป้ายที่สะสมได้ยังไม่ implement** เป็นเป้าหมายระยะยาวตามเอกสารออกแบบเดิม (เมื่อมีข้อมูล label สะสมมากพอ) แต่ยังไม่มีส่วนใดของโค้ดที่ทำสิ่งนี้
 - **ระบบ OIDC login/workspace เต็มรูปแบบยังไม่มี** — local session auth ฝั่ง backend พร้อมแล้ว แต่ยังไม่มี UI และการเชื่อมกับ Identity Provider; งานนี้อยู่ใน milestone ถัดไป ส่วนการย้าย label/box storage ไป PostgreSQL (T-21) และ export หลาย format ทำเสร็จแล้ว ดู [NEXT_STEPS.md](./NEXT_STEPS.md)

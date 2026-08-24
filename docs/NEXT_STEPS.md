@@ -10,7 +10,7 @@
 - PostgreSQL เก็บ annotation metadata และรองรับ concurrent labeling
 - CI มี `go`, `python` และ `smoke` jobs และ merge commit ล่าสุดผ่านแล้ว
 - ระบบเหมาะกับ PoC และทีมภายในที่ใช้ instance เดียว ยังไม่ใช่ production-scale deployment
-- Backend authentication เดิมเป็น opt-in username/password session แต่ frontend ยังไม่มีหน้า login
+- OIDC login แบบเดียวกับ `corpus-core` ทำครบทั้ง Go backend และ Next.js frontend แล้ว; local username/password ยังเป็น fallback
 
 ## หลักการจัดลำดับ
 
@@ -28,21 +28,17 @@
 
 เกณฑ์จบ: เอกสารที่ใช้ onboarding และ operation ระบุชื่อ command, CI และสถานะปัจจุบันตรงกับ repository และมี deployment checklist สำหรับข้อมูลเก่า
 
-### Phase 1 — OIDC Login System
+### Phase 1 — OIDC Login System ✅
 
-สถานะ: เป็น milestone ถัดไป — **รอรายละเอียดจากผู้ใช้ก่อนเริ่ม implementation**
+สถานะ: ทำเสร็จ 2026-08-24 ตาม flow ของ `corpus-core`
 
-งานนี้จะมาแทนหรือครอบ authentication แบบ local เดิม โดยยังไม่ตัดสินรายละเอียดแทนผู้ใช้ล่วงหน้า จุดที่ต้องกำหนดใน specification คือ:
-
-1. Identity Provider, issuer, client, environments และ redirect/logout URLs
-2. Authorization Code Flow + PKCE, state/nonce และการตรวจ issuer, audience, expiry และ JWKS
-3. Application session/cookie, logout, session expiry และการป้องกัน token ไม่ให้รั่วไปถึง browser หรือ log
-4. การ map claims ไปเป็น user/role และ policy ของ protected endpoints
-5. การย้ายจาก `LABEL_TOOL_USERS` และการคง/เลิกใช้ `/api/auth/*` เดิม
-6. Login UI, unauthenticated state, expired session และ error handling
-7. Unit, integration และ end-to-end tests รวม local development และ rollout/rollback plan
-
-เกณฑ์จบของ phase นี้ควรกำหนดหลังได้รับรายละเอียด OIDC โดยอย่างน้อยต้อง login ได้จริง, endpoint ที่ป้องกันไว้ต้องตรวจ identity ได้, logout/expiry ทำงานถูกต้อง และไม่มี access token หลุดไปอยู่ใน client storage หรือ response ที่ไม่จำเป็น
+- Authorization-code redirect และ server-side code exchange ผ่าน OIDC discovery
+- ใช้ `sub` เป็น audit identity ที่เสถียร และแสดงชื่อจาก `preferred_username` → `email` → `sub`
+- CSRF `state` อยู่ใน HttpOnly cookie และถูกตรวจแบบ constant-time ก่อน exchange
+- provider token อยู่ฝั่ง Go เท่านั้น; browser ได้เฉพาะ application-session cookie อายุ 12 ชั่วโมง
+- login/callback/logout UI, unauthenticated และ expired-session redirect ทำงานครบ
+- `LABEL_TOOL_USERS` และ `/api/auth/login` เดิมยังใช้เป็น local fallback ได้
+- integration test ใช้ mock OIDC provider ครอบ redirect, callback, claim mapping, session cookie และ state mismatch
 
 ### Phase 2 — Model quality: small-object classes
 
@@ -59,7 +55,6 @@
 ทำเมื่อมีผู้ใช้จริงยืนยันความต้องการ:
 
 - Upload dropzone ที่เรียก `POST /api/upload` ผ่าน login
-- Login/permission UI หลัง OIDC phase จบ
 - ส่ง usage events จาก frontend ให้ข้าม session และข้ามเครื่องได้จริง
 - เพิ่ม frontend type-check/build เข้า CI
 - เพิ่ม export-format picker ใน UI หาก workflow ต้องใช้ COCO/VOC โดยตรง
@@ -83,7 +78,7 @@
 
 ## Decision gates
 
-- **OIDC:** รอ detailed brief ก่อนออกแบบหรือแก้ auth code
+- **OIDC:** เสร็จแล้ว; เพิ่ม role/workspace เฉพาะเมื่อมี policy จริง
 - **Model quality:** ทำ crop experiment ก่อน NN-matching
 - **Scale:** วัดจำนวนผู้ใช้, instance และ job concurrency ก่อนเพิ่ม Redis/eviction
 - **Production:** กำหนด security, deployment และ observability requirements ก่อนเปิดใช้งานนอกทีมภายใน

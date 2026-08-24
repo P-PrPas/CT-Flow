@@ -74,7 +74,7 @@ pool.
 | GPU (CUDA) inference | Ready | on by default in Docker; falls back to CPU with a one-line build-arg override |
 | Auto-label + review mode | Ready | predicted boxes are fully editable before they're accepted |
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
-| Session auth (`/api/auth/*`) | Backend only | legacy username/password session, off unless `LABEL_TOOL_USERS` is set; OIDC Login System is the next milestone; **no sign-in screen in the UI yet** |
+| OIDC login | Ready | company OIDC authorization-code flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
 | Image upload | Backend only | `POST /api/upload`, refuses to run without auth in `vm` mode; no dropzone in the UI yet |
 | Per-label attribution (`labeled_by`) | Ready | recorded once auth is on |
@@ -319,10 +319,28 @@ Opens with **`?`** in the app; inert while a text field or dialog has focus.
 
 ## Multi-user & security (optional)
 
-Off by default: with no `LABEL_TOOL_USERS` set, there is no login, and
+Off by default: with no OIDC variables or `LABEL_TOOL_USERS` set, there is no login, and
 `POST /api/upload` refuses to run in `vm` mode — a shared server that takes
-files from anyone who knows the URL is worse than no upload at all. Turn
-both on together:
+files from anyone who knows the URL is worse than no upload at all. To use the
+same company OIDC flow as `corpus-core`, register `<FRONTEND_URL>/entry/callback`
+with the provider and set:
+
+```bash
+OAUTH_CLIENT_ID=...
+OAUTH_CLIENT_SECRET=...
+OAUTH_ENDPOINT=https://issuer.example
+FRONTEND_URL=https://ct-flow.example
+LABEL_TOOL_SECRET=... # stable app-session signing key
+```
+
+The backend performs discovery, code exchange, and user-info lookup; provider
+tokens never enter browser storage or response bodies. It then issues the
+existing `labeltool_session` HttpOnly/SameSite=Lax cookie for 12 hours. The
+frontend includes login, callback, expired-session redirect, identity, and
+logout states. Audit attribution uses the stable `sub` claim while the UI shows
+`preferred_username` (falling back to email, then `sub`).
+
+Legacy local username/password login remains available when OIDC is not set:
 
 ```bash
 docker compose run --rm --entrypoint /app/api api -hash-password alice 'their password'
@@ -330,15 +348,11 @@ docker compose run --rm --entrypoint /app/api api -hash-password alice 'their pa
 python -c "import secrets; print(secrets.token_hex(32))"   # LABEL_TOOL_SECRET
 ```
 
-Then every endpoint except `GET /api/config` and `/api/auth/*` needs a signed
+When either login mode is enabled, every endpoint except the login/config routes needs a signed
 session cookie, and every prompt-bank instance records the `labeled_by` who
-taught it. Passwords are PBKDF2-HMAC-SHA256 (240k iterations) compared in
+taught it. Legacy passwords are PBKDF2-HMAC-SHA256 (240k iterations) compared in
 constant time — no user database, and the hash format is unchanged from before
 the Go port, so an existing `LABEL_TOOL_USERS` value keeps working.
-
-**There is no sign-in screen in the UI yet** — the header shows a permanent
-"Not signed in" indicator, and signing in currently means calling
-`POST /api/auth/login` directly. See [Known limitations](#known-limitations--roadmap).
 
 ## Configuration reference
 
@@ -353,6 +367,9 @@ the Go port, so an existing `LABEL_TOOL_USERS` value keeps working.
 | `DATABASE_URL` | set automatically in compose | where label/box storage lives (PostgreSQL, see [docs/DB_MIGRATION_PLAN.md](docs/DB_MIGRATION_PLAN.md)) — override to point at a different Postgres when running outside Docker |
 | `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — empty means no login and no upload |
 | `LABEL_TOOL_SECRET` | *(random per restart)* | signs the session cookie; unset = everyone signed out on every restart |
+| `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | *(empty)* | company OIDC client credentials; both required when OIDC is enabled |
+| `OAUTH_ENDPOINT` | *(empty)* | OIDC issuer/discovery URL |
+| `FRONTEND_URL` | `http://localhost:3000` | public origin; OIDC callback is `<FRONTEND_URL>/entry/callback` |
 | `LABEL_TOOL_MAX_UPLOAD_MB` | `25` | per-file upload cap |
 | `APP_UID` | `1000` | build arg — must own `DATA_DIR` on a Linux host, since the container doesn't run as root |
 | `TORCH_INDEX_URL` | `.../whl/cu126` | build arg — the pip index PyTorch installs from; override to `.../whl/cpu` for a GPU-less build |
@@ -374,7 +391,7 @@ is under `/api`, called only through the Next.js proxy
 | `project.go` | `/api` | `GET`/`POST`/`DELETE /history`, `GET`/`POST /events` |
 | `testset.go` | `/api/testset` | `POST /import`, `POST /remove`, `POST /label` |
 | `jobs.go` | `/api` | `GET /jobs/{id}`, `POST /score`, `POST /evaluate`, `POST /autolabel`, `POST /reembed` |
-| `auth.go` | `/api/auth` | `GET /me`, `POST /login`, `POST /logout` |
+| `auth.go` | `/api/auth`, `/api/public/login` | `GET /me`, `POST /login`, `POST /logout`, `GET /redirect`, `POST /callback` |
 | `upload.go` | `/api` | `POST /upload` |
 | `export.go` | `/api` | `GET /export` |
 
@@ -496,9 +513,8 @@ Full gap analysis: [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) and
 [`docs/REQUIREMENTS_STAKEHOLDER_ANALYSIS.md`](docs/REQUIREMENTS_STAKEHOLDER_ANALYSIS.md).
 The headline items:
 
-- **No sign-in / upload UI.** Both are fully built and tested on the backend
-  (`/api/auth/*`, `POST /api/upload`); nothing in the frontend calls them
-  yet. Building the two screens is the next-highest-leverage frontend work.
+- **No upload UI.** `POST /api/upload` is built and protected by auth, but the
+  frontend still has no dropzone.
 - **`defect`-class recall is still low even with `conf_by_class`** (0.25 F1).
   The box-size gap above points at cropping around each detection before
   running SAVPE on it as the next lever — unblocked and prioritized ahead of
@@ -529,7 +545,7 @@ whoever picks this project up next):
 | [`PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | Test coverage + current overall status |
 | [`EXPERIMENT_T01_CONF.md`](docs/EXPERIMENT_T01_CONF.md) | The conf-threshold experiment behind the accuracy table above |
 | [`REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md) | The Python→Go port: what moved, what stayed Python and why, and what it cost |
-| [`NEXT_STEPS.md`](docs/NEXT_STEPS.md) | Active roadmap after the backend refactor; OIDC Login System is the next milestone |
+| [`NEXT_STEPS.md`](docs/NEXT_STEPS.md) | Active roadmap after the backend refactor and completed OIDC milestone |
 | [`GLOSSARY.md`](docs/GLOSSARY.md) | Terminology (SAVPE, prompt bank, etc.) in the order you'll meet it |
 
 ## Troubleshooting

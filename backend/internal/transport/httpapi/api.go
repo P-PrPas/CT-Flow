@@ -27,6 +27,7 @@ type Server struct {
 	Cfg     config.Config
 	Catalog *models.Catalog
 	Auth    *auth.Auth
+	OIDC    *auth.OIDC
 	Store   *store.Store
 	VPE     *vpe.Client
 	Jobs    *jobs.Tracker

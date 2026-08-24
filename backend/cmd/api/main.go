@@ -70,6 +70,14 @@ func main() {
 	defer stopSignals()
 
 	ctx := context.Background()
+	oidcAuth, err := auth.NewOIDC(ctx,
+		os.Getenv("OAUTH_CLIENT_ID"), os.Getenv("OAUTH_CLIENT_SECRET"),
+		os.Getenv("OAUTH_ENDPOINT"), os.Getenv("FRONTEND_URL"),
+	)
+	if err != nil {
+		log.Error("cannot configure OIDC", "err", err)
+		os.Exit(1)
+	}
 	db, err := store.Open(ctx, env("DATABASE_URL",
 		"postgresql://labeltool:labeltool@localhost:5432/labeltool"))
 	if err != nil {
@@ -86,7 +94,7 @@ func main() {
 	}
 
 	srv := &httpapi.Server{
-		Cfg: cfg, Catalog: catalog, Auth: auth.New(), Log: log,
+		Cfg: cfg, Catalog: catalog, Auth: auth.New(), OIDC: oidcAuth, Log: log,
 		Store: db,
 		VPE:   vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
 		Jobs:  jobs.NewTracker(),
@@ -175,6 +183,8 @@ func routes(s *httpapi.Server) http.Handler {
 	mux.Handle("GET /api/auth/me", s.Handle(s.AuthMe))
 	mux.Handle("POST /api/auth/login", s.Handle(s.AuthLogin))
 	mux.Handle("POST /api/auth/logout", s.Handle(s.AuthLogout))
+	mux.Handle("GET /api/public/login/redirect", s.Handle(s.OIDCRedirect))
+	mux.Handle("POST /api/public/login/callback", s.Handle(s.OIDCCallback))
 
 	// Anything else: JSON, not net/http's text 404, because lib/api.ts reads
 	// `detail` off every failed response.

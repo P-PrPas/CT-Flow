@@ -180,3 +180,13 @@ func TestUsersParsing(t *testing.T) {
 		t.Error("a wrong password or an unknown user must not authenticate")
 	}
 }
+
+func TestOIDCSessionIdentityCannotCollideWithLocalUsername(t *testing.T) {
+	value := OIDCSessionIdentity(OIDCIdentity{Subject: "company-user-1", Display: "alice"})
+	if !strings.HasPrefix(value, "oidc:") {
+		t.Fatalf("OIDC session identity = %q, want reserved oidc: prefix", value)
+	}
+	if _, parsed, found := strings.Cut(value, ":"); !found || VerifyPassword("pw", parsed) {
+		t.Fatal("an OIDC session identity was accepted as a LABEL_TOOL_USERS name:hash entry")
+	}
+}

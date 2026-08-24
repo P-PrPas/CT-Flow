@@ -1,4 +1,4 @@
-# The inference sidecar (backend/vpe_service.py): YOLOE, torch, and the prompt
+# The inference sidecar (backend/inference/service.py): YOLOE, torch, and the prompt
 # bank. Build context is label_tool/ (this repo's root), see docker-compose.yml.
 #
 # This is where the CUDA wheel and the baked checkpoints live now -- the API

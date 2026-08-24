@@ -22,7 +22,7 @@ services:
       - "${API_PORT:-8000}:8000"
 
   db:
-    # Published for the parity harness (backend/_parity.py, _smoke_test.py's
+    # Published for the parity harness (backend/tests/parity.py, smoke_test.py's
     # DB assertions) and adminer -- both run on the host, not in a container.
     # 5433 by default because a distro postgres commonly already holds 5432.
     ports:

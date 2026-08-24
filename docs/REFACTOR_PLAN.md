@@ -562,3 +562,14 @@ backend/                     backend ทั้งหมด ไม่ว่าภ
 ### ยืนยัน
 
 รัน image **ก่อนย้าย** (commit `aa8b4db`) คู่กับ **หลังย้าย** บน network เดียวกัน แล้ว diff ทีละ endpoint: **43/43 เหมือนกันทุกฟิลด์ รวม background job ทั้งสี่** — การจัดโครงไม่เปลี่ยนพฤติกรรมที่ client มองเห็นแม้แต่ฟิลด์เดียว · `go test ./...` เขียว · smoke test เขียว · self-check ฝั่ง Python เขียวหมด · UI ที่ :3000 ใช้งานได้ครบ
+
+## 12. CI สีเขียว (2026-08-24)
+
+Job `smoke` ไม่เคยได้รันจริงเลยตลอด port เพราะ `needs: [go, python]` และ job `python` แดงอยู่ก่อน · พอมันได้รันครั้งแรกก็เจอสองเรื่อง
+
+- **`pip uninstall opencv-python` ลบ `cv2/` ของ headless ไปด้วย** — สองแพ็กเกจนี้เป็นเจ้าของไดเรกทอรี `cv2/` เดียวกัน ถอนตัวหนึ่งจึงลบไฟล์ของอีกตัว แล้ว `pip install opencv-python-headless` ที่ตามมาตอบว่า "already satisfied" ไม่ติดตั้งซ้ำ · ผลคือ **ไม่เหลือ cv2 เลย** sidecar ตายตอน `import cv2` และ `/api/session` ตอบ 500 `internal error` · แก้ด้วย `--force-reinstall --no-deps` แล้วปิดท้ายด้วย `python -c "import cv2"` ให้ step นั้นแดงเองถ้าพลาดอีก
+- **ลูป health check เดิมแดงไม่เป็น** — `for ... curl && break; done` ครบ 30 รอบแล้วก็ผ่านไปเฉย ๆ service ที่ไม่เคยขึ้นจึงไปโผล่เป็น 500 ปริศนาอีก step หนึ่ง · ตอนนี้ทั้ง sidecar และ API เขียน log ลงไฟล์ ลูปจบด้วย `exit 1` พร้อม `cat` log และมี step `if: failure()` ท้าย job ดึง log ทั้งสองมาแสดง — API ตอบ `internal error` โดยตั้งใจ เหตุผลจริงมีอยู่ที่เดียวคือ log
+
+เก็บกวาดที่ตามมาด้วย: `smoke_test.py` ตัดสาขา in-process (TestClient) ที่ตายไปแล้วตั้งแต่ลบ FastAPI ทิ้ง — ตอนนี้บังคับ `SMOKE_BASE_URL` และบอกวิธีรันถ้าไม่ได้ตั้ง · comment ที่ยังอ้างชื่อไฟล์เก่า (`vpe_service.py`, `_smoke_test.py`, `requirements-vpe.txt`, `services/bank.py`) แก้ให้ตรงของจริง
+
+**ยืนยัน:** รัน smoke ครบชุดกับ Go API + sidecar จริง ทั้ง local mode (ได้ upload suite รวม size cap) และ vm mode — `SMOKE TEST OK` ทั้งคู่ · reproduce เคส cv2 ใน venv เปล่าจนเห็น `ModuleNotFoundError: No module named 'cv2'` แล้วยืนยันว่า `--force-reinstall --no-deps` ทำให้กลับมา import ได้

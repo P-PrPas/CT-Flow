@@ -1,23 +1,22 @@
 """One runnable check: open a session, label a box, verify the bank + the
 annotations in PostgreSQL land and survive a reload, then rescore the pool.
 
-Two ways to run it, and the second one is the point -- this is the parity
+It drives a running server over HTTP, which is the point -- this is the parity
 harness for the Go port (docs/REFACTOR_PLAN.md phase 0), not only a Python test:
 
-    python -m backend.tests.smoke_test                            # in-process (TestClient)
     SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test
 
-The HTTP form drives whatever is listening on that port -- FastAPI today, the
-Go service tomorrow -- so "Go passes the same assertions Python does" stays one
-command instead of a second suite that drifts.
+The same command drove FastAPI throughout the port and drives the Go service
+now, which is what made "Go passes the same assertions Python does" one command
+instead of a second suite that drifts.
 
-Two things the HTTP form needs from its environment:
+Two things it needs from its environment:
   * the server must resolve the same filesystem paths this process does (run it
     on the host, or bind-mount so SMOKE_POOL means the same thing on both
     sides) -- input_dir crosses the wire as a plain string;
   * nothing else -- in particular NOT torch. Every assertion here goes over
     HTTP or reads a plain file; the checks that construct Bank() directly moved
-    to backend/_bank_test.py so this can be driven from a machine that has no
+    to backend/tests/bank_test.py so this can be driven from a machine that has no
     reason to carry a CUDA wheel.
 
 Environment: SMOKE_BASE_URL, SMOKE_POOL, SMOKE_USER/SMOKE_PASSWORD (only when
@@ -29,12 +28,14 @@ import shutil
 import time
 from pathlib import Path
 
+import httpx
+
 from . import dbcheck as _dbcheck
 
 HERE = Path(__file__).parent
 # input_dir is the only path a client ever sends -- the bank lives in a fixed
-# .ctflow subfolder of it (see backend/deps.py); labels and test-set membership
-# live in PostgreSQL, keyed by this same POOL path.
+# .ctflow subfolder of it (see internal/platform/config); labels and test-set
+# membership live in PostgreSQL, keyed by this same POOL path.
 POOL = os.getenv("SMOKE_POOL") or str(HERE / "fixtures" / "pool")
 # Scratch fixtures that get sent to the server as a path (input_dir, an
 # upload destination) have to sit where the server is allowed to look, which
@@ -45,20 +46,14 @@ OUT = Path(POOL) / ".ctflow"
 TEST = OUT / "testset"
 
 BASE_URL = os.getenv("SMOKE_BASE_URL")
-if BASE_URL:
-    import httpx
-
-    # 120s: an evaluate/autolabel pass over the fixture pool is a real
-    # inference run, and a cold model load on CPU is not fast.
-    c = httpx.Client(base_url=BASE_URL, timeout=120)
-    uploads = None  # in-process-only knob, see the upload section
-else:
-    from fastapi.testclient import TestClient
-
-    from .app import app
-    from .routers import uploads
-
-    c = TestClient(app)
+if not BASE_URL:
+    raise SystemExit(
+        "set SMOKE_BASE_URL to the API to drive, e.g.\n"
+        "  SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test"
+    )
+# 120s: an evaluate/autolabel pass over the fixture pool is a real inference
+# run, and a cold model load on CPU is not fast.
+c = httpx.Client(base_url=BASE_URL, timeout=120)
 
 if OUT.exists():
     try:
@@ -80,18 +75,16 @@ _dbcheck.delete_project(POOL)
 # A server with auth turned on rejects every call below until we sign in, so
 # this has to happen before the first request, not in the auth section at the
 # bottom. AUTH_ON also decides which half of that section runs.
-AUTH_ON = False
-if BASE_URL:
-    AUTH_ON = c.get("/api/auth/me").json()["enabled"]
-    if AUTH_ON:
-        r = c.post("/api/auth/login", json={
-            "username": os.getenv("SMOKE_USER", "alice"),
-            "password": os.getenv("SMOKE_PASSWORD", "hunter2"),
-        })
-        assert r.status_code == 200, (
-            "target server has LABEL_TOOL_USERS set but SMOKE_USER/SMOKE_PASSWORD "
-            f"did not log in: {r.text}"
-        )
+AUTH_ON = c.get("/api/auth/me").json()["enabled"]
+if AUTH_ON:
+    r = c.post("/api/auth/login", json={
+        "username": os.getenv("SMOKE_USER", "alice"),
+        "password": os.getenv("SMOKE_PASSWORD", "hunter2"),
+    })
+    assert r.status_code == 200, (
+        "target server has LABEL_TOOL_USERS set but SMOKE_USER/SMOKE_PASSWORD "
+        f"did not log in: {r.text}"
+    )
 
 
 def wait_job(job_id: str, timeout: float = 60) -> dict:
@@ -458,18 +451,11 @@ else:
     assert r.json()["saved"] == [str(UP / "escape.jpg")], r.json()
     assert not (SCRATCH / "escape.jpg").exists()
 
-    # The per-file size cap. In-process we can just move the cap under the running
-    # server; over HTTP there is nothing to reach into, so the run has to be
-    # configured with a small one and we send something bigger than it. Both sides
-    # read LABEL_TOOL_MAX_UPLOAD_MB from the environment, so harness and server
-    # agree on the number without a new endpoint to ask over.
-    if uploads is not None:
-        real_cap, uploads.MAX_MB = uploads.MAX_MB, 0.000001
-        r = c.post("/api/upload", data={"dir": str(UP)},
-                   files=[("files", ("big.jpg", jpeg, "image/jpeg"))])
-        uploads.MAX_MB = real_cap
-        assert r.json()["saved"] == [] and "larger than" in r.json()["skipped"][0]["reason"], r.json()
-    elif float(os.getenv("LABEL_TOOL_MAX_UPLOAD_MB", "25")) <= 2:
+    # The per-file size cap. There is nothing to reach into over HTTP, so the run
+    # has to be configured with a small cap and we send something bigger than it.
+    # Both sides read LABEL_TOOL_MAX_UPLOAD_MB from the environment, so harness
+    # and server agree on the number without a new endpoint to ask over.
+    if float(os.getenv("LABEL_TOOL_MAX_UPLOAD_MB", "25")) <= 2:
         cap_bytes = int(float(os.environ["LABEL_TOOL_MAX_UPLOAD_MB"]) * 1024 * 1024)
         # A real JPEG header followed by padding: the size check has to reject this
         # before the decode check gets a chance to, which is the ordering under test.
@@ -519,17 +505,7 @@ def check_auth(client, user: str, password: str, wrong_user: str = "mallory"):
     print(f"auth: gated, logged in as {user}, labeled_by recorded, logged out")
 
 
-if BASE_URL is None:
-    from .services import auth
-    from fastapi.testclient import TestClient as _TestClient
-
-    os.environ["LABEL_TOOL_USERS"] = f"alice:{auth.hash_password('hunter2')}"
-    try:
-        check_auth(_TestClient(app), "alice", "hunter2")
-    finally:
-        del os.environ["LABEL_TOOL_USERS"]
-    assert c.get("/api/auth/me").json() == {"enabled": False, "user": None}
-elif AUTH_ON:
+if AUTH_ON:
     check_auth(c, os.getenv("SMOKE_USER", "alice"), os.getenv("SMOKE_PASSWORD", "hunter2"))
     c.post("/api/auth/login", json={"username": os.getenv("SMOKE_USER", "alice"),
                                     "password": os.getenv("SMOKE_PASSWORD", "hunter2")})

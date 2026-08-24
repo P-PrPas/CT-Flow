@@ -123,9 +123,14 @@ jobs:
             -r backend/inference/requirements.txt
           pip install -r backend/tests/requirements.txt
           # the sidecar's requirements pull in the GUI build for ultralytics' sake; a
-          # runner has no display, and the two packages cannot coexist.
+          # runner has no display, and the two packages cannot coexist. They own the
+          # same cv2/ directory, so uninstalling one deletes the other's files and the
+          # reinstall below is then skipped as "already satisfied" -- leaving no cv2 at
+          # all, which the sidecar only discovers at import time. --force-reinstall is
+          # what puts the files back; the import is the proof it did.
           pip uninstall -y opencv-python
-          pip install opencv-python-headless
+          pip install --force-reinstall --no-deps opencv-python-headless
+          python -c "import cv2; print('cv2', cv2.__version__)"
 
       - name: Cache model weight
         id: cache-weight
@@ -152,22 +157,27 @@ jobs:
 
       - name: Start the inference sidecar
         run: |
-          uvicorn backend.inference.service:app --port 8001 --log-level warning &
-          # /vpe/health loads no model, so this is up in about a second; a
-          # checkpoint is only loaded by the first request that needs one.
-          for _ in $(seq 1 30); do
-            curl -fs http://127.0.0.1:8001/vpe/health && break
+          uvicorn backend.inference.service:app --port 8001 --log-level warning \
+            >/tmp/vpe.log 2>&1 &
+          # /vpe/health loads no model, so this is up as soon as torch is imported; a
+          # checkpoint is only loaded by the first request that needs one. Give up
+          # loudly: a sidecar that never starts used to sail through this loop and
+          # surface a step later as an unexplained 500 from the API.
+          for _ in $(seq 1 60); do
+            curl -fs http://127.0.0.1:8001/vpe/health && exit 0
             sleep 1
           done
+          echo "the inference sidecar never became healthy:"; cat /tmp/vpe.log; exit 1
 
       - name: Start the API
         run: |
           (cd backend && go build -o /tmp/ctflow-api ./cmd/api)
-          /tmp/ctflow-api &
+          /tmp/ctflow-api >/tmp/api.log 2>&1 &
           for _ in $(seq 1 30); do
-            curl -fs http://127.0.0.1:8000/api/config >/dev/null && break
+            curl -fs http://127.0.0.1:8000/api/config >/dev/null && exit 0
             sleep 1
           done
+          echo "the API never became healthy:"; cat /tmp/api.log; exit 1
 
       # Drives the API over HTTP exactly as the browser does. The same command
       # ran against FastAPI throughout the port, which is what made "Go behaves
@@ -176,3 +186,10 @@ jobs:
         env:
           SMOKE_BASE_URL: http://127.0.0.1:8000
         run: python -m backend.tests.smoke_test
+
+      # Both services log to a file, and both are background processes whose
+      # output no step would otherwise show. The API answers "internal error" by
+      # design -- the reason only exists here.
+      - name: Service logs
+        if: failure()
+        run: tail -n 100 /tmp/vpe.log /tmp/api.log

@@ -20,11 +20,11 @@
 - upload ปฏิเสธไฟล์ไม่ใช่ภาพ/เกินขนาด/ชื่อซ้ำ/ไม่มีชื่อ, path traversal ในชื่อไฟล์ถูกตัดทิ้งแทนที่จะพาไฟล์ออกนอกโฟลเดอร์
 - auth: ไม่ login โดนปฏิเสธทุก endpoint ยกเว้น `/api/config`, รหัส/ชื่อผู้ใช้ผิดได้ `401` ทั้งคู่, login แล้วผ่าน, `labeled_by` ถูกบันทึกลง instance, logout แล้วกลับไป `401`
 
-ฝั่ง Go มี `_test.go` ต่อ package: `config` (path safety 6 เคส รวม symlink หนีออกนอก root และ sibling ที่ชื่อขึ้นต้นเหมือน root), `auth` (เทียบกับ vector ที่ Python สร้าง), `store` (รวม concurrency test จริงกับ PostgreSQL — หลาย goroutine สร้างคลาสใหม่พร้อมกัน ยืนยันว่า class index ไม่ชนกัน, ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 4.1), `metrics`, `events`, `export`, `models`, `images`
+ฝั่ง Go มี `_test.go` ต่อ package: `config` (path safety 6 เคส รวม symlink หนีออกนอก root และ sibling ที่ชื่อขึ้นต้นเหมือน root), `auth` (เทียบกับ vector ที่ Python สร้าง), `store` (รวม concurrency test จริงกับ PostgreSQL — หลาย goroutine สร้างคลาสใหม่พร้อมกัน ยืนยันว่า class index ไม่ชนกัน, ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 4.1), `metrics`, `events`, `export`, `models`, `images` · `transport/httpapi` (76 เคส: รูปแบบ `{"detail": ...}` ทุกชนิด error, trust boundary ของ path ต่อ endpoint ที่รับ path, auth gate รวมทั้ง route ที่ยังไม่มีใครเขียน, กฎชื่อไฟล์/ขนาด/ชนิดของ upload, `/config` `/browse` `/image` `/jobs`) — Store กับ VPE เป็น nil โดยตั้งใจ: handler ที่ต้องมี database เพื่อตอบเรื่องพวกนี้คือ handler ที่วาง boundary ไว้ผิดที่
 
 ฝั่ง Python ที่เหลือมี self-check ของตัวเอง: `python -m backend.inference.models`, `python -m backend.tools.{metrics,groundtruth}`, `python -m backend.tests.dbcheck`, `python -m backend.tests.gen_testdata --check` · อีกสองตัวต้องมี torch จึงรันในงาน `smoke`: `python -m backend.tests.bank_test` (การบันทึกของ prompt bank) และ `python -m backend.tests.stream_test` (stream ของ sidecar ต้องถูกผลิตจาก thread เดียว ไม่งั้น lock ต่อ checkpoint ค้างถาวร)
 
-**ไม่มี** integration test ฝั่ง frontend, ไม่มีการวัด coverage เป็นตัวเลข
+**ไม่มี** integration test ฝั่ง frontend · `go test -cover` ของ `transport/httpapi` อยู่ที่ 28.6% ของ statement — ส่วนที่เหลือคือ handler ที่ต้องมี PostgreSQL หรือโมเดลจริง ซึ่ง `tests/smoke_test.py` คุมแบบ end-to-end ไม่ได้ตั้งเป้า coverage เป็นตัวเลขกับ package อื่น
 
 ## CI/CD
 

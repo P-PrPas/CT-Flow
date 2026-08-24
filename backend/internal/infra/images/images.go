@@ -2,7 +2,7 @@
 //
 // Shared by the pool and the test set, since both are just "images directly
 // inside this directory, matching config.ImageExts". Ported from
-// backend/inference/images.py.
+// the FastAPI service's services/images.py.
 package images
 
 import (

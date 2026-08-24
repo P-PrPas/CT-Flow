@@ -81,9 +81,10 @@ func TestIdentifyAgainstPythonCookies(t *testing.T) {
 	}
 }
 
-// The other direction: a cookie Go issues has to be readable by Python. During
-// the strangler phase a login can be served by one process and the next request
-// by the other, so both directions are live at once.
+// The other direction: a cookie Go issues has to be the shape Python read. The
+// port is done, but the vectors stay bidirectional -- this is the check that
+// would have caught a token format quietly drifting while both were live, and
+// it is what pins the format now that only one side is left to read it.
 func TestIssuedTokenShapeIsPythonReadable(t *testing.T) {
 	a := NewWithSecret(load(t).Secret)
 	tok := a.Issue("alice")

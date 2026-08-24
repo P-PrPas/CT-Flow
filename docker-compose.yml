@@ -64,10 +64,10 @@ services:
       LABEL_TOOL_MODE: vm
       LABEL_TOOL_VM_ROOT: /opt/mount/project
       LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
-      # Both services verify the session cookie, so they have to sign it with
-      # the same key -- a login served by one and a request proxied to the
-      # other must agree. Leaving this unset gives each process its own random
-      # secret and every proxied request 401s.
+      # Signs the session cookie. Only this service has any auth -- the sidecar
+      # never sees a cookie. Leaving it unset gives each start its own random
+      # secret, so everyone is signed out whenever the API restarts; set it to
+      # keep sessions across a redeploy.
       LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       VPE_URL: http://vpe:8001

@@ -2,7 +2,9 @@
 // measured (T-07).
 //
 // On disk so the learning curve survives a browser, a machine, and a colleague.
-// Ported from backend/inference/history.py.
+// Ported out of the FastAPI service's services/bank.py, which owned the file
+// alongside the bank itself; here it is its own package because nothing about
+// storing a list of points needs to know what a prompt bank is.
 //
 // A point is opaque here: the frontend decides what it puts in one
 // (lib/history.ts), and this only has to store and return them in order. That

@@ -22,7 +22,7 @@
 
 ฝั่ง Go มี `_test.go` ต่อ package: `config` (path safety 6 เคส รวม symlink หนีออกนอก root และ sibling ที่ชื่อขึ้นต้นเหมือน root), `auth` (เทียบกับ vector ที่ Python สร้าง), `store` (รวม concurrency test จริงกับ PostgreSQL — หลาย goroutine สร้างคลาสใหม่พร้อมกัน ยืนยันว่า class index ไม่ชนกัน, ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 4.1), `metrics`, `events`, `export`, `models`, `images`
 
-ฝั่ง Python ที่เหลือมี self-check ของตัวเอง: `python -m backend.services.{models,metrics,groundtruth}`, `python -m backend.tests.dbcheck`, `python -m backend.tests.gen_testdata --check`
+ฝั่ง Python ที่เหลือมี self-check ของตัวเอง: `python -m backend.inference.models`, `python -m backend.tools.{metrics,groundtruth}`, `python -m backend.tests.dbcheck`, `python -m backend.tests.gen_testdata --check` · อีกสองตัวต้องมี torch จึงรันในงาน `smoke`: `python -m backend.tests.bank_test` (การบันทึกของ prompt bank) และ `python -m backend.tests.stream_test` (stream ของ sidecar ต้องถูกผลิตจาก thread เดียว ไม่งั้น lock ต่อ checkpoint ค้างถาวร)
 
 **ไม่มี** integration test ฝั่ง frontend, ไม่มีการวัด coverage เป็นตัวเลข
 

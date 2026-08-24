@@ -8,7 +8,8 @@
 //
 //	<state_dir>/_bank/events.jsonl
 //
-// One JSON object per line, append-only. Ported from backend/inference/events.py
+// One JSON object per line, append-only. Ported from the FastAPI service's
+// services/events.py
 // -- a text file and a loop, no database and no analytics service, because
 // these are a handful of counters per labeling day and the file lands in the
 // same folder as the dataset it describes.

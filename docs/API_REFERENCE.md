@@ -18,7 +18,7 @@
 
 ## Auth (`internal/transport/httpapi/auth.go`, prefix `/api/auth`)
 
-ปิดอยู่โดย default ทั้งชุด สร้าง user ด้วย `python -m backend.services.auth <ชื่อ> <รหัสผ่าน>` แล้วใส่ผลลัพธ์ใน `LABEL_TOOL_USERS` (คั่นด้วย comma)
+ปิดอยู่โดย default ทั้งชุด สร้าง user ด้วย `docker compose run --rm --entrypoint /app/api api -hash-password <ชื่อ> '<รหัสผ่าน>'` แล้วใส่ผลลัพธ์ใน `LABEL_TOOL_USERS` (คั่นด้วย comma)
 
 ### `GET /api/auth/me`
 - **Response:** `{"enabled": bool, "user": str|null}` — `enabled=false` แปลว่าเซิร์ฟเวอร์นี้ไม่มีระบบ login ไม่ใช่ว่ายังไม่ได้ login

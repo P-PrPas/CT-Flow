@@ -18,9 +18,9 @@ var Public = map[string]bool{
 
 // RequireLogin is T-12 / FR-30. Inert until LABEL_TOOL_USERS is set.
 //
-// It wraps the whole mux, including the strangler proxy, so a route still
-// served by the Python service is gated here exactly as it was there -- porting
-// an endpoint to Go must never be what makes it reachable signed out.
+// It wraps the whole mux rather than sitting on each route, so the gate is on
+// by default and Public above is the only way out of it -- a route added later
+// is protected by having been forgotten, not exposed by it.
 func (s *Server) RequireLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions || Public[r.URL.Path] || !auth.Enabled() {

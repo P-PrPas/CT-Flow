@@ -155,6 +155,14 @@ jobs:
       - name: Bank unit checks
         run: python -m backend.tests.bank_test
 
+      # The sidecar's streams must be produced on one thread, or the
+      # per-checkpoint lock gets released by a thread that never took it and
+      # stays held for the life of the process. Two overlapping passes is all it
+      # takes, which nothing else here does -- the smoke test and the parity
+      # differ both drive one call at a time.
+      - name: Stream threading check
+        run: python -m backend.tests.stream_test
+
       - name: Start the inference sidecar
         run: |
           uvicorn backend.inference.service:app --port 8001 --log-level warning \

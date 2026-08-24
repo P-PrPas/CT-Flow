@@ -22,8 +22,10 @@ checked_path(); the roots check below is a second line of defence for a
 misconfigured deployment, not the primary one. docker-compose.yml must not
 publish this port.
 """
+import asyncio
 import json
 import os
+import threading
 from pathlib import Path
 
 import cv2
@@ -60,13 +62,48 @@ def _bank(state_dir: str) -> Bank:
 def _ndjson(lines):
     """One JSON object per line. A stream can't change its status code after
     the first byte, so a failure mid-pass arrives as a line carrying "error"
-    and the caller has to look for it -- see the API service's vpe client."""
-    def gen():
-        try:
-            for line in lines:
-                yield json.dumps(line, ensure_ascii=False) + "\n"
-        except Exception as exc:
-            yield json.dumps({"error": str(exc)}) + "\n"
+    and the caller has to look for it -- see the API service's vpe client.
+
+    `lines` is drained by one dedicated thread from start to finish, and that is
+    a correctness requirement, not a performance choice. Handing a *sync*
+    generator to StreamingResponse makes Starlette pull it through
+    iterate_in_threadpool, which runs every single next() on whichever anyio
+    worker happens to be free -- so a generator holding inference/vpe.py's
+    per-checkpoint threading.RLock across its yields acquires it on one thread
+    and releases it on another. That raises "cannot release un-acquired lock"
+    and, far worse, leaves the lock held at count=1 for the life of the process:
+    every later teach/predict on that checkpoint then blocks forever.
+
+    Two overlapping passes are all it takes, which the Go API produces by design
+    (score/evaluate/autolabel/reembed each run in their own goroutine). The
+    FastAPI backend never tripped it because it never ran two passes at once.
+
+    A slow consumer is not backpressured. The queue is bounded by one pass's
+    worth of lines, which the caller already holds in memory anyway, and a bound
+    here would instead wedge the pump -- with the model lock held -- whenever a
+    client walked away mid-pass.
+    """
+    async def gen():
+        loop = asyncio.get_running_loop()
+        out: asyncio.Queue = asyncio.Queue()
+
+        def pump():
+            try:
+                for line in lines:
+                    loop.call_soon_threadsafe(
+                        out.put_nowait, json.dumps(line, ensure_ascii=False) + "\n")
+            except Exception as exc:
+                loop.call_soon_threadsafe(
+                    out.put_nowait, json.dumps({"error": str(exc)}) + "\n")
+            finally:
+                # Always, so a disconnected client cannot leave gen() awaiting a
+                # line that is never coming.
+                loop.call_soon_threadsafe(out.put_nowait, None)
+
+        threading.Thread(target=pump, name="vpe-stream", daemon=True).start()
+        while (chunk := await out.get()) is not None:
+            yield chunk
+
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 

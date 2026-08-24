@@ -15,6 +15,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
@@ -60,6 +62,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Cancelled on SIGINT/SIGTERM, which is what `docker compose down` and a
+	// redeploy send. Used only for shutdown -- startup work below wants a
+	// context that a stray Ctrl-C during boot does not half-cancel.
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
 	ctx := context.Background()
 	db, err := store.Open(ctx, env("DATABASE_URL",
 		"postgresql://labeltool:labeltool@localhost:5432/labeltool"))
@@ -95,10 +104,39 @@ func main() {
 		// slow link is legitimately slow. Idle connections are still reaped.
 		IdleTimeout: 120 * time.Second,
 	}
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Error("server stopped", "err", err)
-		os.Exit(1)
+	// ListenAndServe off the main goroutine so the signal wait below is what the
+	// process blocks on, and a listen failure still exits rather than hanging.
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.ListenAndServe() }()
+
+	select {
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Error("server stopped", "err", err)
+			os.Exit(1)
+		}
+	case <-sigCtx.Done():
+		// Stop accepting, then let the requests already in flight answer. 8s and
+		// not longer: Docker's default stop grace period is 10 seconds, and a
+		// drain that outlasts it is not a graceful shutdown, it is a SIGKILL
+		// with extra steps. Requests here are short anyway -- the long work is a
+		// background job the poller checks on, not a held-open request.
+		//
+		// Those background jobs do NOT survive this, and deliberately are not
+		// waited for -- a pass can legitimately have hours left, and the job
+		// tracker they report into is in this process's memory anyway (see
+		// internal/platform/jobs). A restart mid-pass has always meant the UI
+		// polls an id that no longer exists and gets a 404; making shutdown
+		// clean does not change that, and pretending to wait would just turn a
+		// redeploy into a SIGKILL after the grace period.
+		log.Info("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Error("shutdown did not finish cleanly", "err", err)
+		}
 	}
+	// db.Close is the deferred call above, which os.Exit used to skip entirely.
 }
 
 func routes(s *httpapi.Server) http.Handler {

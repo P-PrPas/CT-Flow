@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 // Error is a refusal the sidecar chose the status for.
@@ -35,11 +34,17 @@ type Client struct {
 	http *http.Client
 }
 
-// New builds a client. The timeout is long because one request can cover a full
-// inference pass over a folder; a stalled pass is noticed by the absence of
-// streamed lines rather than by this.
+// New builds a client with no overall timeout, deliberately. http.Client's
+// Timeout covers reading the body too, so any value here is really a cap on a
+// whole inference pass -- and a 30 minute one silently contradicted the six
+// hours jobs.go budgets, cutting a large pool's pass off mid-stream after the
+// database had already taken half its writes.
+//
+// The context is the one deadline, and every call below carries one:
+// request-scoped calls die with the request, background passes with
+// jobContext(). One place to look, and it cannot disagree with itself.
 func New(baseURL string) *Client {
-	return &Client{base: baseURL, http: &http.Client{Timeout: 30 * time.Minute}}
+	return &Client{base: baseURL, http: &http.Client{}}
 }
 
 // ClassCount is one taught class and how many instances it holds.

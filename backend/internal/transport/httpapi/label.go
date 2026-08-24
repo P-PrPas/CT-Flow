@@ -43,16 +43,20 @@ func (s *Server) SaveLabel(w http.ResponseWriter, r *http.Request) error {
 	if len(req.Boxes) == 0 {
 		return errStatus(http.StatusBadRequest, "no boxes")
 	}
+	// The trust boundary comes before anything that uses the path, the database
+	// included: a rejected path should not be able to reach a query at all, and
+	// a path outside the root should answer 403 rather than whatever the test-set
+	// check happens to say about it.
+	image, err := s.checkedPath(req.Image)
+	if err != nil {
+		return err
+	}
 	isTest, err := s.Store.IsTest(r.Context(), inputDir, req.Image)
 	if err != nil {
 		return err
 	}
 	if isTest {
 		return errStatus(http.StatusBadRequest, testSetRefusal)
-	}
-	image, err := s.checkedPath(req.Image)
-	if err != nil {
-		return err
 	}
 
 	var user *string
@@ -94,6 +98,10 @@ func (s *Server) Relabel(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	image, err := s.checkedPath(req.Image)
+	if err != nil {
+		return err
+	}
 	isTest, err := s.Store.IsTest(r.Context(), inputDir, req.Image)
 	if err != nil {
 		return err
@@ -126,10 +134,6 @@ func (s *Server) Relabel(w http.ResponseWriter, r *http.Request) error {
 			"unknown class(es) %s -- use Save to bank to teach a new class", pyReprList(unknown)))
 	}
 
-	image, err := s.checkedPath(req.Image)
-	if err != nil {
-		return err
-	}
 	if !readableImage(image) {
 		return errStatus(http.StatusBadRequest, "cannot read image")
 	}

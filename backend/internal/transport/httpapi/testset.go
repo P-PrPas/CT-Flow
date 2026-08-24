@@ -131,16 +131,17 @@ func (s *Server) TestsetLabel(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// Path check first: the trust boundary comes before the path reaches a query.
+	image, err := s.checkedPath(req.Image)
+	if err != nil {
+		return err
+	}
 	isTest, err := s.Store.IsTest(r.Context(), inputDir, req.Image)
 	if err != nil {
 		return err
 	}
 	if !isTest {
 		return errStatus(http.StatusBadRequest, "this image isn't in the test set yet -- import it first")
-	}
-	image, err := s.checkedPath(req.Image)
-	if err != nil {
-		return err
 	}
 	if !readableImage(image) {
 		return errStatus(http.StatusBadRequest, "cannot read image")

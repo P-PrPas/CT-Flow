@@ -57,8 +57,14 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", spec.MediaType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+spec.Filename+`"`)
 	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(body)
-	return err
+	if _, err := w.Write(body); err != nil {
+		// Returning this would have Handle try to write a JSON error over a
+		// response whose headers and body are already out -- a second
+		// WriteHeader, and a zip with an error object stapled to the end of it.
+		// The client is gone; the log is the only place left to say so.
+		s.Log.Error("writing the export body", "path", r.URL.Path, "err", err)
+	}
+	return nil
 }
 
 // imageDims reads an image's size from its header. An image that has moved or

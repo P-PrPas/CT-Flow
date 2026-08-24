@@ -22,11 +22,14 @@
 
 ### `GET /api/public/login/redirect`
 - **Response:** `{"redirectUrl": str}` + HttpOnly state cookie อายุ 5 นาที
+- state cookie เก็บ `<state>.<PKCE verifier>` ไว้ด้วยกัน (ทั้งสองส่วนเป็น base64url จึงไม่มี `.` ปนแน่นอน) — cookie เดียวที่มาไม่ครบไม่ได้ ดีกว่าสอง cookie ที่มาครึ่งเดียวได้
+- แนบ `code_challenge` (S256) **เฉพาะเมื่อ discovery document ของ provider ประกาศ `code_challenge_methods_supported: ["S256"]`** — provider ที่ไม่รองรับจะไม่ได้รับ parameter ที่ไม่ได้ขอ
 
 ### `POST /api/public/login/callback`
 - **Body:** `{"code": str, "state": str}`
 - **Response:** `{"enabled": true, "user": str, "mode": "oidc"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.)
-- **401** เมื่อ state ไม่ตรง, code exchange ล้มเหลว หรือ user-info ใช้ไม่ได้
+- **401** เมื่อ state ไม่ตรง, code exchange ล้มเหลว หรือ user-info ใช้ไม่ได้ — เทียบ state แบบ constant-time และลบ state cookie **ก่อน** แลก code
+- สำเร็จแล้ว upsert แถวใน `users` (`oid` = `sub` ของ provider) เพื่อให้ `sub` ที่ไปอยู่ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้ · เขียนไม่สำเร็จ **ไม่** ทำให้ login พัง (เป็นปัญหาฝั่ง reporting ไม่ใช่เหตุผลที่จะปฏิเสธ login ที่ถูกต้อง)
 
 ### `GET /api/auth/me`
 - **Response:** `{"enabled": bool, "user": str|null, "mode": "none"|"local"|"oidc"}` — `enabled=false` แปลว่าเซิร์ฟเวอร์นี้ไม่มีระบบ login ไม่ใช่ว่ายังไม่ได้ login
@@ -38,7 +41,9 @@
 - **400** ถ้าเซิร์ฟเวอร์ไม่ได้ตั้ง user ไว้เลย หรือ OIDC active อยู่ (local login เป็น fallback เท่านั้น)
 
 ### `POST /api/auth/logout`
-- ลบ cookie · **Response:** `{"enabled": bool, "user": null, "mode": "none"|"local"|"oidc"}`
+- ลบ cookie · **Response:** `{"enabled": bool, "user": null, "mode": "none"|"local"|"oidc", "logoutUrl"?: str}`
+- `logoutUrl` มีเฉพาะโหมด `oidc` และเฉพาะเมื่อ discovery document มี `end_session_endpoint` — frontend ต้องพา browser ไปที่ URL นั้น ไม่งั้น session ฝั่ง provider ยังอยู่ แล้วการกด "sign in" ครั้งถัดไปบนเครื่อง label ที่ใช้ร่วมกันจะ login เงียบ ๆ เป็นคนเดิม
+- **ไม่**แนบ `post_logout_redirect_uri`: parameter นั้นต้อง register กับ provider ก่อน และ logout ที่พังเพราะ URL ไม่ได้ register แย่กว่า logout ที่จบบนหน้า signed-out ของ provider เอง
 
 ---
 

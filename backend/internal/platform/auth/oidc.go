@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -17,6 +18,27 @@ import (
 type OIDC struct {
 	Provider *oidc.Provider
 	OAuth2   oauth2.Config
+
+	// PKCE is off unless the discovery document advertises S256. Sending a
+	// code_challenge a provider never asked for is how you find out at 3am
+	// that it rejects unknown parameters, and this flow already has a
+	// confidential client -- PKCE is defence in depth here, not the thing
+	// holding it up.
+	PKCE bool
+
+	// EndSession is the provider's RP-initiated logout endpoint, "" when the
+	// discovery document has none. Without it "sign out" only clears the
+	// CT-Flow cookie, and on the shared labelling machine this tool is
+	// deployed on (LABEL_TOOL_MODE=vm) the next click on "sign in" walks
+	// straight back in as the same person with no prompt.
+	EndSession string
+
+	// Secure is whether FRONTEND_URL is https, i.e. whether the cookies this
+	// deployment sets must carry Secure whatever the proxy in front of the API
+	// claims the scheme is. X-Forwarded-Proto is only as reliable as whoever
+	// configured the ingress; FRONTEND_URL is this deployment's own statement
+	// of its public URL and has to be right for the redirect to work at all.
+	Secure bool
 }
 
 type oidcClaims struct {
@@ -28,6 +50,7 @@ type oidcClaims struct {
 type OIDCIdentity struct {
 	Subject string
 	Display string
+	Email   string
 }
 
 // A colon cannot occur in a LABEL_TOOL_USERS username because it is that
@@ -58,6 +81,15 @@ func NewOIDC(ctx context.Context, clientID, clientSecret, issuer, frontendURL st
 	if err != nil {
 		return nil, fmt.Errorf("OIDC discovery: %w", err)
 	}
+	// Both of these are optional in the discovery document, so a provider that
+	// omits them turns the feature off rather than failing the login. The error
+	// is ignored for the same reason: no extra claims is not a broken provider.
+	var meta struct {
+		EndSession    string   `json:"end_session_endpoint"`
+		CodeChallenge []string `json:"code_challenge_methods_supported"`
+	}
+	_ = provider.Claims(&meta)
+
 	return &OIDC{
 		Provider: provider,
 		OAuth2: oauth2.Config{
@@ -65,15 +97,27 @@ func NewOIDC(ctx context.Context, clientID, clientSecret, issuer, frontendURL st
 			Endpoint: provider.Endpoint(),
 			Scopes:   []string{oidc.ScopeOpenID, "email", "profile"},
 		},
+		PKCE:       slices.Contains(meta.CodeChallenge, "S256"),
+		EndSession: meta.EndSession,
+		Secure:     strings.HasPrefix(strings.ToLower(frontendURL), "https://"),
 	}, nil
 }
 
-func (o *OIDC) AuthCodeURL(state string) string { return o.OAuth2.AuthCodeURL(state) }
+func (o *OIDC) AuthCodeURL(state, verifier string) string {
+	if !o.PKCE {
+		return o.OAuth2.AuthCodeURL(state)
+	}
+	return o.OAuth2.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
+}
 
 // Identity exchanges the one-use code entirely on the server. Provider tokens
 // never become a response body, browser cookie, localStorage value, or log field.
-func (o *OIDC) Identity(ctx context.Context, code string) (OIDCIdentity, error) {
-	token, err := o.OAuth2.Exchange(ctx, code)
+func (o *OIDC) Identity(ctx context.Context, code, verifier string) (OIDCIdentity, error) {
+	var opts []oauth2.AuthCodeOption
+	if o.PKCE {
+		opts = append(opts, oauth2.VerifierOption(verifier))
+	}
+	token, err := o.OAuth2.Exchange(ctx, code, opts...)
 	if err != nil {
 		return OIDCIdentity{}, fmt.Errorf("exchange code: %w", err)
 	}
@@ -89,12 +133,13 @@ func (o *OIDC) Identity(ctx context.Context, code string) (OIDCIdentity, error) 
 	if claims.ID == "" {
 		return OIDCIdentity{}, fmt.Errorf("OIDC user info has no sub")
 	}
-	for _, display := range []string{claims.Username, claims.Email} {
+	email := strings.TrimSpace(claims.Email)
+	for _, display := range []string{claims.Username, email} {
 		if display = strings.TrimSpace(display); display != "" {
-			return OIDCIdentity{Subject: claims.ID, Display: display}, nil
+			return OIDCIdentity{Subject: claims.ID, Display: display, Email: email}, nil
 		}
 	}
-	return OIDCIdentity{Subject: claims.ID, Display: claims.ID}, nil
+	return OIDCIdentity{Subject: claims.ID, Display: claims.ID, Email: email}, nil
 }
 
 // OIDCSessionIdentity keeps the stable subject and human display name in the

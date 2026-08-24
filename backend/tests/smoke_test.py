@@ -510,7 +510,7 @@ if AUTH_ON:
     c.post("/api/auth/login", json={"username": os.getenv("SMOKE_USER", "alice"),
                                     "password": os.getenv("SMOKE_PASSWORD", "hunter2")})
 else:
-    assert c.get("/api/auth/me").json() == {"enabled": False, "user": None}
+    assert c.get("/api/auth/me").json() == {"enabled": False, "user": None, "mode": "none"}
     print("auth: target server has no users configured -- gate not exercised, "
           "re-run against a server with LABEL_TOOL_USERS set to cover it")
 

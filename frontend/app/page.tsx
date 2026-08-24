@@ -173,7 +173,9 @@ function Workspace({ auth }: { auth: api.AuthState }) {
               <button
                 className="chip btn-like"
                 title="Sign out"
-                onClick={() => api.logout().finally(() => window.location.assign("/entry/login"))}
+                onClick={() => api.logout()
+                  .then((out) => window.location.assign(out.logoutUrl || "/entry/login"))
+                  .catch(() => window.location.assign("/entry/login"))}
               >
                 <Icon name="user" size={12} /> {auth.user}
               </button>

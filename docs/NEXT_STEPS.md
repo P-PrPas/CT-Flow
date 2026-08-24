@@ -35,6 +35,9 @@
 - Authorization-code redirect และ server-side code exchange ผ่าน OIDC discovery
 - ใช้ `sub` เป็น audit identity ที่เสถียร และแสดงชื่อจาก `preferred_username` → `email` → `sub`
 - CSRF `state` อยู่ใน HttpOnly cookie และถูกตรวจแบบ constant-time ก่อน exchange
+- PKCE (S256) เปิดอัตโนมัติเมื่อ discovery document ของ provider ประกาศรองรับ — verifier เดินทางไปกับ state cookie ใบเดียวกัน
+- RP-initiated logout: ถ้า provider มี `end_session_endpoint` การ sign out จะพา browser ไปจบ session ฝั่ง provider ด้วย ไม่ใช่แค่ลบ cookie ของ CT-Flow
+- ตาราง `users` (`oid` = `sub`) ถูก upsert ทุกครั้งที่ login เพื่อให้ `sub` ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้
 - provider token อยู่ฝั่ง Go เท่านั้น; browser ได้เฉพาะ application-session cookie อายุ 12 ชั่วโมง
 - login/callback/logout UI, unauthenticated และ expired-session redirect ทำงานครบ
 - `LABEL_TOOL_USERS` และ `/api/auth/login` เดิมยังใช้เป็น local fallback ได้

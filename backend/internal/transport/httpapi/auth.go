@@ -5,6 +5,9 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
+	"strings"
+
+	"golang.org/x/oauth2"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/auth"
 )
@@ -22,6 +25,11 @@ var Public = map[string]bool{
 }
 
 const oidcStateCookie = "labeltool_oidc_state"
+
+// The state cookie carries the PKCE verifier next to the state, separated by a
+// ".". Neither half can contain one -- both are base64url -- and one cookie
+// that cannot half-arrive beats two that can.
+const oidcStateSep = "."
 
 // RequireLogin is inert until OIDC or legacy local users are configured.
 //
@@ -71,6 +79,10 @@ type authState struct {
 	Enabled bool    `json:"enabled"`
 	User    *string `json:"user"`
 	Mode    string  `json:"mode"`
+	// LogoutURL is set only by AuthLogout, and only when the provider offers
+	// RP-initiated logout. The browser has to be sent there for a sign-out to
+	// mean anything on a shared machine.
+	LogoutURL string `json:"logoutUrl,omitempty"`
 }
 
 func state(mode, user string) authState {
@@ -134,12 +146,9 @@ func (s *Server) OIDCRedirect(w http.ResponseWriter, r *http.Request) error {
 	if _, err := rand.Read(raw); err != nil {
 		return err
 	}
-	state := base64.RawURLEncoding.EncodeToString(raw)
-	http.SetCookie(w, &http.Cookie{
-		Name: oidcStateCookie, Value: state, Path: "/", MaxAge: 300,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureRequest(r),
-	})
-	writeJSON(w, http.StatusOK, map[string]string{"redirectUrl": s.OIDC.AuthCodeURL(state)})
+	login, verifier := base64.RawURLEncoding.EncodeToString(raw), oauth2.GenerateVerifier()
+	s.setStateCookie(w, r, login+oidcStateSep+verifier, 300)
+	writeJSON(w, http.StatusOK, map[string]string{"redirectUrl": s.OIDC.AuthCodeURL(login, verifier)})
 	return nil
 }
 
@@ -155,40 +164,82 @@ func (s *Server) OIDCCallback(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	cookie, err := r.Cookie(oidcStateCookie)
-	if err != nil || req.State == "" || len(cookie.Value) != len(req.State) ||
-		subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(req.State)) != 1 {
+	if err != nil {
 		return errStatus(http.StatusUnauthorized, "invalid login state")
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: oidcStateCookie, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureRequest(r),
-	})
-	identity, err := s.OIDC.Identity(r.Context(), req.Code)
+	want, verifier, _ := strings.Cut(cookie.Value, oidcStateSep)
+	if req.State == "" || len(want) != len(req.State) ||
+		subtle.ConstantTimeCompare([]byte(want), []byte(req.State)) != 1 {
+		return errStatus(http.StatusUnauthorized, "invalid login state")
+	}
+	s.setStateCookie(w, r, "", -1)
+	identity, err := s.OIDC.Identity(r.Context(), req.Code, verifier)
 	if err != nil {
 		return errStatus(http.StatusUnauthorized, "OIDC login failed")
 	}
+	s.recordUser(r, identity)
 	s.setSessionCookie(w, r, auth.OIDCSessionIdentity(identity))
 	writeJSON(w, http.StatusOK, state("oidc", identity.Display))
 	return nil
 }
 
+// recordUser is what keeps FR-31 answerable. Attribution stores the provider's
+// `sub` -- the only claim that survives someone being renamed -- and a `sub` on
+// its own is a UUID belonging to no other table. The users row is where it
+// becomes a person again.
+//
+// Best-effort on purpose: an identity ledger that cannot be written is a
+// reporting problem, not a reason to refuse an otherwise valid login.
+func (s *Server) recordUser(r *http.Request, identity auth.OIDCIdentity) {
+	if s.Store == nil {
+		return
+	}
+	if err := s.Store.UpsertUser(r.Context(), identity.Subject, identity.Display, identity.Email); err != nil {
+		s.Log.Warn("cannot record the OIDC user", "err", err)
+	}
+}
+
+func (s *Server) setStateCookie(w http.ResponseWriter, r *http.Request, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: oidcStateCookie, Value: value, Path: "/", MaxAge: maxAge,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.secureCookie(r),
+	})
+}
+
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, user string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: auth.Cookie, Value: s.Auth.Issue(user), Path: "/", MaxAge: auth.TTLSeconds,
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secureRequest(r),
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.secureCookie(r),
 	})
 }
 
-func secureRequest(r *http.Request) bool {
-	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+// secureCookie asks the deployment before it asks the proxy. X-Forwarded-Proto
+// is only as trustworthy as whoever configured the ingress, and one that
+// forgets to send it silently drops Secure from every session cookie on an
+// https site -- a downgrade nothing in the app would ever report.
+func (s *Server) secureCookie(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" ||
+		(s.OIDC != nil && s.OIDC.Secure)
 }
 
 // AuthLogout clears the cookie. Always 200, signed in or not.
+//
+// Under OIDC it also hands back the provider's end-session URL, because
+// clearing only CT-Flow's cookie makes "sign out" a lie: the provider session
+// outlives it, so the next "sign in" is silent and the next person at a shared
+// labelling machine is signed in as whoever left. No post_logout_redirect_uri
+// is attached -- that parameter has to be registered with the provider first,
+// and a logout rejected for an unregistered URL is worse than one that ends on
+// the provider's own signed-out page.
 func (s *Server) AuthLogout(w http.ResponseWriter, r *http.Request) error {
 	http.SetCookie(w, &http.Cookie{
 		Name: auth.Cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: secureRequest(r),
+		SameSite: http.SameSiteLaxMode, Secure: s.secureCookie(r),
 	})
-	writeJSON(w, http.StatusOK, state(s.authMode(), ""))
+	out := state(s.authMode(), "")
+	if s.OIDC != nil {
+		out.LogoutURL = s.OIDC.EndSession
+	}
+	writeJSON(w, http.StatusOK, out)
 	return nil
 }

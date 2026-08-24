@@ -589,3 +589,24 @@ func (s *Store) DeleteProject(ctx context.Context, inputDir string) error {
 		return err
 	})
 }
+
+// UpsertUser records who an OIDC subject is, so the `sub` sitting in
+// annotations.created_by and in the prompt bank's labeled_by can still be read
+// as a person's name a year from now. Called on every successful login, not
+// only the first: the provider is the source of truth for the display name and
+// email, and both change without CT-Flow being told.
+//
+// No transaction -- it is one statement, and the row it touches is not one any
+// other statement here reads.
+func (s *Store) UpsertUser(ctx context.Context, oid, username, email string) error {
+	var mail *string
+	if email != "" {
+		mail = &email
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO users (oid, username, email) VALUES ($1, $2, $3)
+		ON CONFLICT (oid) DO UPDATE
+		   SET username = EXCLUDED.username, email = EXCLUDED.email, updated_at = now()`,
+		oid, username, mail)
+	return err
+}

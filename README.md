@@ -338,7 +338,15 @@ tokens never enter browser storage or response bodies. It then issues the
 existing `labeltool_session` HttpOnly/SameSite=Lax cookie for 12 hours. The
 frontend includes login, callback, expired-session redirect, identity, and
 logout states. Audit attribution uses the stable `sub` claim while the UI shows
-`preferred_username` (falling back to email, then `sub`).
+`preferred_username` (falling back to email, then `sub`); every login upserts a
+`users` row keyed on that `sub`, which is what lets an attribution be read back
+as a person's name rather than an opaque id.
+
+PKCE (S256) and RP-initiated logout both switch on only when the provider's
+discovery document advertises them, so a provider that supports neither is
+unaffected. When it does advertise `end_session_endpoint`, signing out ends the
+session at the provider too -- without that, "sign out" on a shared labelling
+machine leaves the next sign-in silent and signed in as whoever left.
 
 Legacy local username/password login remains available when OIDC is not set:
 

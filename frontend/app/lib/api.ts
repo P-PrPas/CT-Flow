@@ -26,7 +26,13 @@ const post = (url: string, body: unknown) =>
 
 export const imgUrl = (path: string) => `/api/image?path=${encodeURIComponent(path)}`;
 
-export type AuthState = { enabled: boolean; user: string | null; mode: "none" | "local" | "oidc" };
+export type AuthState = {
+  enabled: boolean; user: string | null; mode: "none" | "local" | "oidc";
+  /** Only on the logout response, and only under OIDC: where to send the
+   *  browser so the provider session ends too. Clearing our own cookie alone
+   *  leaves the next "sign in" silent. */
+  logoutUrl?: string;
+};
 
 export function getAuth(): Promise<AuthState> {
   return request("/api/auth/me");

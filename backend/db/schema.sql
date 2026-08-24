@@ -50,3 +50,32 @@ CREATE TABLE IF NOT EXISTS annotations (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS annotations_image_id_idx ON annotations (image_id);
+
+-- Who a `sub` is. OIDC attribution (FR-31) writes the provider's subject into
+-- annotations.created_by, events.jsonl and the prompt bank's labeled_by,
+-- because that is the one claim that survives a rename -- and it is also
+-- unreadable, so on its own it turns "who taught this prompt" into a UUID
+-- nobody can answer. This table is the answer, written on every login.
+--
+-- Shape follows corpus-core's users table (`oid` is its name for the `sub`
+-- claim), minus what CT-Flow has no screen for: no firstname/lastname split,
+-- no picture_url, no is_admin, no metadata blob. Add them when something
+-- actually renders them.
+--
+-- Deliberately *not* copied from corpus-core: UNIQUE on username and email.
+-- Only `oid` identifies a person. A provider that reissues a
+-- preferred_username to a new subject -- an account deleted and recreated --
+-- would turn a legitimate login into a constraint violation, and the rejected
+-- one would be the current employee.
+--
+-- annotations.created_by stays TEXT rather than becoming a FK: legacy
+-- LABEL_TOOL_USERS logins have no row here, and the prompt bank is a JSON file
+-- written by the Python sidecar, which cannot join anything.
+CREATE TABLE IF NOT EXISTS users (
+    id          BIGSERIAL PRIMARY KEY,
+    oid         TEXT NOT NULL UNIQUE,
+    username    TEXT NOT NULL,
+    email       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

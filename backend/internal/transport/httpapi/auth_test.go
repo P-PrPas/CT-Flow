@@ -305,16 +305,17 @@ func TestOIDCLoginFlow(t *testing.T) {
 	if unconfigured, err := auth.NewOIDC(context.Background(), "", "", "", "https://ctflow.example"); err != nil || unconfigured != nil {
 		t.Fatalf("FRONTEND_URL alone enabled OIDC: oidc=%v err=%v", unconfigured, err)
 	}
-	tokenHits := 0
+	tokenHits, sentVerifier := 0, ""
 	var provider *httptest.Server
 	provider = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
-			fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"userinfo_endpoint":%q,"jwks_uri":%q,"response_types_supported":["code"],"subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"]}`,
-				provider.URL, provider.URL+"/authorize", provider.URL+"/token", provider.URL+"/userinfo", provider.URL+"/jwks")
+			fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"userinfo_endpoint":%q,"jwks_uri":%q,"end_session_endpoint":%q,"code_challenge_methods_supported":["S256"],"response_types_supported":["code"],"subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"]}`,
+				provider.URL, provider.URL+"/authorize", provider.URL+"/token", provider.URL+"/userinfo", provider.URL+"/jwks", provider.URL+"/logout")
 		case "/token":
 			tokenHits++
+			sentVerifier = r.FormValue("code_verifier")
 			if err := r.ParseForm(); err != nil || r.Form.Get("code") != "company-code" {
 				http.Error(w, `{"error":"bad code"}`, http.StatusBadRequest)
 				return
@@ -358,8 +359,16 @@ func TestOIDCLoginFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := redirectURL.Query().Get("state")
-	if state == "" || stateCookie.Name != oidcStateCookie || stateCookie.Value != state || !stateCookie.HttpOnly {
+	cookieState, verifier, split := strings.Cut(stateCookie.Value, oidcStateSep)
+	if state == "" || stateCookie.Name != oidcStateCookie || cookieState != state || !stateCookie.HttpOnly {
 		t.Fatalf("state cookie and redirect do not match: cookie=%+v url=%s", stateCookie, redirectURL)
+	}
+	// PKCE is on because this provider's discovery document advertises S256.
+	// The challenge on the wire must be the hash, never the verifier itself.
+	challenge := redirectURL.Query().Get("code_challenge")
+	if !oidcAuth.PKCE || !split || verifier == "" || challenge == "" ||
+		redirectURL.Query().Get("code_challenge_method") != "S256" || challenge == verifier {
+		t.Fatalf("no S256 PKCE challenge on the authorize URL: %s", redirectURL)
 	}
 
 	callback := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{
@@ -369,6 +378,9 @@ func TestOIDCLoginFlow(t *testing.T) {
 	w := do(s, s.OIDCCallback, callback)
 	if w.Code != http.StatusOK {
 		t.Fatalf("callback status = %d: %s", w.Code, w.Body)
+	}
+	if sentVerifier != verifier {
+		t.Errorf("token exchange sent code_verifier %q, want the one from the state cookie %q", sentVerifier, verifier)
 	}
 	if body := decode(t, w); body["user"] != "alice" || body["mode"] != "oidc" {
 		t.Errorf("callback body = %v", body)
@@ -391,6 +403,13 @@ func TestOIDCLoginFlow(t *testing.T) {
 	me.AddCookie(session)
 	if body := decode(t, do(s, s.AuthMe, me)); body["user"] != "alice" {
 		t.Errorf("auth state displays %v, want alice", body["user"])
+	}
+
+	// Signing out has to end the provider session too, or the next "sign in" on
+	// a shared labelling machine is silent and lands on the previous person.
+	out := do(s, s.AuthLogout, httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil))
+	if got := decode(t, out)["logoutUrl"]; got != provider.URL+"/logout" {
+		t.Errorf("logout returned logoutUrl %v, want the provider end_session_endpoint", got)
 	}
 
 	bad := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{

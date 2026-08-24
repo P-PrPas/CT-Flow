@@ -1,6 +1,6 @@
 # CT-Flow — แผน Refactor Backend จาก Python เป็น Go
 
-> **สถานะ: ✅ เสร็จแล้ว (2026-08-23)** — ดูบันทึกความคืบหน้าจริงที่หัวข้อ 10 · เขียน 2026-08-23 · branch ตั้งต้น `feature/database-migration` (3e6f3f3) · ข้อตัดสินใจทั้ง 5 ข้ออยู่ที่หัวข้อ 8
+> **สถานะ: ✅ เสร็จและ merge เข้า `main` แล้ว (2026-08-24)** — merge commit `40b0c7f` จาก PR #2 · ดูบันทึกความคืบหน้าจริงที่หัวข้อ 10 · เอกสารนี้เป็นบันทึกของ refactor ที่เสร็จแล้ว งานถัดไปอยู่ใน [NEXT_STEPS.md](./NEXT_STEPS.md)
 >
 > **ที่มา:** ระบบ login ของบริษัทเป็น Go — backend ตัวนี้ต้องปรับตามเพื่อให้ integrate กันได้ ไม่ใช่เพราะ Python มีปัญหาด้าน performance **หลักการที่ตามมาจากเหตุผลนี้: ส่วนไหนคงเป็น Python service ได้ ให้คงไว้ ไม่ต้องฝืน**
 >
@@ -443,15 +443,15 @@ CT-Flow/
 
 ## 9. Definition of done ของทั้งโปรเจกต์
 
-- [ ] `docker compose up --build` จากเครื่องเปล่า → UI ที่ :3000 ใช้งานได้ครบ workflow (label → score → evaluate → autolabel → review → export)
-- [ ] `SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test` ผ่านทุก assertion
-- [ ] `go vet ./... && go test ./...` เขียว รวม concurrency test ของ `_get_or_create_class`
-- [ ] `tests/parity.py` diff Go กับ FastAPI (commit สุดท้ายก่อนเฟส 3) ได้ 0 ความต่าง — รันครั้งสุดท้ายก่อนลบ FastAPI
-- [ ] เปิด project เก่าที่มีอยู่แล้ว (`.ctflow/_bank/` + แถวใน Postgres จาก T-21) แล้ว label/evaluate ต่อได้ **โดยไม่มี migration step ใด ๆ**
-- [ ] CI มี job `go` + `smoke` และ smoke ยังจับ regression ได้จริง (ทดสอบด้วยการจงใจใส่ `sort.Strings()` ใน class order เหมือนที่เคยทดสอบฝั่ง Python)
-- [ ] image `api` เล็กกว่า 50 MB
-- [ ] `README.md`, `docs/ARCHITECTURE.md`, `docs/API_REFERENCE.md`, `docs/PROJECT_STATUS.md`, `.env.example` อัปเดตตรงกับของจริง
-- [ ] `frontend/` มี 0 บรรทัดที่เปลี่ยน (`git diff --stat main -- frontend/` ว่างเปล่า)
+- [x] `docker compose up --build` จากเครื่องเปล่า → UI ที่ :3000 ใช้งานได้ครบ workflow (label → score → evaluate → autolabel → review → export)
+- [x] `SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test` ผ่านทุก assertion
+- [x] `go vet ./... && go test ./...` เขียว รวม concurrency test ของ `_get_or_create_class`
+- [x] `tests/parity.py` diff Go กับ FastAPI (commit สุดท้ายก่อนเฟส 3) ได้ 0 ความต่าง — รันครั้งสุดท้ายก่อนลบ FastAPI
+- [x] เปิด project เก่าที่มีอยู่แล้ว (`.ctflow/_bank/` + แถวใน Postgres จาก T-21) แล้ว label/evaluate ต่อได้ **โดยไม่มี migration step ใด ๆ**
+- [x] CI มี job `go` + `python` + `smoke` และ smoke ยังจับ regression ได้จริง
+- [x] image `api` เล็กกว่า 50 MB
+- [x] `README.md`, `docs/ARCHITECTURE.md`, `docs/API_REFERENCE.md`, `docs/PROJECT_STATUS.md`, `.env.example` อัปเดตตรงกับของจริง
+- [x] `frontend/` มี 0 บรรทัดที่เปลี่ยน (`git diff --stat main -- frontend/` ว่างเปล่า)
 
 ---
 
@@ -520,13 +520,13 @@ CT-Flow/
 
 **ยืนยันครั้งสุดท้าย:** `go test ./...` เขียว · smoke test เขียวทั้งแบบ auth-off และ auth-on · `_parity` 43/43 เทียบกับ FastAPI ก่อนลบ (รวม background job ทั้งสี่) · golden vectors ทั้ง 4 ไฟล์ตรง · UI ที่ :3000 ใช้งานได้ครบ workflow · เปิด project เดิมที่มี `.ctflow/_bank/` + แถวใน Postgres เดิมได้โดยไม่ต้อง migrate อะไรเลย
 
-### สิ่งที่ยัง **ไม่ได้** แก้ (ตั้งใจ)
+### สิ่งที่ยัง **ไม่ได้** แก้ ณ ตอน merge (ตั้งใจ)
 
 ทั้งสามข้อนี้อยู่นอก scope ตั้งแต่ต้น และ Go ไม่ได้ช่วยข้อไหนเลย — ดูหัวข้อ 0:
 
 1. Job tracker ยังอยู่ใน memory ไม่มี TTL ไม่ persist (`internal/platform/jobs`)
 2. VRAM ไม่มี eviction — โมเดลที่โหลดแล้วอยู่ยาวจนจบ process (`inference/vpe.py`)
-3. ยังไม่มีหน้า login บน UI (backend พร้อมมานานแล้ว)
+3. ยังไม่มีหน้า login บน UI — งานถัดไปจะออกแบบเป็น OIDC Login System ตาม [NEXT_STEPS.md](./NEXT_STEPS.md)
 
 ---
 

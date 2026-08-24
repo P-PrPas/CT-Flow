@@ -1,40 +1,89 @@
-# Label Tool — ข้อเสนองานต่อไป
+# CT-Flow — แผนงานถัดไป
 
-เอกสารนี้สรุปช่องว่างระหว่างสิ่งที่ implement จริงกับเป้าหมายเดิม พร้อมรายการงานที่ควรพิจารณาทำต่อ เรียงตามความสำคัญโดยประมาณ **ไม่ใช่ requirements spec ฉบับสมบูรณ์** — เป็นจุดตั้งต้นสำหรับวางแผนงานรอบถัดไป ใช้คู่กับ [PROJECT_STATUS.md](./PROJECT_STATUS.md) และ [PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md)
+> **สถานะ ณ 2026-08-24:** backend refactor เสร็จครบเฟส 0–3 และ merge เข้า `main` แล้วที่ commit `40b0c7f` จาก PR #2 ผลิตภัณฑ์ทำ workflow หลักได้ครบตั้งแต่ label → score → evaluate → auto-label → review → export
+>
+> เอกสารนี้เป็น active roadmap สำหรับงานหลัง refactor ส่วนรายละเอียดของ refactor อยู่ใน [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)
 
-## สรุปสถานะปัจจุบัน → เป้าหมายที่ควรไปต่อ
+## สถานะปัจจุบัน
 
-เครื่องมือนี้ทำวงจร human-in-the-loop labeling จบ end-to-end แล้ว (label → bank → rescore → evaluate → auto-label → review) และมี smoke test ยืนยัน invariant สำคัญ (class-index stability, การแยกขาดของ test set กับ bank) แต่ยังเป็นเครื่องมือ PoC/ใช้ในทีมภายใน ไม่ใช่ระบบที่พร้อมขยายไปสู่การใช้งานจริงในสเกลใหญ่ หรือแทนที่การเทรน closed-set detector ตามที่เอกสารออกแบบเดิมตั้งเป้าไว้
+- API เป็น Go และ inference/prompt bank เป็น Python sidecar
+- PostgreSQL เก็บ annotation metadata และรองรับ concurrent labeling
+- CI มี `go`, `python` และ `smoke` jobs และ merge commit ล่าสุดผ่านแล้ว
+- ระบบเหมาะกับ PoC และทีมภายในที่ใช้ instance เดียว ยังไม่ใช่ production-scale deployment
+- Backend authentication เดิมเป็น opt-in username/password session แต่ frontend ยังไม่มีหน้า login
 
-## ช่องว่างเทียบกับเอกสารออกแบบเดิม (`../docs/yoloe-auto-label-tool-design.md`)
+## หลักการจัดลำดับ
 
-- **NN-matching bank** — เอกสารออกแบบเดิมตั้งใจให้ bank แยกแยะ variation ภายในคลาสเดียวกันด้วย nearest-neighbor matching ต่อ instance แต่ implementation จริงใช้ mean-pooling เฉลี่ยทุก instance ให้เหลือตัวแทนเดียวต่อคลาส (`bank.py`) — ใช้ได้ดีกับคลาสที่ลักษณะสม่ำเสมอ (เช่น `good_part` F1 ~0.78–0.80) แต่ยังไม่พิสูจน์ว่าจะช่วยแก้ปัญหาคลาสที่แยกยาก (เช่น `defect` F1 ~0.04–0.07) ได้จริงหรือไม่
-- **Active-learning selector** — เอกสารออกแบบเดิมพูดถึงตัวเลือกภาพเชิงกลยุทธ์สำหรับ label ต่อ แต่ implementation จริงมีแค่การเรียง "confidence ต่ำสุดก่อน" ในหน้า UI ซึ่งเป็นตัวประมาณง่าย ๆ ไม่ใช่ตัวเลือกที่คำนวณจาก uncertainty/diversity จริง
-- **Retrain closed-set detector** — เป้าหมายปลายทางของเอกสารออกแบบเดิมคือเมื่อสะสม label ได้มากพอ ให้ retrain โมเดล closed-set แยกต่างหาก แต่ยังไม่มีส่วนใดของโค้ดที่ทำสิ่งนี้ — ผลลัพธ์ปัจจุบันหยุดอยู่ที่ไฟล์ YOLO label เท่านั้น
+แก้สิ่งที่จำเป็นต่อผู้ใช้ก่อน ส่วนงาน scale หรือ algorithm ที่ยังไม่มีหลักฐานว่าจำเป็นให้รอ workload จริงและผลการทดลองก่อน ไม่เพิ่ม Redis, VRAM eviction หรือ NN-matching เพียงเพราะมีช่องว่างในเอกสาร
 
-> **อัปเดต 2026-08-23:** backend port เป็น Go เสร็จแล้ว (ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)) — **ไม่มีข้อไหนในรายการข้างล่างที่ถูกแก้โดยการ port** และไม่ได้ตั้งใจให้แก้ เหตุผลของงานนั้นคือ integrate กับระบบ login ของบริษัทที่เป็น Go ไม่ใช่ performance · ข้อ 3 (job tracker) กับ VRAM eviction ยังค้างอยู่เหมือนเดิมทุกประการ
+## Roadmap
 
-## รายการงานที่ควรพิจารณาทำต่อ (เรียงตามความสำคัญโดยประมาณ)
+### Phase 0 — Documentation และ deployment hygiene ✅
 
-1. **แก้ปัญหาคลาสขนาดเล็ก/แยกยาก (เช่น `defect`)** — T-01 ยืนยันแล้วว่าสาเหตุหลักคือ threshold ไม่ใช่ไม่มีสัญญาณ (recall 0.00 → 0.26 เมื่อลด conf) `conf_by_class` แก้ไปครึ่งทาง (defect F1 0.248) แต่ยังห่างจาก `READY_F1 = 0.75` — ขั้นต่อไปคือ crop เฉพาะพื้นที่สนใจก่อนส่งเข้า SAVPE (T-08 ในเอกสาร requirements) ดู [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
-2. ~~เพิ่ม authentication/authorization ระดับพื้นฐาน~~ ✅ ทำแล้ว (`/api/auth/*` + middleware, ปิดอยู่จนกว่าจะตั้ง `LABEL_TOOL_USERS`) — เหลือหน้า login บน UI · **ตอนนี้เป็น Go แล้ว (`internal/platform/auth`) ซึ่งคือเหตุผลทั้งหมดของการ port** format ของ hash และ cookie ไม่เปลี่ยน จึงเชื่อมกับระบบ login ของบริษัทได้
-   - **ยังไม่ทำ: rate limit บน `POST /api/auth/login`** — ทุก request จ่าย PBKDF2 240,000 รอบ แม้ username ไม่มีอยู่จริง (ตั้งใจ เพื่อไม่ให้เวลาตอบสนองบอกว่า username ไหนมีจริง — `auth.Check`) ผลข้างเคียงคือใครที่ยิงถึง endpoint นี้เผา CPU ได้ไม่จำกัด · ไม่ได้แก้ตอน port เพราะ **มันคือการเปลี่ยนพฤติกรรม ไม่ใช่การเปลี่ยนภาษา** และ FastAPI เดิมก็ไม่มี · ควรทำพร้อมหน้า login บน UI และพร้อมการตัดสินใจว่าจะเชื่อมกับ SSO ของบริษัทแทนหรือไม่ — ถ้าไปทาง SSO endpoint นี้อาจหายไปทั้งอัน การใส่ rate limiter ตอนนี้จึงอาจเป็นโค้ดที่เขียนทิ้ง
-3. **ย้าย job tracker ออกจากหน่วยความจำ process เดียว** — จำเป็นถ้าจะรองรับหลาย instance หรือผู้ใช้พร้อมกันจำนวนมาก (โค้ดมีคอมเมนต์ระบุแนวทางไว้แล้วว่าควรใช้ Redis/TTL eviction) — ยังไม่เกิด ยังไม่ทำ · ตอนนี้อยู่ที่ `internal/platform/jobs` port มาแบบไม่แก้พฤติกรรมโดยตั้งใจ **แต่การแยก API ออกจาก inference แล้วทำให้ข้อนี้กลายเป็นสิ่งเดียวที่ขวางการ scale API แนวนอน** — เมื่อก่อนโมเดลที่ผูกกับ process ก็ขวางอยู่ด้วย
-4. ~~เพิ่ม `mode="update"` ให้ `/api/relabel`~~ ✅ ทำแล้ว
-5. ~~ตั้ง CI พื้นฐาน~~ ✅ ทำแล้ว — `.github/workflows/backend.yml` (`go` + `python` + `smoke` job) ยืนยันแล้วว่าจับ regression จริง (ทดสอบด้วยการสลับ `Bank.classes` เป็น `sorted()`)
-6. **ประเมิน NN-matching bank อย่างจริงจัง** — ยังไม่ทำ รอ T-08 (crop) เสร็จก่อนตามลำดับใน requirements doc เพราะ T-01 ชี้ว่าปัญหาหลักคือ scale ไม่ใช่ diversity
-7. ~~ทบทวนสิทธิ์ root ของ container `api`~~ ✅ ทำแล้ว — `ARG APP_UID` + `USER app`, build ยืนยันสำเร็จแล้ว
-8. **พิจารณา active-learning selector ที่แท้จริง** — ถ้าปริมาณภาพที่ต้อง label ต่อโปรเจกต์ใหญ่ขึ้นมาก การเรียง "confidence ต่ำสุดก่อน" + thumbnail diversity แบบปัจจุบัน (FR-18) อาจไม่พอ ควรพิจารณา embedding distance จริงแทน thumbnail hash — ยังไม่ทำ
-9. **GPU support** ✅ ทำแล้ว — `backend/inference/Dockerfile` ติดตั้ง CUDA torch (`cu126`) เป็นค่าเริ่มต้น, `docker-compose.yml` ขอ GPU ให้ service `vpe` ผ่าน `deploy.reservations`, override เป็น CPU ได้ด้วย build arg เดียว
-10. **เลือก YOLOE checkpoint ได้หลายเวอร์ชัน/ขนาด** ✅ ทำแล้ว — `backend/models.json` (ใช้ร่วมกันระหว่าง Go กับ sidecar), ล็อกต่อ output folder ผ่าน `Bank.lock_model()`, ดู FR-36 ใน [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md)
-11. **ลบกล่อง pre-annotation ที่โมเดลทำนายเกินได้ทีละกล่อง** ✅ ทำแล้ว — `BoxCanvas.tsx` (`onRemoveDraft`), ดู FR-37 ใน [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md)
-12. **เลือกโมเดลได้ทุกที่ที่ตัวเลือกปรากฏ ไม่ใช่แค่ตอนตั้งค่าก่อนเปิด session + จุดบอกสถานะ weight พร้อมใช้** ✅ ทำแล้ว — แยก `ModelPicker.tsx` ออกมาใช้ร่วมกันระหว่าง Setup card กับการ์ด "Model" ในหน้า label · เพิ่ม `available: bool` ต่อโมเดลใน `GET /api/config` (`internal/platform/models`'s `IsAvailable()`) พร้อมจุด 🟢/🔴 ใน UI · pre-cache `yoloe-26s-seg` และ `yoloe-26x-seg` ไว้ใน `label_tool/models/` ควบคู่กับ default แล้ว (ก่อนหน้านี้มีแค่ default ทำให้เลือก v26 แล้ว predict เงียบล้มเหลวเพราะ auto-download ไปไม่ถึงปลายทาง) ดู FR-36/FR-38
-13. **เปลี่ยนโมเดลของโปรเจกต์ที่ล็อกไปแล้วได้จริง (re-embed) โดยไม่ต้องเริ่ม output folder ใหม่** ✅ ทำแล้ว — `Bank.reembed()` + `POST /api/reembed` (background job) วนอ่าน `bank.instances` ทุกตัวย้อนกลับไปที่ภาพต้นทางเดิม รัน embedding ใหม่ด้วยโมเดลเป้าหมาย แล้ว commit แทนที่ทั้งชุดพร้อมสลับ `bank.model` แบบ atomic · ไม่แตะ `labels/*.txt` เลย (ยืนยันด้วย md5sum ตรงกันก่อน/หลังในการทดสอบจริง) · ปุ่ม "Switch model…" ใน `ModelPicker.tsx` ดู FR-39
+สถานะ: sync เอกสารหลักแล้วในรอบนี้ (2026-08-24); ownership check เป็น deployment preflight ทุกครั้งที่ใช้ `DATA_DIR` เดิม
 
-14. ~~ย้าย annotation storage (label/box) จากไฟล์ YOLO txt ไปเป็นตาราง PostgreSQL + เพิ่ม export format selection (YOLO/COCO/VOC)~~ ✅ **implement แล้ว (2026-08-21)** — `services/annotations_db.py`, `services/db.py`, `routers/export.py`, `tools/migrate_to_db.py` ทดสอบผ่านสมบูรณ์แล้วผ่าน `tests/smoke_test.py` เต็มรูปแบบกับ PostgreSQL จริง — **scope เฉพาะ label/box metadata `embeddings.pt` ยังเป็นไฟล์เหมือนเดิมตามแผน** ที่เหลือ: `docker compose build api` ยังไม่ได้รันจริง (เฉพาะ build/packaging risk ไม่ใช่ logic), และ frontend export-format picker ยังไม่มี UI — ดูรายละเอียดที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 10
+- แก้เอกสารที่ยังอ้างชื่อไฟล์/CI job/สถานะก่อน merge
+- ตรวจ `APP_UID` และ ownership ของ `DATA_DIR` ก่อน deploy เพราะข้อมูลเก่าที่เป็น root-owned จะเขียนไม่ได้เมื่อ container รันเป็น `app`
+- ทำให้ README, PROJECT_STATUS และ requirements ใช้ชื่อ command และโครงสร้างปัจจุบันตรงกัน
 
-## ความเสี่ยง / คำถามที่ทีมควรตัดสินใจก่อนเริ่มงานต่อ
+เกณฑ์จบ: เอกสารที่ใช้ onboarding และ operation ระบุชื่อ command, CI และสถานะปัจจุบันตรงกับ repository และมี deployment checklist สำหรับข้อมูลเก่า
 
-- ถ้าจะแก้ปัญหาคลาส `defect`: จะเพิ่มความละเอียดภาพหรือ crop ก่อน มีผลกับ throughput ของ inference มากแค่ไหน — ยังไม่มีข้อมูลวัดผล ต้องทดลองก่อนตัดสินใจ
-- ~~ถ้าจะเปิดให้หลายคนใช้งานพร้อมกัน: จะรองรับหลาย session เขียน bank เดียวกันพร้อมกันจริง ๆ หรือจำกัดให้ 1 คนต่อ 1 โปรเจกต์~~ **ตัดสินใจแล้ว (2026-08-21): รองรับหลายคนพร้อมกันจริง** ผ่านการย้าย label storage ไป PostgreSQL — ดูข้อ 14 และ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) · ยังมีคำถามย่อยเปิดอยู่ในเอกสารนั้น (หัวข้อ 8)
-- การ retrain closed-set detector จากป้ายสะสม: ยังไม่มีการยืนยันว่าปริมาณ label ที่สะสมได้จากทีมภายในเพียงพอต่อการ retrain ที่ให้ผลดีกว่าใช้ prompt bank ต่อไปหรือไม่ — ควรทดลองเปรียบเทียบก่อนลงทุนสร้างระบบ retrain
+### Phase 1 — OIDC Login System
+
+สถานะ: เป็น milestone ถัดไป — **รอรายละเอียดจากผู้ใช้ก่อนเริ่ม implementation**
+
+งานนี้จะมาแทนหรือครอบ authentication แบบ local เดิม โดยยังไม่ตัดสินรายละเอียดแทนผู้ใช้ล่วงหน้า จุดที่ต้องกำหนดใน specification คือ:
+
+1. Identity Provider, issuer, client, environments และ redirect/logout URLs
+2. Authorization Code Flow + PKCE, state/nonce และการตรวจ issuer, audience, expiry และ JWKS
+3. Application session/cookie, logout, session expiry และการป้องกัน token ไม่ให้รั่วไปถึง browser หรือ log
+4. การ map claims ไปเป็น user/role และ policy ของ protected endpoints
+5. การย้ายจาก `LABEL_TOOL_USERS` และการคง/เลิกใช้ `/api/auth/*` เดิม
+6. Login UI, unauthenticated state, expired session และ error handling
+7. Unit, integration และ end-to-end tests รวม local development และ rollout/rollback plan
+
+เกณฑ์จบของ phase นี้ควรกำหนดหลังได้รับรายละเอียด OIDC โดยอย่างน้อยต้อง login ได้จริง, endpoint ที่ป้องกันไว้ต้องตรวจ identity ได้, logout/expiry ทำงานถูกต้อง และไม่มี access token หลุดไปอยู่ใน client storage หรือ response ที่ไม่จำเป็น
+
+### Phase 2 — Model quality: small-object classes
+
+สถานะ: งาน product ถัดจาก OIDC เมื่อมี dataset และ acceptance criteria พร้อม
+
+- ทำ T-08 crop-before-SAVPE เพื่อแก้ปัญหา `defect` ที่ยังได้ F1 ประมาณ 0.25 แม้ใช้ per-class threshold
+- วัด precision/recall/F1 เทียบกับ baseline เดิมบน `conveyor_pvc`
+- ถ้าผลทดลองชี้ว่าปัญหาคือ class variation จริง ค่อยทำ NN-matching bank เป็นงานแยก
+
+ห้ามเริ่มด้วยการเปลี่ยน bank algorithm โดยไม่มีผลทดลองรองรับ เพราะ mean-pooling ยังเพียงพอสำหรับคลาสที่มีลักษณะสม่ำเสมอ
+
+### Phase 3 — UX และ product completeness
+
+ทำเมื่อมีผู้ใช้จริงยืนยันความต้องการ:
+
+- Upload dropzone ที่เรียก `POST /api/upload` ผ่าน login
+- Login/permission UI หลัง OIDC phase จบ
+- ส่ง usage events จาก frontend ให้ข้าม session และข้ามเครื่องได้จริง
+- เพิ่ม frontend type-check/build เข้า CI
+- เพิ่ม export-format picker ใน UI หาก workflow ต้องใช้ COCO/VOC โดยตรง
+
+### Phase 4 — Scale และ operations (conditional)
+
+ทำเฉพาะเมื่อมี requirement รองรับ traffic หรือหลาย instance:
+
+- ย้าย job tracker ไป Redis และเพิ่ม TTL/cleanup
+- เพิ่ม VRAM eviction/LRU เมื่อการสลับหลาย checkpoint ทำให้เกิด OOM จริง
+- เพิ่ม HTTPS/reverse proxy, deployment pipeline และ monitoring สำหรับ production
+
+### Research backlog
+
+ยังไม่ใช่งานถัดไปโดยอัตโนมัติ:
+
+- active-learning selector ที่ใช้ uncertainty/diversity จริง
+- retrain closed-set detector จาก annotation ที่สะสม
+
+สองเรื่องนี้ควรเริ่มเมื่อมี baseline จากการใช้งานจริงและมีคำถามเชิงผลิตภัณฑ์ที่ชัดเจน
+
+## Decision gates
+
+- **OIDC:** รอ detailed brief ก่อนออกแบบหรือแก้ auth code
+- **Model quality:** ทำ crop experiment ก่อน NN-matching
+- **Scale:** วัดจำนวนผู้ใช้, instance และ job concurrency ก่อนเพิ่ม Redis/eviction
+- **Production:** กำหนด security, deployment และ observability requirements ก่อนเปิดใช้งานนอกทีมภายใน

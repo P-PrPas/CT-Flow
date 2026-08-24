@@ -74,7 +74,7 @@ pool.
 | GPU (CUDA) inference | Ready | on by default in Docker; falls back to CPU with a one-line build-arg override |
 | Auto-label + review mode | Ready | predicted boxes are fully editable before they're accepted |
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
-| Session auth (`/api/auth/*`) | Backend only | off unless `LABEL_TOOL_USERS` is set; **no sign-in screen in the UI yet** |
+| Session auth (`/api/auth/*`) | Backend only | legacy username/password session, off unless `LABEL_TOOL_USERS` is set; OIDC Login System is the next milestone; **no sign-in screen in the UI yet** |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
 | Image upload | Backend only | `POST /api/upload`, refuses to run without auth in `vm` mode; no dropzone in the UI yet |
 | Per-label attribution (`labeled_by`) | Ready | recorded once auth is on |
@@ -132,7 +132,7 @@ label_tool/                     repo root
 │   │   └── requirements.txt
 │   ├── db/schema.sql             applied by the API at boot; idempotent
 │   ├── models.json               checkpoint catalog, read by both services
-│   └── Dockerfile                the Go API image (~48 MB)
+│   └── Dockerfile                the Go API image (~35.5 MB)
 ```
 
 **Why two backends.** Everything that needs torch — YOLOE inference and the
@@ -529,7 +529,7 @@ whoever picks this project up next):
 | [`PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | Test coverage + current overall status |
 | [`EXPERIMENT_T01_CONF.md`](docs/EXPERIMENT_T01_CONF.md) | The conf-threshold experiment behind the accuracy table above |
 | [`REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md) | The Python→Go port: what moved, what stayed Python and why, and what it cost |
-| [`NEXT_STEPS.md`](docs/NEXT_STEPS.md) | Prioritized gap list for the next round of work |
+| [`NEXT_STEPS.md`](docs/NEXT_STEPS.md) | Active roadmap after the backend refactor; OIDC Login System is the next milestone |
 | [`GLOSSARY.md`](docs/GLOSSARY.md) | Terminology (SAVPE, prompt bank, etc.) in the order you'll meet it |
 
 ## Troubleshooting

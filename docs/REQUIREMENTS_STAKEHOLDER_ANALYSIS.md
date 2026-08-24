@@ -5,6 +5,8 @@
 > **เอกสารที่เกี่ยวข้อง:** [PRODUCT_OVERVIEW.md](./PRODUCT_OVERVIEW.md) · [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md) · [PROJECT_STATUS.md](./PROJECT_STATUS.md) · [NEXT_STEPS.md](./NEXT_STEPS.md) · [GLOSSARY.md](./GLOSSARY.md)
 >
 > **สถานะ:** ฉบับร่างสำหรับทบทวนกับทีม — ส่วนที่เป็น requirement ใหม่ยังไม่ผ่านการยืนยันกับผู้ใช้จริง (ดูหัวข้อ 9 "สมมติฐานที่ต้องตรวจสอบ")
+>
+> **หมายเหตุหลัง merge:** ลำดับงานที่ active ให้ยึด [NEXT_STEPS.md](./NEXT_STEPS.md) เป็น source of truth; phase ในเอกสารนี้เป็นการจัดกลุ่ม requirements เดิม
 
 ---
 
@@ -196,9 +198,9 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| FR-40 | ย้าย label/box metadata (`labels/*.txt`, `classes.txt`, `testset.json`, สถานะ `labeled`/`auto`) จากไฟล์ไปตาราง PostgreSQL | ✅ | `services/annotations_db.py` + `db/schema.sql` · implement แล้ว 2026-08-21 ทดสอบผ่าน `tests/smoke_test.py` เต็มรูปแบบกับ PostgreSQL จริง · `_bank/embeddings.pt` ไม่อยู่ใน scope นี้ ยังเป็นไฟล์เหมือนเดิมตามแผน · ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 10 |
-| FR-41 | รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันจริง (ไม่ใช่แค่กันเขียนชนกันแบบ `filelock`) | ✅ | DB transaction ล็อกระดับแถวตอนสร้างคลาสใหม่ (`annotations_db._get_or_create_class`) แทน `filelock` — ดู DB_MIGRATION_PLAN.md หัวข้อ 4.1, ทดสอบ concurrency จริงใน `annotations_db.py`'s self-check |
-| FR-42 | Export annotation เลือก format ได้ (YOLO/COCO/Pascal VOC) แทนที่จะได้แค่ YOLO txt | ✅ | `GET /api/export` (`routers/export.py`) — ทดสอบผ่านทั้งสาม format จริง ดู DB_MIGRATION_PLAN.md หัวข้อ 6 · **ยังไม่มี UI ให้เลือก format** (backend เท่านั้น เหมือน pattern เดิมของ T-12/T-13) |
+| FR-40 | ย้าย label/box metadata (`labels/*.txt`, `classes.txt`, `testset.json`, สถานะ `labeled`/`auto`) จากไฟล์ไปตาราง PostgreSQL | ✅ | `internal/infra/store` + `backend/db/schema.sql` · implement แล้ว 2026-08-21 และทดสอบผ่าน PostgreSQL จริง · `_bank/embeddings.pt` ไม่อยู่ใน scope นี้ ยังเป็นไฟล์เหมือนเดิมตามแผน |
+| FR-41 | รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันจริง (ไม่ใช่แค่กันเขียนชนกันแบบ `filelock`) | ✅ | DB transaction ล็อกระดับแถวตอนสร้างคลาสใหม่ใน `internal/infra/store` และมี concurrency test กับ PostgreSQL จริง |
+| FR-42 | Export annotation เลือก format ได้ (YOLO/COCO/Pascal VOC) แทนที่จะได้แค่ YOLO txt | ✅ | `GET /api/export` (`internal/transport/httpapi` + `internal/core/export`) — ทดสอบผ่านทั้งสาม format จริง · **ยังไม่มี UI ให้เลือก format** |
 
 **แรงจูงใจ:** ทีมมีแผนทำระบบ login + workspace แบบ Label Studio ในอนาคต และทีม infra ต้องการวาง PostgreSQL เป็นรากฐาน — งานกลุ่มนี้เตรียมทางไว้ (เช่น `annotations.created_by`, `projects.id` ที่ future user/workspace table จะอ้างอิง) แต่**ไม่ได้สร้างระบบ login/workspace จริงในรอบนี้**
 
@@ -208,13 +210,13 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| NFR-01 | Path safety — กัน browser เข้าถึงไฟล์นอกขอบเขต | ✅ | `checked_path()` + `vm` mode |
+| NFR-01 | Path safety — กัน browser เข้าถึงไฟล์นอกขอบเขต | ✅ | `internal/platform/config.PathAllowed` + `vm` mode |
 | NFR-02 | กันการเขียน bank ชนกัน | ✅ | `filelock.FileLock` |
-| NFR-03 | Background job ไม่ block UI | ✅ | `BackgroundTasks` + poll ทุก 400ms |
+| NFR-03 | Background job ไม่ block UI | ✅ | Go goroutine + `/api/jobs/{id}` polling ทุก 400ms |
 | NFR-04 | ETA คำนวณจากเวลาเซิร์ฟเวอร์ (กัน clock skew) | ✅ | `started_at`/`now` |
-| NFR-05 | CI รัน smoke test อัตโนมัติ | 🟡 | `.github/workflows/backend.yml` — job `checks` (self-check ที่ไม่ต้องใช้โมเดล) + job `smoke` (โหลด weight แล้วรัน `backend.tests.smoke_test`) · ยืนยันแล้วว่า smoke test **fail จริง** เมื่อสลับ `Bank.classes` เป็น `sorted()` · **ยังไม่ได้รันบน GitHub จริง** (repo นี้ยังไม่มี remote) |
+| NFR-05 | CI รัน smoke test อัตโนมัติ | ✅ | `.github/workflows/backend.yml` — jobs `go`, `python` และ `smoke` · smoke รัน Go API + Python sidecar จริงผ่าน HTTP · ยืนยันแล้วว่าจับ regression ของ class order, IoU threshold และ path safety ได้ · merge commit `40b0c7f` ผ่านบน GitHub แล้ว |
 | NFR-06 | Job tracker persist/รองรับหลาย worker | ❌ | ต้องใช้ Redis/TTL (มีคอมเมนต์ในโค้ดแล้ว) · เงื่อนไขเริ่มงานคือ >1 worker ซึ่งยังไม่เกิด |
-| NFR-07 | Container ไม่รันเป็น root | 🟡 | Dockerfile สร้าง user `app` จาก build arg `APP_UID` (default 1000) แล้ว `USER app` · **ยังไม่ได้ build ยืนยัน** (Docker Desktop ไม่ได้รันตอนแก้) · บน Linux host ต้อง `--build-arg APP_UID=$(id -u)` ให้ตรงกับเจ้าของ `DATA_DIR` |
+| NFR-07 | Container ไม่รันเป็น root | ✅ | Dockerfile สร้าง user `app` จาก build arg `APP_UID` (default 1000) แล้ว `USER app` · บน Linux host ต้อง `--build-arg APP_UID=$(id -u)` ให้ตรงกับเจ้าของ `DATA_DIR` และต้องตรวจ ownership ของข้อมูลเก่าก่อน deploy |
 | NFR-08 | HTTPS | ❌ | ต้องพึ่ง reverse proxy ภายนอก |
 | NFR-09 | GPU support | 🟡 | `backend/inference/Dockerfile` ติดตั้ง PyTorch จาก `--extra-index-url .../whl/cu126` เป็นค่าเริ่มต้น (ตรงกับ driver 12.7 ที่ตรวจจริงบนเครื่องนี้ผ่าน `nvidia-smi` — driver รองรับ CUDA ≥ 12.6) + `docker-compose.yml` ขอ GPU ผ่าน `deploy.resources.reservations.devices` · override เป็น CPU ได้ด้วย `--build-arg TORCH_INDEX_URL=.../whl/cpu` โดยไม่ต้องแก้ไฟล์ · `device: None` ใน `inference/vpe.py` ปล่อยให้ ultralytics auto-เลือก cuda:0 เอง ไม่ต้องแก้โค้ด inference · **`docker compose build api` สำเร็จจริง** (ยืนยันแล้วว่า `torch-2.13.0+cu126` ติดตั้งได้ไม่มี error) **แต่ยังไม่ได้ยืนยัน runtime** — Docker Desktop daemon ตอบ `500` ทุก request หลัง build เสร็จ (`docker info`/`docker images` ค้าง) ยังไม่ทันได้ `docker compose up` มาเช็ค `torch.cuda.is_available()` จริงในคอนเทนเนอร์ที่รัน |
 
@@ -259,8 +261,8 @@
 
 #### T-02 · ✅ ตั้ง CI รัน smoke test
 - **เชื่อมโยง:** NFR-05
-- **ทำแล้ว:** `.github/workflows/backend.yml` — job `checks` รัน self-check ของ `auth`/`events`/`metrics` (ไม่ต้องใช้ weight, จบใน ~30 วิ) และ job `smoke` โหลด weight แล้วรัน `backend.tests.smoke_test`
-- **เกณฑ์ยอมรับ:** ✅ ทดสอบแล้วว่า smoke test fail จริงเมื่อเปลี่ยน `Bank.classes` เป็น `sorted()` (ป้ายเก่าถูกอ่านเป็นคลาสผิด) · ⚠️ ยังไม่ได้รันบน GitHub เพราะ repo ยังไม่มี remote
+- **ทำแล้ว:** `.github/workflows/backend.yml` — jobs `go`, `python` และ `smoke`; job `go` รัน vet/gofmt/tests/build, job `python` รัน self-check ที่เหลือ และ job `smoke` โหลด weight แล้วยก Go API + sidecar จริงผ่าน HTTP
+- **เกณฑ์ยอมรับ:** ✅ smoke test fail จริงเมื่อเปลี่ยน `Bank.classes` เป็น `sorted()` (ป้ายเก่าถูกอ่านเป็นคลาสผิด) · ✅ workflow รันบน GitHub แล้วและ merge commit `40b0c7f` ผ่าน
 
 ### Phase 1 — Quick win ด้าน UX (ผลตอบแทนสูงสุดต่อ effort)
 
@@ -324,10 +326,10 @@
 
 ### Phase 4 — ขยายไปยังผู้ใช้ที่ไม่ใช่วิศวกร
 
-#### T-12 · 🟡 Authentication พื้นฐาน + บันทึกผู้ label — **backend เสร็จ**
+#### T-12 · 🟡 Local authentication compatibility + บันทึกผู้ label — **backend เสร็จ; OIDC เป็น milestone ถัดไป**
 - **เชื่อมโยง:** FR-30, FR-31, NFR-07
-- **ทำแล้ว:** `services/auth.py` (pbkdf2 + cookie เซ็น HMAC จาก stdlib ล้วน ไม่มี dependency ใหม่) + `routers/auth.py` + middleware ใน `app.py` ที่ปิดทุก path ยกเว้น `/api/config` และ `/api/auth/*` · `labeled_by` ลงทุก instance
-- **ปิดอยู่โดย default:** ไม่ตั้ง `LABEL_TOOL_USERS` = ไม่มี login เลย พฤติกรรมเดิมทุกอย่าง ดังนั้นการตัดสินใจข้อ 1/2 ในหัวข้อ 9 ยังเลื่อนได้ โดยไม่ต้องรอโค้ด
+- **ทำแล้ว:** `internal/platform/auth` (PBKDF2 + signed session cookie) + `internal/transport/httpapi/auth.go` และ middleware ที่ปิดทุก path ยกเว้น `/api/config` และ `/api/auth/*` · `labeled_by` ลงทุก instance
+- **ปิดอยู่โดย default:** ไม่ตั้ง `LABEL_TOOL_USERS` = ไม่มี login เลย พฤติกรรมเดิมทุกอย่าง; local auth นี้จะถูกทบทวนเมื่อออกแบบ OIDC ตาม [NEXT_STEPS.md](./NEXT_STEPS.md)
 - **เกณฑ์ยอมรับ:** ✅ ยืนยันใน smoke test — ไม่ login ได้ 401 ทุก endpoint, รหัสผิดได้ 401, login แล้วผ่าน, `labeled_by == "alice"`, logout แล้วกลับเป็น 401
 - **ยังไม่ทำ:** หน้า login บน UI (ตอนนี้ต้อง login ผ่าน `POST /api/auth/login` เอง)
 

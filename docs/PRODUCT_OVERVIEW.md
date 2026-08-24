@@ -24,7 +24,7 @@
         _bank/embeddings.pt     embedding ต่อคลาส (สิ่งที่ทำให้ label ต่อได้)
         _bank/metadata.json     ที่มาของแต่ละ embedding + โมเดลที่ล็อกไว้
 
-PostgreSQL (services/annotations_db.py):
+PostgreSQL (internal/infra/store):
     classes    index ของคลาส -> ชื่อคลาส (พูล/test set คนละชุด)
     images     พาธภาพ + สถานะ labeled/auto + ธงว่าเป็น test set หรือไม่
     annotations  กล่องแต่ละกล่อง (พิกัดพิกเซล)
@@ -36,10 +36,10 @@ PostgreSQL (services/annotations_db.py):
 
 - **Bank ใช้ mean-pooling ต่อคลาส ไม่ใช่ NN-matching ต่อ instance.** เอกสารออกแบบเดิม (`../docs/yoloe-auto-label-tool-design.md`) ตั้งใจให้ bank แยกแยะ variation ภายในคลาสเดียวกันด้วยการ match แบบ nearest-neighbor แต่ implementation จริงเฉลี่ย embedding ทุกตัวในคลาสให้เหลือตัวแทนเดียว (`inference/bank.py`, `mean_vpe()`) — เพียงพอสำหรับคลาสที่รูปลักษณ์ค่อนข้างสม่ำเสมอ แต่จะเริ่มด้อยลงถ้าคลาสมีความหลากหลายสูง (multi-modal)
 - **ไม่มี active-learning selector จริง** สิ่งที่ใกล้เคียงที่สุดคือการเรียงภาพในพูลจาก "confidence ต่ำสุดก่อน" บนหน้า UI ซึ่งเป็นการประมาณ ไม่ใช่ตัวเลือกภาพเชิงกลยุทธ์ตามที่เอกสารออกแบบเดิมตั้งใจ
-- **ไม่มีระบบ authentication/login** ใด ๆ ในแอปทั้งหมด
+- **มี authentication ฝั่ง backend แบบ opt-in** (`/api/auth/*` + session middleware) แต่ยังไม่มีหน้า login บน UI — งานถัดไปคือ OIDC Login System
 - **ไม่มีปุ่มอัปโหลดไฟล์** การนำภาพเข้าโฟลเดอร์ `/opt/mount/project` เป็นเรื่อง filesystem หรือ network share ที่อยู่นอกขอบเขตของแอป (ออกแบบมาให้รันบนเซิร์ฟเวอร์ที่แชร์ ไม่ใช่เครื่องส่วนตัว)
 - **การ retrain closed-set detector จากป้ายที่สะสมได้ยังไม่ implement** เป็นเป้าหมายระยะยาวตามเอกสารออกแบบเดิม (เมื่อมีข้อมูล label สะสมมากพอ) แต่ยังไม่มีส่วนใดของโค้ดที่ทำสิ่งนี้
-- **ระบบ login/workspace เต็มรูปแบบ (หลายคน/หลายทีมแชร์ instance เดียวกัน) ยังไม่มี** — สิ่งที่ทำไปแล้ว (2026-08-21) คือย้าย label/box storage ไป PostgreSQL (T-21) เพื่อให้หลายคนแก้ project (`input_dir`) เดียวกัน**พร้อมกัน**ได้จริงโดยไม่ชนกัน และเพิ่ม export หลาย format (YOLO/COCO/VOC, `GET /api/export`) — แนวคิด "โฟลเดอร์ = โปรเจกต์" ตามที่ระบุด้านบนยังไม่เปลี่ยน แค่ที่เก็บ label เปลี่ยนจากไฟล์เป็น DB เท่านั้น ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md)
+- **ระบบ OIDC login/workspace เต็มรูปแบบยังไม่มี** — local session auth ฝั่ง backend พร้อมแล้ว แต่ยังไม่มี UI และการเชื่อมกับ Identity Provider; งานนี้อยู่ใน milestone ถัดไป ส่วนการย้าย label/box storage ไป PostgreSQL (T-21) และ export หลาย format ทำเสร็จแล้ว ดู [NEXT_STEPS.md](./NEXT_STEPS.md)
 
 ## Use case หลัก
 
@@ -52,6 +52,6 @@ PostgreSQL (services/annotations_db.py):
 
 ## ข้อจำกัดที่ควรรู้ตอนนี้
 
-- ออกแบบมาให้ใช้งานทีละคนต่อโปรเจกต์ (`input_dir`) หนึ่งชุดในแต่ละครั้ง — bank มี file lock (`filelock`) ป้องกันการเขียนชนกัน แต่ไม่ได้ออกแบบมาให้หลายคนแก้ไข bank เดียวกันพร้อมกันจากหลาย session
-- `classes.txt` เป็น **append-only เท่านั้น** ห้ามลบหรือเรียงลำดับใหม่ด้วยมือ เพราะไฟล์ label ทุกไฟล์อ้างอิงคลาสด้วย index ตำแหน่งในไฟล์นี้
+- annotation และ box metadata ใน PostgreSQL รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันได้แล้ว แต่ prompt bank ยังใช้ file lock (`filelock`) และยังไม่มี user/workspace authorization แยกต่อ project
+- ลำดับคลาสเป็น **append-only** ทั้งใน prompt bank และ PostgreSQL ห้ามลบหรือเรียงลำดับใหม่ เพราะ label ที่มีอยู่แล้วอ้างอิงคลาสด้วย index
 - คลาสที่มีลักษณะเล็กและปะปนกับพื้นหลัง (เช่น defect เล็ก ๆ บนชิ้นงาน) ยังเป็นจุดอ่อนของ SAVPE ที่ความละเอียด 640px — วัดได้จริงจากชุดข้อมูล `conveyor_pvc`: F1 ของคลาส `defect` อยู่ที่ราว 0.04–0.07 แทบไม่ขยับแม้เพิ่มจำนวน prompt ในขณะที่ `good_part` ทำได้ถึง F1 ~0.78–0.80 จากแค่ 1–20 prompt (ดูรายละเอียดใน [PROJECT_STATUS.md](./PROJECT_STATUS.md))

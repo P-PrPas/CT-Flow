@@ -1,5 +1,7 @@
 # Label Tool — สถานะโปรเจกต์
 
+> **สถานะปัจจุบัน (2026-08-24):** backend refactor เสร็จครบและ merge เข้า `main` แล้วที่ commit `40b0c7f` จาก PR #2 · CI หลัง merge ผ่าน · milestone ถัดไปคือ OIDC Login System โดยรอรายละเอียด implementation จากผู้ใช้
+
 ## Test coverage
 
 **หลัง port เป็น Go มีสามชั้น:** (1) `go test ./...` — unit test ต่อ package รวม `internal/infra/store` ที่รันกับ PostgreSQL จริง (2) `backend/tests/smoke_test.py` — end-to-end ยิงผ่าน HTTP จริง (3) `backend/tests/testdata/` — golden vector ข้ามภาษาที่ Go ต้อง reproduce ให้ตรงเป๊ะ
@@ -32,16 +34,16 @@
 
 - **`go`** — `go vet`, `gofmt -l` (fail ถ้ามีไฟล์ไม่ format), `go test ./...` กับ postgres service, `go build`
 - **`python`** — self-check ของ sidecar + `_gen_testdata --check` ไม่ต้องใช้ torch ไม่ต้องใช้ model weight จบในไม่กี่วินาที
-- **`smoke`** — ติดตั้ง CPU torch (runner ไม่มี GPU), cache น้ำหนักโมเดล 28 MB ข้าม run, ยก sidecar + Go API ขึ้นจริง แล้วรัน `backend._smoke_test.py` ยิงผ่าน HTTP
+- **`smoke`** — ติดตั้ง CPU torch (runner ไม่มี GPU), cache น้ำหนักโมเดล 28 MB ข้าม run, ยก sidecar + Go API ขึ้นจริง แล้วรัน `backend.tests.smoke_test` ยิงผ่าน HTTP
 
-ทดสอบแล้วว่า smoke test **fail จริง** เมื่อจงใจสลับ `Bank.classes` เป็น `sorted()` และ golden vector check **fail จริง** เมื่อจงใจขยับ IoU threshold เป็น 0.4 และ path-safety test **fail จริง** เมื่อเปลี่ยนเป็น `strings.HasPrefix` — ยืนยันว่า CI จับ regression ได้จริง ไม่ใช่แค่ผ่านเฉย ๆ ทริกเกอร์เมื่อ push/PR ที่แตะ `backend/**`, `cmd/**`, `internal/**`, `go.mod`
+ทดสอบแล้วว่า smoke test **fail จริง** เมื่อจงใจสลับ `Bank.classes` เป็น `sorted()` และ golden vector check **fail จริง** เมื่อจงใจขยับ IoU threshold เป็น 0.4 และ path-safety test **fail จริง** เมื่อเปลี่ยนเป็น `strings.HasPrefix` — ยืนยันว่า CI จับ regression ได้จริง ไม่ใช่แค่ผ่านเฉย ๆ workflow ทริกเกอร์เมื่อ push/PR ที่แตะ `backend/**` หรือ workflow เอง
 
 **ยังไม่มี** pipeline สำหรับ frontend (type-check/build เป็นการรันมือ `npx tsc --noEmit` / `npm run build`), ไม่มี auto-deploy เมื่อ merge
 
 ## Known bugs และข้อจำกัด (ยังไม่แก้ ณ ขณะเขียนเอกสารนี้)
 
 - **Job tracker เก็บสถานะในหน่วยความจำ process เดียว.** ไม่ persist ข้าม restart, ไม่มี TTL/eviction ของ job เก่า — **port มาจาก `job_tracker.py` แบบไม่แก้พฤติกรรมโดยตั้งใจ** (`internal/platform/jobs`) มีคอมเมนต์ `ponytail:` ระบุทางแก้เป็น Redis/TTL ไว้แล้ว
-- **Authentication เป็น opt-in, ปิดอยู่โดย default** — ไม่ตั้ง `LABEL_TOOL_USERS` เท่ากับไม่มีการยืนยันตัวตนเลย เหมือนพฤติกรรมเดิมทุกประการ backend (`/api/auth/*` + middleware) พร้อมแล้ว **แต่ยังไม่มีหน้า login บน UI** ต้องเรียก `POST /api/auth/login` เอง
+- **Authentication ปัจจุบันเป็น opt-in username/password session, ปิดอยู่โดย default** — ไม่ตั้ง `LABEL_TOOL_USERS` เท่ากับไม่มีการยืนยันตัวตนเลย เหมือนพฤติกรรมเดิมทุกประการ backend (`/api/auth/*` + middleware) พร้อมแล้ว **แต่ยังไม่มีหน้า login บน UI** · งานถัดไปคือ OIDC Login System
 - ~~**CORS เปิดกว้างทุก origin**~~ **หายไปแล้ว** — Go ไม่ตั้ง CORS header เลย ซึ่งถูกต้องเพราะ browser คุยผ่าน Next.js proxy อย่างเดียว ถ้าจะเปิด backend ให้เข้าถึงตรงในอนาคตต้องเพิ่มแบบระบุ origin
 - **Bank ใช้ mean-pooling เดียวต่อคลาส** ไม่รองรับคลาสที่มี variation สูง (multi-modal) ได้ดี — โค้ดมีคอมเมนต์ชี้ทางอัพเกรดเป็น nearest-neighbor matching ไว้แล้วแต่ยังไม่ implement
 - **คลาสขนาดเล็กที่ปะปนกับพื้นหลังยังแยกไม่ค่อยออก.** วัดจริงจาก dataset `conveyor_pvc` ที่ conf default เดิม (0.25): `defect` (รอยขีดข่วน/บิ่นเล็ก ๆ) recall = 0.00 ในขณะที่ `good_part` ได้ F1 0.82 — **T-01 พิสูจน์แล้วว่าสาเหตุหลักคือ threshold ไม่ใช่ไม่มีสัญญาณ** (recall ขยับเป็น 0.26 ที่ conf 0.05) `conf_by_class` ดึงทั้งสองคลาสมาพร้อมกันได้แล้ว (defect 0.248 + good_part 0.818) แต่ยังห่างจากเกณฑ์ auto-label (`READY_F1 = 0.75`) มาก — รายละเอียดเต็มที่ [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
@@ -55,9 +57,9 @@
 
 **ใช้งานได้ในวง PoC/ทีมภายในที่ไว้ใจกันได้ ไม่ใช่ production พร้อมเปิดสาธารณะ**
 
-- Authentication มีแล้วแต่เป็น opt-in (ปิดอยู่โดย default) — ถ้าไม่ตั้ง `LABEL_TOOL_USERS` ยังต้องพึ่งการควบคุมการเข้าถึงเครือข่ายภายนอกแอป (VPN, firewall, network segment) เหมือนเดิม และยังไม่มีหน้า login บน UI
-- มี CI (`checks` + `smoke` job) แต่ไม่มี auto-deploy — การ deploy จริงยังเป็นการรัน `docker compose up --build` ด้วยมือ
-- Job tracker แบบ in-memory จำกัดให้รันได้แค่ 1 uvicorn worker ต่อ instance
+- Authentication มีแล้วแต่เป็น opt-in username/password session (ปิดอยู่โดย default) — ถ้าไม่ตั้ง `LABEL_TOOL_USERS` ยังต้องพึ่งการควบคุมการเข้าถึงเครือข่ายภายนอกแอป (VPN, firewall, network segment) เหมือนเดิม และยังไม่มีหน้า login บน UI · งานถัดไปคือ OIDC Login System
+- มี CI (`go` + `python` + `smoke` jobs) แต่ไม่มี auto-deploy — การ deploy จริงยังเป็นการรัน `docker compose up --build` ด้วยมือ
+- Job tracker แบบ in-memory จำกัดให้รันได้แค่ 1 API process ต่อ instance
 - ไม่มี HTTPS ในตัวแอป (certs mechanism มีไว้แค่ตอน build ผ่าน proxy องค์กรเท่านั้น)
 - Container `api` ไม่รันเป็น root แล้ว (`ARG APP_UID` + `USER app`)
 - ใช้ GPU (CUDA, `cu126`) เป็นค่าเริ่มต้นในการ build — override เป็น CPU ได้ด้วย build arg เดียวไม่ต้องแก้ไฟล์ (`--build-arg TORCH_INDEX_URL=.../whl/cpu`)

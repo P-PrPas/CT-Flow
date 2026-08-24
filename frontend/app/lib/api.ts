@@ -10,6 +10,9 @@ export type { JobProgress };
 async function request(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
   const data = await res.json();
+  if (res.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/entry/")) {
+    window.location.assign("/entry/login");
+  }
   if (!res.ok) throw new Error(data.detail ?? "request failed");
   return data;
 }
@@ -22,6 +25,34 @@ const post = (url: string, body: unknown) =>
   });
 
 export const imgUrl = (path: string) => `/api/image?path=${encodeURIComponent(path)}`;
+
+export type AuthState = {
+  enabled: boolean; user: string | null; mode: "none" | "local" | "oidc";
+  /** Only on the logout response, and only under OIDC: where to send the
+   *  browser so the provider session ends too. Clearing our own cookie alone
+   *  leaves the next "sign in" silent. */
+  logoutUrl?: string;
+};
+
+export function getAuth(): Promise<AuthState> {
+  return request("/api/auth/me");
+}
+
+export function loginRedirect(): Promise<{ redirectUrl: string }> {
+  return request("/api/public/login/redirect");
+}
+
+export function loginCallback(code: string, state: string): Promise<AuthState> {
+  return post("/api/public/login/callback", { code, state });
+}
+
+export function localLogin(username: string, password: string): Promise<AuthState> {
+  return post("/api/auth/login", { username, password });
+}
+
+export function logout(): Promise<AuthState> {
+  return post("/api/auth/logout", {});
+}
 
 export function getConfig(): Promise<{
   mode: string; roots: string[]; colors: string[]; models: ModelInfo[]; default_model: string;

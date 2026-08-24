@@ -1,5 +1,7 @@
 # Label Tool — สถานะโปรเจกต์
 
+> **สถานะปัจจุบัน (2026-08-24):** backend refactor เสร็จครบ · OIDC Login System แบบเดียวกับ `corpus-core` ทำครบทั้ง Go backend และ Next.js frontend แล้ว · milestone ถัดไปคือ model quality สำหรับ small-object classes
+
 ## Test coverage
 
 **หลัง port เป็น Go มีสามชั้น:** (1) `go test ./...` — unit test ต่อ package รวม `internal/infra/store` ที่รันกับ PostgreSQL จริง (2) `backend/tests/smoke_test.py` — end-to-end ยิงผ่าน HTTP จริง (3) `backend/tests/testdata/` — golden vector ข้ามภาษาที่ Go ต้อง reproduce ให้ตรงเป๊ะ
@@ -18,9 +20,9 @@
 - `/api/evaluate` และ `/api/autolabel` คืนโครงสร้างผลลัพธ์ตามที่คาด และสถานะ `auto` ใน DB sync กับจำนวนภาพที่เขียนป้ายจริง
 - predict รอดจากการที่ bank เพิ่มคลาสกลางคัน (regression guard ของบั๊กจริงที่เคยเจอ — ดู [`vpe.py`](../backend/inference/vpe.py) หัวข้อ `arm()`)
 - upload ปฏิเสธไฟล์ไม่ใช่ภาพ/เกินขนาด/ชื่อซ้ำ/ไม่มีชื่อ, path traversal ในชื่อไฟล์ถูกตัดทิ้งแทนที่จะพาไฟล์ออกนอกโฟลเดอร์
-- auth: ไม่ login โดนปฏิเสธทุก endpoint ยกเว้น `/api/config`, รหัส/ชื่อผู้ใช้ผิดได้ `401` ทั้งคู่, login แล้วผ่าน, `labeled_by` ถูกบันทึกลง instance, logout แล้วกลับไป `401`
+- auth: local login และ OIDC redirect/callback ผ่าน mock provider, state mismatch ถูกปฏิเสธก่อน exchange, session เป็น HttpOnly, `labeled_by` ถูกบันทึก และ logout/expiry กลับไปหน้า login
 
-ฝั่ง Go มี `_test.go` ต่อ package: `config` (path safety 6 เคส รวม symlink หนีออกนอก root และ sibling ที่ชื่อขึ้นต้นเหมือน root), `auth` (เทียบกับ vector ที่ Python สร้าง), `store` (รวม concurrency test จริงกับ PostgreSQL — หลาย goroutine สร้างคลาสใหม่พร้อมกัน ยืนยันว่า class index ไม่ชนกัน, ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 4.1), `metrics`, `events`, `export`, `models`, `images` · `transport/httpapi` (76 เคส: รูปแบบ `{"detail": ...}` ทุกชนิด error, trust boundary ของ path ต่อ endpoint ที่รับ path, auth gate รวมทั้ง route ที่ยังไม่มีใครเขียน, กฎชื่อไฟล์/ขนาด/ชนิดของ upload, `/config` `/browse` `/image` `/jobs`) — Store กับ VPE เป็น nil โดยตั้งใจ: handler ที่ต้องมี database เพื่อตอบเรื่องพวกนี้คือ handler ที่วาง boundary ไว้ผิดที่
+ฝั่ง Go มี `_test.go` ต่อ package: `config` (path safety 6 เคส รวม symlink หนีออกนอก root และ sibling ที่ชื่อขึ้นต้นเหมือน root), `auth` (เทียบกับ vector ที่ Python สร้าง), `store` (รวม concurrency test จริงกับ PostgreSQL — หลาย goroutine สร้างคลาสใหม่พร้อมกัน ยืนยันว่า class index ไม่ชนกัน, ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) หัวข้อ 4.1), `metrics`, `events`, `export`, `models`, `images` · `transport/httpapi` (77 เคส: รูปแบบ `{"detail": ...}` ทุกชนิด error, trust boundary ของ path ต่อ endpoint ที่รับ path, auth gate รวมทั้ง route ที่ยังไม่มีใครเขียน, OIDC callback/state, กฎชื่อไฟล์/ขนาด/ชนิดของ upload, `/config` `/browse` `/image` `/jobs`) — Store กับ VPE เป็น nil โดยตั้งใจ: handler ที่ต้องมี database เพื่อตอบเรื่องพวกนี้คือ handler ที่วาง boundary ไว้ผิดที่
 
 ฝั่ง Python ที่เหลือมี self-check ของตัวเอง: `python -m backend.inference.models`, `python -m backend.tools.{metrics,groundtruth}`, `python -m backend.tests.dbcheck`, `python -m backend.tests.gen_testdata --check` · อีกสองตัวต้องมี torch จึงรันในงาน `smoke`: `python -m backend.tests.bank_test` (การบันทึกของ prompt bank) และ `python -m backend.tests.stream_test` (stream ของ sidecar ต้องถูกผลิตจาก thread เดียว ไม่งั้น lock ต่อ checkpoint ค้างถาวร)
 
@@ -32,16 +34,16 @@
 
 - **`go`** — `go vet`, `gofmt -l` (fail ถ้ามีไฟล์ไม่ format), `go test ./...` กับ postgres service, `go build`
 - **`python`** — self-check ของ sidecar + `_gen_testdata --check` ไม่ต้องใช้ torch ไม่ต้องใช้ model weight จบในไม่กี่วินาที
-- **`smoke`** — ติดตั้ง CPU torch (runner ไม่มี GPU), cache น้ำหนักโมเดล 28 MB ข้าม run, ยก sidecar + Go API ขึ้นจริง แล้วรัน `backend._smoke_test.py` ยิงผ่าน HTTP
+- **`smoke`** — ติดตั้ง CPU torch (runner ไม่มี GPU), cache น้ำหนักโมเดล 28 MB ข้าม run, ยก sidecar + Go API ขึ้นจริง แล้วรัน `backend.tests.smoke_test` ยิงผ่าน HTTP
 
-ทดสอบแล้วว่า smoke test **fail จริง** เมื่อจงใจสลับ `Bank.classes` เป็น `sorted()` และ golden vector check **fail จริง** เมื่อจงใจขยับ IoU threshold เป็น 0.4 และ path-safety test **fail จริง** เมื่อเปลี่ยนเป็น `strings.HasPrefix` — ยืนยันว่า CI จับ regression ได้จริง ไม่ใช่แค่ผ่านเฉย ๆ ทริกเกอร์เมื่อ push/PR ที่แตะ `backend/**`, `cmd/**`, `internal/**`, `go.mod`
+ทดสอบแล้วว่า smoke test **fail จริง** เมื่อจงใจสลับ `Bank.classes` เป็น `sorted()` และ golden vector check **fail จริง** เมื่อจงใจขยับ IoU threshold เป็น 0.4 และ path-safety test **fail จริง** เมื่อเปลี่ยนเป็น `strings.HasPrefix` — ยืนยันว่า CI จับ regression ได้จริง ไม่ใช่แค่ผ่านเฉย ๆ workflow ทริกเกอร์เมื่อ push/PR ที่แตะ `backend/**` หรือ workflow เอง
 
 **ยังไม่มี** pipeline สำหรับ frontend (type-check/build เป็นการรันมือ `npx tsc --noEmit` / `npm run build`), ไม่มี auto-deploy เมื่อ merge
 
 ## Known bugs และข้อจำกัด (ยังไม่แก้ ณ ขณะเขียนเอกสารนี้)
 
 - **Job tracker เก็บสถานะในหน่วยความจำ process เดียว.** ไม่ persist ข้าม restart, ไม่มี TTL/eviction ของ job เก่า — **port มาจาก `job_tracker.py` แบบไม่แก้พฤติกรรมโดยตั้งใจ** (`internal/platform/jobs`) มีคอมเมนต์ `ponytail:` ระบุทางแก้เป็น Redis/TTL ไว้แล้ว
-- **Authentication เป็น opt-in, ปิดอยู่โดย default** — ไม่ตั้ง `LABEL_TOOL_USERS` เท่ากับไม่มีการยืนยันตัวตนเลย เหมือนพฤติกรรมเดิมทุกประการ backend (`/api/auth/*` + middleware) พร้อมแล้ว **แต่ยังไม่มีหน้า login บน UI** ต้องเรียก `POST /api/auth/login` เอง
+- **Authentication เป็น opt-in OIDC พร้อม UI และ local username/password fallback** — ไม่ตั้ง OIDC variables หรือ `LABEL_TOOL_USERS` เท่ากับไม่มีการยืนยันตัวตน เหมือนพฤติกรรมเดิมทุกประการ
 - ~~**CORS เปิดกว้างทุก origin**~~ **หายไปแล้ว** — Go ไม่ตั้ง CORS header เลย ซึ่งถูกต้องเพราะ browser คุยผ่าน Next.js proxy อย่างเดียว ถ้าจะเปิด backend ให้เข้าถึงตรงในอนาคตต้องเพิ่มแบบระบุ origin
 - **Bank ใช้ mean-pooling เดียวต่อคลาส** ไม่รองรับคลาสที่มี variation สูง (multi-modal) ได้ดี — โค้ดมีคอมเมนต์ชี้ทางอัพเกรดเป็น nearest-neighbor matching ไว้แล้วแต่ยังไม่ implement
 - **คลาสขนาดเล็กที่ปะปนกับพื้นหลังยังแยกไม่ค่อยออก.** วัดจริงจาก dataset `conveyor_pvc` ที่ conf default เดิม (0.25): `defect` (รอยขีดข่วน/บิ่นเล็ก ๆ) recall = 0.00 ในขณะที่ `good_part` ได้ F1 0.82 — **T-01 พิสูจน์แล้วว่าสาเหตุหลักคือ threshold ไม่ใช่ไม่มีสัญญาณ** (recall ขยับเป็น 0.26 ที่ conf 0.05) `conf_by_class` ดึงทั้งสองคลาสมาพร้อมกันได้แล้ว (defect 0.248 + good_part 0.818) แต่ยังห่างจากเกณฑ์ auto-label (`READY_F1 = 0.75`) มาก — รายละเอียดเต็มที่ [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
@@ -55,9 +57,9 @@
 
 **ใช้งานได้ในวง PoC/ทีมภายในที่ไว้ใจกันได้ ไม่ใช่ production พร้อมเปิดสาธารณะ**
 
-- Authentication มีแล้วแต่เป็น opt-in (ปิดอยู่โดย default) — ถ้าไม่ตั้ง `LABEL_TOOL_USERS` ยังต้องพึ่งการควบคุมการเข้าถึงเครือข่ายภายนอกแอป (VPN, firewall, network segment) เหมือนเดิม และยังไม่มีหน้า login บน UI
-- มี CI (`checks` + `smoke` job) แต่ไม่มี auto-deploy — การ deploy จริงยังเป็นการรัน `docker compose up --build` ด้วยมือ
-- Job tracker แบบ in-memory จำกัดให้รันได้แค่ 1 uvicorn worker ต่อ instance
+- Authentication รองรับ OIDC ของบริษัทพร้อมหน้า login/callback/logout และ local username/password fallback; ถ้าไม่ตั้ง auth ทั้งสองแบบยังต้องพึ่ง VPN/firewall/network segment เหมือนเดิม
+- มี CI (`go` + `python` + `smoke` jobs) แต่ไม่มี auto-deploy — การ deploy จริงยังเป็นการรัน `docker compose up --build` ด้วยมือ
+- Job tracker แบบ in-memory จำกัดให้รันได้แค่ 1 API process ต่อ instance
 - ไม่มี HTTPS ในตัวแอป (certs mechanism มีไว้แค่ตอน build ผ่าน proxy องค์กรเท่านั้น)
 - Container `api` ไม่รันเป็น root แล้ว (`ARG APP_UID` + `USER app`)
 - ใช้ GPU (CUDA, `cu126`) เป็นค่าเริ่มต้นในการ build — override เป็น CPU ได้ด้วย build arg เดียวไม่ต้องแก้ไฟล์ (`--build-arg TORCH_INDEX_URL=.../whl/cpu`)

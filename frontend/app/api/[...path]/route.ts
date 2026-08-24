@@ -15,6 +15,7 @@ async function proxy(req: Request, path: string[]) {
     const v = req.headers.get(h);
     if (v) headers.set(h, v);
   }
+  headers.set("x-forwarded-proto", req.headers.get("x-forwarded-proto")?.split(",")[0].trim() ?? url.protocol.slice(0, -1));
 
   const res = await fetch(`${API}/api/${path.join("/")}${url.search}`, {
     method: req.method,

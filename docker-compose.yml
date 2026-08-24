@@ -69,6 +69,10 @@ services:
       # secret, so everyone is signed out whenever the API restarts; set it to
       # keep sessions across a redeploy.
       LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
+      OAUTH_ENDPOINT: ${OAUTH_ENDPOINT:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       VPE_URL: http://vpe:8001
       DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool

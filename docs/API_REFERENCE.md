@@ -11,26 +11,39 @@
 - **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank อยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()`) ส่วนป้ายและ test-set membership อยู่ใน PostgreSQL คีย์ด้วย `input_dir` เดียวกัน (T-21, ดู `internal/infra/store`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
 - **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
-- **Auth:** ถ้าตั้ง `LABEL_TOOL_USERS` ไว้ ทุก endpoint **ยกเว้น** `GET /api/config` และ `/api/auth/*` ต้องมี session cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้ง ระบบไม่มี login เลยและทุก endpoint เปิดเหมือนเดิม (ดู `internal/platform/auth`) · สร้าง hash ด้วย `docker compose run --rm --entrypoint /app/api api -hash-password <ชื่อ> '<รหัสผ่าน>'` — **format ของ hash และ cookie ไม่เปลี่ยนจากเดิม** ค่า `LABEL_TOOL_USERS` เก่าใช้ต่อได้ทันที
+- **Auth:** ถ้าตั้ง OIDC (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ENDPOINT`, `FRONTEND_URL`) หรือ `LABEL_TOOL_USERS` ทุก endpoint **ยกเว้น** config/login routes ต้องมี `labeltool_session` cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้งทั้งคู่ระบบเปิดเหมือนเดิม · OIDC มี priority เหนือ local fallback
 - **`conf_by_class`:** `/api/predict`, `/api/evaluate`, `/api/autolabel` รับ dict `{ชื่อคลาส: threshold}` เพื่อ override `conf` เป็นรายคลาส (`{}` = พฤติกรรมเดิม) — เหตุผลและตัวเลขอยู่ใน [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
 
 ---
 
-## Auth (`internal/transport/httpapi/auth.go`, prefix `/api/auth`)
+## Auth (`internal/transport/httpapi/auth.go`)
 
-ปิดอยู่โดย default ทั้งชุด สร้าง user ด้วย `docker compose run --rm --entrypoint /app/api api -hash-password <ชื่อ> '<รหัสผ่าน>'` แล้วใส่ผลลัพธ์ใน `LABEL_TOOL_USERS` (คั่นด้วย comma)
+ปิดอยู่โดย default ทั้งชุด OIDC ใช้ authorization-code flow แบบเดียวกับ `corpus-core`; backend exchange code และออก application-session cookie โดยไม่ส่ง provider token กลับ browser
+
+### `GET /api/public/login/redirect`
+- **Response:** `{"redirectUrl": str}` + HttpOnly state cookie อายุ 5 นาที
+- state cookie เก็บ `<state>.<PKCE verifier>` ไว้ด้วยกัน (ทั้งสองส่วนเป็น base64url จึงไม่มี `.` ปนแน่นอน) — cookie เดียวที่มาไม่ครบไม่ได้ ดีกว่าสอง cookie ที่มาครึ่งเดียวได้
+- แนบ `code_challenge` (S256) **เฉพาะเมื่อ discovery document ของ provider ประกาศ `code_challenge_methods_supported: ["S256"]`** — provider ที่ไม่รองรับจะไม่ได้รับ parameter ที่ไม่ได้ขอ
+
+### `POST /api/public/login/callback`
+- **Body:** `{"code": str, "state": str}`
+- **Response:** `{"enabled": true, "user": str, "mode": "oidc"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.)
+- **401** เมื่อ state ไม่ตรง, code exchange ล้มเหลว หรือ user-info ใช้ไม่ได้ — เทียบ state แบบ constant-time และลบ state cookie **ก่อน** แลก code
+- สำเร็จแล้ว upsert แถวใน `users` (`oid` = `sub` ของ provider) เพื่อให้ `sub` ที่ไปอยู่ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้ · เขียนไม่สำเร็จ **ไม่** ทำให้ login พัง (เป็นปัญหาฝั่ง reporting ไม่ใช่เหตุผลที่จะปฏิเสธ login ที่ถูกต้อง)
 
 ### `GET /api/auth/me`
-- **Response:** `{"enabled": bool, "user": str|null}` — `enabled=false` แปลว่าเซิร์ฟเวอร์นี้ไม่มีระบบ login ไม่ใช่ว่ายังไม่ได้ login
+- **Response:** `{"enabled": bool, "user": str|null, "mode": "none"|"local"|"oidc"}` — `enabled=false` แปลว่าเซิร์ฟเวอร์นี้ไม่มีระบบ login ไม่ใช่ว่ายังไม่ได้ login
 
 ### `POST /api/auth/login`
 - **Body:** `{"username": str, "password": str}`
-- **Response:** `{"enabled": true, "user": str}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.)
+- **Response:** `{"enabled": true, "user": str, "mode": "local"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.)
 - **401** เมื่อรหัสผ่านหรือชื่อผู้ใช้ผิด (ข้อความเดียวกันทั้งสองกรณี โดยตั้งใจ)
-- **400** ถ้าเซิร์ฟเวอร์ไม่ได้ตั้ง user ไว้เลย
+- **400** ถ้าเซิร์ฟเวอร์ไม่ได้ตั้ง user ไว้เลย หรือ OIDC active อยู่ (local login เป็น fallback เท่านั้น)
 
 ### `POST /api/auth/logout`
-- ลบ cookie · **Response:** `{"enabled": bool, "user": null}`
+- ลบ cookie · **Response:** `{"enabled": bool, "user": null, "mode": "none"|"local"|"oidc", "logoutUrl"?: str}`
+- `logoutUrl` มีเฉพาะโหมด `oidc` และเฉพาะเมื่อ discovery document มี `end_session_endpoint` — frontend ต้องพา browser ไปที่ URL นั้น ไม่งั้น session ฝั่ง provider ยังอยู่ แล้วการกด "sign in" ครั้งถัดไปบนเครื่อง label ที่ใช้ร่วมกันจะ login เงียบ ๆ เป็นคนเดิม
+- **ไม่**แนบ `post_logout_redirect_uri`: parameter นั้นต้อง register กับ provider ก่อน และ logout ที่พังเพราะ URL ไม่ได้ register แย่กว่า logout ที่จบบนหน้า signed-out ของ provider เอง
 
 ---
 
@@ -41,7 +54,7 @@
 
 - **Form:** `dir` (โฟลเดอร์ปลายทาง, สร้างให้ถ้ายังไม่มี), `files` (หลายไฟล์ได้)
 - **Response:** `{"saved": [path...], "skipped": [{"name": str, "reason": str}], "images": [path...]}`
-- **403** เมื่อ `LABEL_TOOL_MODE=vm` แต่ยังไม่ได้ตั้ง `LABEL_TOOL_USERS` — เงื่อนไขของ T-13: ห้ามเปิดรับไฟล์บนเซิร์ฟเวอร์ที่ใครก็เข้าได้
+- **403** เมื่อ `LABEL_TOOL_MODE=vm` แต่ยังไม่ได้ตั้ง OIDC หรือ `LABEL_TOOL_USERS` — เงื่อนไขของ T-13: ห้ามเปิดรับไฟล์บนเซิร์ฟเวอร์ที่ใครก็เข้าได้
 - **เหตุผลที่ไฟล์ถูกข้าม:** `bad filename` (ชื่อว่าง/ขึ้นต้นด้วย `.`) · `not an image file type` (นามสกุลไม่อยู่ใน `IMAGE_EXTS`) · `not a readable image` (decode ไม่ผ่าน — ด่านจริง ไม่ใช่นามสกุล) · `already in this folder` (ไม่เขียนทับของเดิมเด็ดขาด) · `larger than N MB` (`LABEL_TOOL_MAX_UPLOAD_MB`, default 25)
 - ส่วน directory ในชื่อไฟล์ถูกตัดทิ้งเสมอ — `../x.jpg` กลายเป็น `x.jpg` ในโฟลเดอร์ปลายทาง ไม่ใช่ไฟล์นอกโฟลเดอร์
 

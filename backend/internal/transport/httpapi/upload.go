@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/images"
-	"github.com/P-PrPas/CT-Flow/backend/internal/platform/auth"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 )
 
@@ -24,12 +23,12 @@ import (
 //  3. the bytes have to decode as an image. The extension is a fast reject; the
 //     decode is the one that actually decides.
 func (s *Server) Upload(w http.ResponseWriter, r *http.Request) error {
-	if s.Cfg.Mode == "vm" && !auth.Enabled() {
+	if s.Cfg.Mode == "vm" && !s.authEnabled() {
 		// T-13's precondition, enforced in code rather than left in a doc: a
 		// shared deployment that accepts files from anyone who knows the URL is
 		// a worse problem than not having upload at all.
 		return errStatus(http.StatusForbidden,
-			"set LABEL_TOOL_USERS before enabling upload on a shared server")
+			"configure OIDC or LABEL_TOOL_USERS before enabling upload on a shared server")
 	}
 
 	mr, err := r.MultipartReader()

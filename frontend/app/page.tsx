@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import DirPicker from "./components/DirPicker";
 import ProgressBar from "./components/ProgressBar";
 import SetupCard from "./components/SetupCard";
 import ShortcutsDialog from "./components/ShortcutsDialog";
 import { useSession, type Panel } from "./lib/session";
+import * as api from "./lib/api";
 import { BrandMark, fileOf, Icon, pct, Tip, type IconName } from "./lib/ui";
 import InsightsPanel from "./panels/InsightsPanel";
 import PoolPanel from "./panels/PoolPanel";
@@ -13,6 +15,24 @@ import ReportPanel from "./panels/ReportPanel";
 import TestsetPanel from "./panels/TestsetPanel";
 
 export default function Page() {
+  const router = useRouter();
+  const [auth, setAuth] = useState<api.AuthState | null>(null);
+
+  useEffect(() => {
+    api.getAuth().then(setAuth).catch(() => setAuth({ enabled: false, user: null, mode: "none" }));
+  }, []);
+
+  useEffect(() => {
+    if (auth?.enabled && !auth.user) router.replace("/entry/login");
+  }, [auth, router]);
+
+  if (!auth || (auth.enabled && !auth.user)) {
+    return <main className="row" style={{ minHeight: "100dvh", justifyContent: "center" }}>Loading…</main>;
+  }
+  return <Workspace auth={auth} />;
+}
+
+function Workspace({ auth }: { auth: api.AuthState }) {
   const s = useSession();
 
   /** FR-20 — the whole repetitive part of the loop, on keys. Deliberately inert
@@ -149,13 +169,21 @@ export default function Page() {
               <Icon name="keyboard" size={15} />
             </button>
 
-            {/* FR-30/31 — the slot is designed so the layout is final; sign-in
-                itself is not built, and nothing here pretends it is. */}
-            <Tip text="Sign-in is not built yet. Until it is, everyone shares one session and labels are not attributed to a person (T-12).">
-              <span className="chip" style={{ opacity: .7 }}>
-                <Icon name="lock" size={12} /> Not signed in
-              </span>
-            </Tip>
+            {auth.user ? (
+              <button
+                className="chip btn-like"
+                title="Sign out"
+                onClick={() => api.logout()
+                  .then((out) => window.location.assign(out.logoutUrl || "/entry/login"))
+                  .catch(() => window.location.assign("/entry/login"))}
+              >
+                <Icon name="user" size={12} /> {auth.user}
+              </button>
+            ) : (
+              <Tip text="Authentication is disabled on this server.">
+                <span className="chip"><Icon name="lock" size={12} /> Auth off</span>
+              </Tip>
+            )}
           </div>
         </div>
       </header>

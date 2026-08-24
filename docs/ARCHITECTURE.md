@@ -5,7 +5,7 @@
 | ชั้น | เทคโนโลยี |
 |---|---|
 | Frontend | Next.js 15 (App Router) + React 19 + TypeScript — ไม่มี UI/state library เพิ่ม ใช้ `useState`/`useEffect` ล้วน และ CSS แบบ utility class ของตัวเอง (`globals.css`) |
-| Backend API | **Go** (`backend/cmd/api`, `backend/internal/*`) — stdlib `net/http` ล้วน ไม่มี framework · dependency นอก stdlib 3 ตัว: `jackc/pgx/v5`, `x/crypto/pbkdf2`, `x/image/bmp` (ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)) |
+| Backend API | **Go** (`backend/cmd/api`, `backend/internal/*`) — stdlib `net/http` ล้วน ไม่มี framework · dependency หลักคือ `jackc/pgx/v5`, `coreos/go-oidc/v3`, `x/oauth2`, `x/crypto/pbkdf2`, `x/image/bmp` (ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)) |
 | Inference sidecar | **FastAPI (Python)** — `backend/inference/service.py` เหลือแค่ส่วนที่ต้องใช้ torch: YOLOE + prompt bank |
 | Model / Inference | Ultralytics **YOLOE** ผ่าน `YOLOEVPSegPredictor` (SAVPE) — **เลือก checkpoint ได้จากรายการที่กำหนดไว้ล่วงหน้า** (`inference/models.py`) ตั้งแต่ `yoloe-v8s-seg` เล็กสุด ถึง `yoloe-26x-seg` รุ่นล่าสุดและใหญ่สุด ไม่ hardcode ตัวเดียวอีกต่อไป |
 | ML runtime | PyTorch — build ด้วย CUDA (`cu126`) เป็นค่าเริ่มต้นใน Docker image, override เป็น CPU ได้ด้วย build arg |
@@ -68,7 +68,10 @@ Job ทั้งสี่ตัว (`score`, `evaluate`, `autolabel`, `reembed`)
   - `projects` — หนึ่งแถวต่อ `input_dir` หนึ่งโฟลเดอร์ (ยังไม่มีแนวคิด workspace/multi-tenant จริง แค่เตรียม `id` ไว้ให้ระบบ user/workspace ในอนาคตอ้างอิงได้)
   - `classes` — index → ชื่อคลาส **append-only เสมอ ห้ามเรียงใหม่หรือลบ** (แทน `classes.txt` เดิม) แยก index space ระหว่าง `kind='pool'` กับ `kind='testset'` คนละชุดกัน สร้างคลาสใหม่ผ่าน `internal/infra/store.getOrCreateClass()` ซึ่งล็อกแถว `projects` ก่อนคำนวณ index ถัดไป กันสองคนสร้างคลาสใหม่ชนกัน (แทนที่ `filelock` เดิมที่ใช้จุดประสงค์เดียวกันตอนยังเป็นไฟล์)
   - `images` — หนึ่งแถวต่อ `(project, kind, path)` มีคอลัมน์ `status` (`unlabeled`/`labeled`/`auto`) แทนที่ `bank.labeled`/`bank.auto` เดิม
-  - `annotations` — หนึ่งแถวต่อกล่อง พิกัดพิกเซล `x1,y1,x2,y2` ตรงกับ Box model ใน API_REFERENCE.md ทุกประการ (ไม่ normalize เหมือน YOLO txt เดิมอีกต่อไป — export ค่อยแปลงตอนขาออก) มี `created_by` สำหรับ audit ในอนาคต
+  - `annotations` — หนึ่งแถวต่อกล่อง พิกัดพิกเซล `x1,y1,x2,y2` ตรงกับ Box model ใน API_REFERENCE.md ทุกประการ (ไม่ normalize เหมือน YOLO txt เดิมอีกต่อไป — export ค่อยแปลงตอนขาออก) มี `created_by` สำหรับ audit
+  - `users` — หนึ่งแถวต่อคนที่เคย login ผ่าน OIDC (`oid` = claim `sub`, ชื่อเรียกเดียวกับ `corpus-core`) เขียนทับทุกครั้งที่ login เพราะ provider คือแหล่งความจริงของชื่อและอีเมล · **มีไว้เพราะ attribution เก็บ `sub`** ซึ่งเป็น claim เดียวที่รอดตอนคนถูกเปลี่ยนชื่อ แต่บนตัวมันเองคือ UUID ที่ไม่มีตารางอื่นรู้จัก — ตารางนี้คือคำตอบของ "ใครสอน prompt นี้" (FR-31)
+    - `created_by` ยังเป็น `TEXT` ไม่ใช่ FK: login แบบ `LABEL_TOOL_USERS` ไม่มีแถวที่นี่ และ prompt bank เป็นไฟล์ JSON ที่ Python sidecar เขียน ซึ่ง join อะไรไม่ได้
+    - **ไม่**ลอก `UNIQUE` บน `username`/`email` มาจาก `corpus-core`: `oid` เท่านั้นที่ระบุตัวคน ถ้า provider เอา `preferred_username` เดิมไปให้ subject ใหม่ (บัญชีถูกลบแล้วสร้างใหม่) constraint นั้นจะเปลี่ยน login ที่ถูกต้องให้กลายเป็น error และคนที่โดนปฏิเสธคือพนักงานคนปัจจุบัน
 - **Prompt bank (`<input_dir>/.ctflow/_bank/`, ดู `deps.state_dir()`) — ยังเป็นไฟล์เหมือนเดิม ไม่อยู่ใน scope ของ T-21:**
   - `embeddings.pt` — dict ที่ `torch.save` แล้ว: `{ชื่อคลาส: [Tensor, Tensor, ...]}` หนึ่ง tensor ต่อหนึ่ง instance ที่ label ด้วยมือ
   - `metadata.json` — `{"instances": {ชื่อคลาส: [{source_image, bbox, added_at, labeled_by}]}, "model": "yoloe-11s-seg" | null}` (ตัด `labeled`/`auto` ออกแล้ว ย้ายไปเป็น `images.status` ใน DB)

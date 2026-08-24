@@ -89,7 +89,7 @@ func TestUploadRefusedOnASharedServerWithoutUsers(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
-	if got, want := detail(t, w), "set LABEL_TOOL_USERS before enabling upload on a shared server"; got != want {
+	if got, want := detail(t, w), "configure OIDC or LABEL_TOOL_USERS before enabling upload on a shared server"; got != want {
 		t.Errorf("detail = %q, want %q", got, want)
 	}
 	// And nothing landed.

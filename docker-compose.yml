@@ -14,46 +14,35 @@ services:
       retries: 10
     restart: unless-stopped
 
-  api:
+  # Inference sidecar: YOLOE + the prompt bank (docs/REFACTOR_PLAN.md). Split
+  # out of `api` so the API service carries no torch, and so the two can be
+  # rebuilt and restarted independently -- reloading an API change no longer
+  # means re-loading a checkpoint.
+  #
+  # Not published to the host, and it must stay that way: it trusts its caller
+  # to have run every path through checked_path() already.
+  vpe:
     build:
-      context: .                       # this repo's root
-      dockerfile: backend/Dockerfile
+      context: .                       # needs certs/ too
+      dockerfile: backend/inference/Dockerfile
       args:
-        APP_UID: ${APP_UID:-1000}      # must own DATA_DIR on a Linux host
-    image: ct-flow-api
+        APP_UID: ${APP_UID:-1000}      # must match api's -- both write under DATA_DIR
+    image: ct-flow-vpe
     environment:
-      LABEL_TOOL_MODE: vm              # in a container the FS is always "the vm"
+      LABEL_TOOL_MODE: vm
       LABEL_TOOL_VM_ROOT: /opt/mount/project
-      # Empty = no login and no upload (single trusted user). Fill both in to
-      # turn the tool multi-user -- see .env.example.
-      LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
-      LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
-      LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
-      # T-21: label/box storage. The prompt bank (embeddings) is unaffected --
-      # still the file under each project's .ctflow/_bank/. See
-      # docs/DB_MIGRATION_PLAN.md.
-      DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool
-    depends_on:
-      db:
-        condition: service_healthy
     volumes:
-      # Everything the tool can see. Each project's labels/bank/test-set data
-      # live in a .ctflow/ subfolder next to its own images, all still under
-      # here -- the browser can only ever pick paths inside /opt/mount/project.
+      # It reads the images it embeds, and owns <input_dir>/.ctflow/_bank/
+      # outright -- no other process writes there.
       - ${DATA_DIR:-../data}:/opt/mount/project
       # YOLOE checkpoints, auto-downloaded on first use per selected model
       # (see backend/services/models.py) -- named so a restart doesn't
       # re-fetch every weight from scratch.
       - models:/models
-    # Swagger UI (/docs), ReDoc (/redoc), and the raw spec (/openapi.json) --
-    # not proxied through `web` (its catch-all only forwards /api/*), so this
-    # is the only way to reach them against the Dockerized backend.
-    ports:
-      - "${API_PORT:-8000}:8000"
     # Requires an NVIDIA GPU + driver + the NVIDIA Container Toolkit on the
     # host (`docker info` should list an `nvidia` runtime). No GPU available?
     # Delete this block and rebuild with TORCH_INDEX_URL=.../whl/cpu instead
-    # (see backend/Dockerfile) -- inference still runs, just on CPU.
+    # (see backend/inference/Dockerfile) -- inference still runs, just on CPU.
     deploy:
       resources:
         reservations:
@@ -61,6 +50,44 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    restart: unless-stopped
+
+  # The API service. Every /api endpoint the frontend calls.
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        APP_UID: ${APP_UID:-1000}
+    image: ct-flow-api
+    environment:
+      LABEL_TOOL_MODE: vm
+      LABEL_TOOL_VM_ROOT: /opt/mount/project
+      LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
+      # Signs the session cookie. Only this service has any auth -- the sidecar
+      # never sees a cookie. Leaving it unset gives each start its own random
+      # secret, so everyone is signed out whenever the API restarts; set it to
+      # keep sessions across a redeploy.
+      LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
+      LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      VPE_URL: http://vpe:8001
+      DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/labeltool
+    depends_on:
+      db:
+        condition: service_healthy
+      vpe:
+        condition: service_healthy
+    volumes:
+      # Everything the tool can see. Each project's prompt bank, eval history
+      # and events log live in a .ctflow/ subfolder next to its own images, all
+      # under here -- the browser can only ever pick paths inside it.
+      - ${DATA_DIR:-../data}:/opt/mount/project
+      # Read-only: only to report which checkpoints are already cached.
+      - models:/models:ro
+    # Not published: the browser reaches the API through the Next.js proxy in
+    # `web`, and Swagger -- the only other reason this port was ever on the host
+    # -- went with FastAPI. Add a ports entry back if you want to curl it
+    # directly during development.
     restart: unless-stopped
 
   web:

@@ -8,6 +8,10 @@ __pycache__/
 # Model weights (fetched separately, see README)
 *.pt
 
+# Go -- `go build` in the repo root drops a binary named after the module
+/CT-Flow
+/api
+
 # Web
 frontend/node_modules/
 frontend/.next/

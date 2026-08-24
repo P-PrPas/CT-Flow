@@ -1,76 +1,52 @@
-# Build context is label_tool/ (this repo's root), see docker-compose.yml.
-FROM python:3.12-slim
+# The Go API service. Build context is the repo root (it needs certs/), see
+# docker-compose.yml. The inference sidecar has its own: backend/inference/Dockerfile.
 
-# opencv needs these; slim has neither
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 curl \
-    && rm -rf /var/lib/apt/lists/*
+FROM golang:1.26-alpine AS build
+WORKDIR /src
 
-WORKDIR /app
-
-# Any .crt dropped in certs/ becomes trusted at build time. Needed when
-# something intercepts TLS between the build and pypi -- a corporate proxy,
-# or antivirus HTTPS scanning (AVG/Avast/Kaspersky all do this).
-# Empty folder = no-op.
+# Any .crt dropped in certs/ becomes trusted at build time, same as the Python
+# image: a corporate TLS proxy intercepts the module download too.
 COPY certs/ /usr/local/share/ca-certificates/
-RUN update-ca-certificates
-ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
-    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
-    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+RUN apk add --no-cache ca-certificates && update-ca-certificates
 
-# CUDA build of torch. cu126 needs a host driver that supports CUDA 12.6 or
-# newer -- check with `nvidia-smi`, the "CUDA Version" it prints is the
-# ceiling your driver supports, and a driver only runs wheels built for that
-# version or older (a cu128/cu130 wheel on a driver capped at 12.7 fails with
-# "CUDA driver version is insufficient"). No NVIDIA GPU on the build/run
-# host? Override at build time:
-#   docker compose build --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu api
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
-COPY backend/requirements.txt backend/requirements.txt
-RUN pip install --no-cache-dir --extra-index-url ${TORCH_INDEX_URL} \
-    -r backend/requirements.txt
+# Module files first so a source-only change reuses the download layer.
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
 
-# backend/ stays a real package (app.py, routers/, services/) so imports
-# inside it (`from .routers import ...`, `from ..services.bank import Bank`)
-# resolve the same way they do outside Docker.
-COPY backend/ backend/
+COPY backend/cmd/ cmd/
+COPY backend/internal/ internal/
+# CGO off so the result runs on a base image with no libc of its own.
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+
+FROM alpine:3.22
+# ca-certificates for outbound TLS; busybox already provides the wget the
+# healthcheck uses, which is why this is alpine rather than distroless -- a
+# scratch image has nothing that can perform its own healthcheck.
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=build /out/api /app/api
+
+# Two data files shared with the Python sidecar rather than compiled in, so
+# that adding a checkpoint or changing the schema is one edit and not two that
+# can disagree. They are data, not code, hence copied rather than embedded.
+COPY backend/models.json /app/models.json
+COPY backend/db/schema.sql /app/db/schema.sql
 
 ENV MODELS_DIR=/models \
+    MODELS_CATALOG=/app/models.json \
+    SCHEMA_PATH=/app/db/schema.sql \
     LABEL_TOOL_MODE=vm \
     LABEL_TOOL_VM_ROOT=/opt/mount/project \
-    YOLO_CONFIG_DIR=/tmp \
-    MPLCONFIGDIR=/tmp \
-    PYTHONUNBUFFERED=1
+    PORT=8000
 
-# NFR-07 -- not root. The UID has to match whoever owns the host folder you
-# bind-mount at /opt/mount/project, or the container cannot write labels into it:
-#   docker compose build --build-arg APP_UID=$(id -u) api
-# Docker Desktop on Windows/macOS ignores mount ownership, so the default is
-# only a real decision on Linux hosts.
+# NFR-07 -- not root. Must match the UID that owns DATA_DIR on a Linux host and
+# the sidecar's UID, since both write under it:
+#   docker compose build --build-arg APP_UID=$(id -u)
 ARG APP_UID=1000
-# /models is a named volume (docker-compose.yml) so a checkpoint survives a
-# restart instead of re-downloading. A named volume's first mount inherits
-# whatever owns this directory in the image at that moment -- must happen
-# before USER, or the volume comes up root-owned and `app` can't write into it.
-RUN mkdir -p /models \
-    && useradd --create-home --uid ${APP_UID} app \
-    && chown -R app /app /models
-
-# Bake the smallest/default and the two newest-generation checkpoints into the
-# image so a *fresh* named volume auto-seeds from them on first mount (Docker
-# copies a mount point's image content into an empty volume the first time it
-# attaches) -- this is what makes them survive `docker compose down -v`,
-# unlike a checkpoint that only ever landed in the volume via a runtime
-# download or a manual `docker cp`. The rest of the catalog still
-# auto-downloads into the volume on first use, same as before.
-# ponytail: these three .pt files have to already exist under label_tool/models/
-# on whoever's machine runs this build (see README.md#model-selection for the
-# curl commands) -- COPY can't skip a source file that isn't there.
-COPY models/yoloe-11s-seg.pt models/yoloe-26s-seg.pt models/yoloe-26x-seg.pt /models/
-RUN chown app /models/*.pt
+RUN adduser -D -u ${APP_UID} app && chown -R app /app
 USER app
 
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --retries=10 \
-    CMD curl -fs http://localhost:8000/api/config || exit 1
-CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    CMD wget -q -O- http://localhost:8000/api/config >/dev/null || exit 1
+CMD ["/app/api"]

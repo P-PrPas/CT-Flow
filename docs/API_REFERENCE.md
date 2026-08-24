@@ -1,22 +1,24 @@
 # Label Tool — API Reference
 
-เอกสารนี้อ้างอิงจากโค้ดจริงใน `backend/routers/*.py` ณ commit ปัจจุบัน ทุก endpoint อยู่ภายใต้ base path `/api` (ยกเว้น testset ที่อยู่ใต้ `/api/testset`) และถูกเรียกผ่าน Next.js proxy (`app/api/[...path]/route.ts`) เสมอ ไม่ใช่ตรงจาก browser
+เอกสารนี้อ้างอิงจากโค้ดจริงใน `internal/transport/httpapi/*.go` ณ commit ปัจจุบัน ทุก endpoint อยู่ภายใต้ base path `/api` (ยกเว้น testset ที่อยู่ใต้ `/api/testset`) และถูกเรียกผ่าน Next.js proxy (`app/api/[...path]/route.ts`) เสมอ ไม่ใช่ตรงจาก browser
+
+> **หมายเหตุหลัง port เป็น Go:** เอกสารนี้คือ reference ฉบับเดียว — ไม่มี Swagger UI / `/openapi.json` อีกแล้ว (FastAPI แถมมาให้ ส่วน Go ไม่มี และ spec ที่ generate จาก `req: dict` ได้แค่ `body: object` ซึ่งด้อยกว่าเอกสารนี้อยู่แล้ว) · **request/response ทุกตัวในเอกสารนี้ไม่เปลี่ยนเลยจากตอนเป็น FastAPI** — ยืนยันด้วย `backend/tests/parity.py` ที่ diff response ทีละฟิลด์ระหว่างสอง backend ได้ 43/43 เหมือนกันหมด
 
 ## Convention ที่ใช้ร่วมกัน
 
-- **รูปแบบ error:** ทุก endpoint คืน `HTTPException` ของ FastAPI เมื่อผิดพลาด → body เป็น `{"detail": "<ข้อความ>"}` ฝั่ง frontend (`lib/api.ts`) จับคู่กับสิ่งนี้โดยตรงใน `request()`: โยน `Error(data.detail)` เมื่อ response ไม่ ok
-- **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, รูปภาพ) ต้องผ่าน `deps.checked_path()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.path_allowed()` (นอกขอบเขต `vm` mode) จะได้ `403`
-- **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank อยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()`) ส่วนป้ายและ test-set membership อยู่ใน PostgreSQL คีย์ด้วย `input_dir` เดียวกัน (T-21, ดู `services/annotations_db.py`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
+- **รูปแบบ error:** ทุก endpoint คืน body เป็น `{"detail": "<ข้อความ>"}` เมื่อผิดพลาด ฝั่ง frontend (`lib/api.ts`) จับคู่กับสิ่งนี้โดยตรงใน `request()`: โยน `Error(data.detail)` เมื่อ response ไม่ ok · ฝั่ง Go บังคับด้วยการให้ทุก handler คืน `error` แทนการเขียน response เอง (`internal/transport/httpapi.Handle`) จึงไม่มี handler ไหนลืมรูปแบบนี้ได้ · **ข้อความ error ทุกตัวยกมาเหมือนเดิมทุกตัวอักษร** เพราะ smoke test เทียบตรง ๆ และ UI เอาไปแสดง
+- **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, รูปภาพ) ต้องผ่าน `Server.checkedPath()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.PathAllowed()` (นอกขอบเขต `vm` mode) จะได้ `403` · การตรวจใช้การ resolve symlink แล้วเทียบเป็น path component ไม่ใช่ prefix ของ string (มี test ครอบ 6 เคสใน `internal/platform/config`)
+- **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank อยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()`) ส่วนป้ายและ test-set membership อยู่ใน PostgreSQL คีย์ด้วย `input_dir` เดียวกัน (T-21, ดู `internal/infra/store`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
 - **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
-- **Auth:** ถ้าตั้ง `LABEL_TOOL_USERS` ไว้ ทุก endpoint **ยกเว้น** `GET /api/config` และ `/api/auth/*` ต้องมี session cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้ง ระบบไม่มี login เลยและทุก endpoint เปิดเหมือนเดิม (ดู `services/auth.py`)
+- **Auth:** ถ้าตั้ง `LABEL_TOOL_USERS` ไว้ ทุก endpoint **ยกเว้น** `GET /api/config` และ `/api/auth/*` ต้องมี session cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้ง ระบบไม่มี login เลยและทุก endpoint เปิดเหมือนเดิม (ดู `internal/platform/auth`) · สร้าง hash ด้วย `docker compose run --rm --entrypoint /app/api api -hash-password <ชื่อ> '<รหัสผ่าน>'` — **format ของ hash และ cookie ไม่เปลี่ยนจากเดิม** ค่า `LABEL_TOOL_USERS` เก่าใช้ต่อได้ทันที
 - **`conf_by_class`:** `/api/predict`, `/api/evaluate`, `/api/autolabel` รับ dict `{ชื่อคลาส: threshold}` เพื่อ override `conf` เป็นรายคลาส (`{}` = พฤติกรรมเดิม) — เหตุผลและตัวเลขอยู่ใน [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
 
 ---
 
-## Auth (`routers/auth.py`, prefix `/api/auth`)
+## Auth (`internal/transport/httpapi/auth.go`, prefix `/api/auth`)
 
-ปิดอยู่โดย default ทั้งชุด สร้าง user ด้วย `python -m backend.services.auth <ชื่อ> <รหัสผ่าน>` แล้วใส่ผลลัพธ์ใน `LABEL_TOOL_USERS` (คั่นด้วย comma)
+ปิดอยู่โดย default ทั้งชุด สร้าง user ด้วย `docker compose run --rm --entrypoint /app/api api -hash-password <ชื่อ> '<รหัสผ่าน>'` แล้วใส่ผลลัพธ์ใน `LABEL_TOOL_USERS` (คั่นด้วย comma)
 
 ### `GET /api/auth/me`
 - **Response:** `{"enabled": bool, "user": str|null}` — `enabled=false` แปลว่าเซิร์ฟเวอร์นี้ไม่มีระบบ login ไม่ใช่ว่ายังไม่ได้ login
@@ -32,7 +34,7 @@
 
 ---
 
-## Upload (`routers/uploads.py`)
+## Upload (`internal/transport/httpapi/upload.go`)
 
 ### `POST /api/upload`
 อัปโหลดภาพเข้าโฟลเดอร์ (multipart/form-data)
@@ -45,13 +47,13 @@
 
 ---
 
-## System (`routers/system.py`)
+## System (`internal/transport/httpapi/system.go`)
 
 ### `GET /api/config`
 รายงานโหมดการทำงานปัจจุบัน + root ที่ browse ได้ + สีที่ใช้แสดงกล่องแต่ละคลาส + รายการโมเดลที่เลือกได้
 
 - **Response:** `{"mode": "local"|"vm", "roots": [str...], "colors": [str...], "models": [ModelInfo...], "default_model": str}`
-- `ModelInfo` = `{"id": str, "family": str, "size": str, "note": str, "available": bool}` — ดู [`services/models.py`](../backend/services/models.py), `id` คือค่าที่ส่งเป็น `model_id` ใน `POST /api/label` · `available` เช็คสดจากดิสก์ทุกครั้งที่เรียก (มีไฟล์ `.pt` อยู่ใน `MODELS_DIR` จริงหรือไม่) — `false` ไม่ได้แปลว่าใช้ไม่ได้ แค่แปลว่า predict/label ครั้งแรกด้วยโมเดลนั้นจะไป auto-download จาก GitHub ก่อน (อาจช้าหรือเงียบล้มเหลวถ้าเน็ตไปไม่ถึง)
+- `ModelInfo` = `{"id": str, "family": str, "size": str, "note": str, "available": bool}` — ดู [`backend/models.json`](../backend/inference/models.py), `id` คือค่าที่ส่งเป็น `model_id` ใน `POST /api/label` · `available` เช็คสดจากดิสก์ทุกครั้งที่เรียก (มีไฟล์ `.pt` อยู่ใน `MODELS_DIR` จริงหรือไม่) — `false` ไม่ได้แปลว่าใช้ไม่ได้ แค่แปลว่า predict/label ครั้งแรกด้วยโมเดลนั้นจะไป auto-download จาก GitHub ก่อน (อาจช้าหรือเงียบล้มเหลวถ้าเน็ตไปไม่ถึง)
 - ใช้เป็น healthcheck endpoint ของ container `api` ด้วย (`docker-compose.yml`)
 
 ### `GET /api/browse`
@@ -65,7 +67,7 @@
 
 ---
 
-## Pool labeling (`routers/pool.py`)
+## Pool labeling (`internal/transport/httpapi/pool.go`, `label.go`, `project.go`)
 
 วงจร label หลักของพูลภาพ
 
@@ -131,9 +133,9 @@
 
 ---
 
-## Test set (`routers/testset.py`, prefix `/api/testset`)
+## Test set (`internal/transport/httpapi/testset.go`, prefix `/api/testset`)
 
-Ground truth สำหรับวัดผล ตั้งใจให้แยกขาดจาก prompt bank โดยสิ้นเชิง — **ไม่มีการคัดลอกไฟล์ภาพ**: test set คือภาพในพูลที่ถูก "แปะป้าย" ไว้เป็นแถวแยกใน PostgreSQL (`kind='testset'`, ดู `services/annotations_db.py`, T-21) ดังนั้น path ของภาพ test set กับภาพในพูลคือ path เดียวกันเป๊ะ ๆ ไม่มี `/api/testset/session` แยกอีกต่อไป — `POST /api/session` (`routers/pool.py`) คืน state ของ test set มาให้พร้อมกันแล้ว
+Ground truth สำหรับวัดผล ตั้งใจให้แยกขาดจาก prompt bank โดยสิ้นเชิง — **ไม่มีการคัดลอกไฟล์ภาพ**: test set คือภาพในพูลที่ถูก "แปะป้าย" ไว้เป็นแถวแยกใน PostgreSQL (`kind='testset'`, ดู `internal/infra/store`, T-21) ดังนั้น path ของภาพ test set กับภาพในพูลคือ path เดียวกันเป๊ะ ๆ ไม่มี `/api/testset/session` แยกอีกต่อไป — `POST /api/session` (`internal/transport/httpapi/pool.go`, `label.go`, `project.go`) คืน state ของ test set มาให้พร้อมกันแล้ว
 
 ### `POST /api/testset/import`
 แปะป้ายภาพจากพูลว่าเป็น test set (ไม่คัดลอกไฟล์ — ข้ามภาพที่แปะป้ายอยู่แล้ว)
@@ -157,9 +159,9 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 
 ---
 
-## Background jobs (`routers/jobs.py`)
+## Background jobs (`internal/transport/httpapi/jobs.go`)
 
-การรัน inference รอบยาวทำงานผ่าน FastAPI `BackgroundTasks` — endpoint ที่สั่งงานคืน `job_id` ทันที ฝั่ง client ต้อง poll เอาเอง
+การรัน inference รอบยาวทำงานผ่าน goroutine (`internal/platform/jobs`) — endpoint ที่สั่งงานคืน `job_id` ทันที ฝั่ง client ต้อง poll เอาเอง
 
 ### `GET /api/jobs/{job_id}`
 ตรวจสถานะ job
@@ -182,7 +184,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 - **Body:** `{"input_dir": str, "conf": float, "conf_by_class": {cls: float}}` (`conf` default `0.25`)
 - **Response:** `{"job_id": str, "total": int}`
 - **400** ถ้า bank ว่างเปล่า หรือ test set ยังไม่มีป้าย (`metrics.load_ground_truth` โยน `FileNotFoundError`)
-- **ผลลัพธ์ (`result`):** `metrics.evaluate(gt, pred)` รวมกับ `{"conf": conf, "conf_by_class": {...}}` — ดูรูปแบบเต็มในหัวข้อ `services/metrics.py` ของ [ARCHITECTURE.md](./ARCHITECTURE.md)
+- **ผลลัพธ์ (`result`):** `metrics.evaluate(gt, pred)` รวมกับ `{"conf": conf, "conf_by_class": {...}}` — ดูรูปแบบเต็มในหัวข้อ `tools/metrics.py` ของ [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ### `POST /api/autolabel`
 เขียนป้ายลง PostgreSQL ให้ภาพที่ระบุโดยตรงจาก bank (background)
@@ -207,9 +209,9 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 
 ---
 
-## Export (`routers/export.py`, T-24)
+## Export (`internal/transport/httpapi/export.go` + `internal/core/export`, T-24)
 
-ดาวน์โหลด annotation ของโปรเจกต์เป็น format ที่เลือกได้ อ่านตรงจาก PostgreSQL (`services/annotations_db.py`) ไม่ใช่ background job (ไม่มี inference, เร็วพอที่จะ synchronous ได้) — ไม่ใช้ตัวไหนแก้ state ทั้งสิ้น
+ดาวน์โหลด annotation ของโปรเจกต์เป็น format ที่เลือกได้ อ่านตรงจาก PostgreSQL (`internal/infra/store`) ไม่ใช่ background job (ไม่มี inference, เร็วพอที่จะ synchronous ได้) — ไม่ใช้ตัวไหนแก้ state ทั้งสิ้น
 
 ### `GET /api/export`
 - **Query:** `input_dir` (str), `format` (`"yolo"` default | `"coco"` | `"voc"`), `kind` (`"pool"` default | `"testset"`)

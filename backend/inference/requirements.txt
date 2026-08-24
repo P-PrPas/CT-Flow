@@ -1,0 +1,13 @@
+# The inference sidecar (backend/inference/service.py): YOLOE, the prompt bank, and
+# nothing else. No psycopg2 -- this process never connects to the database; the
+# API service assembles BankSummary from both halves. No python-multipart --
+# it serves no uploads.
+ultralytics>=8.4.48
+opencv-python>=4.13.0
+pillow>=12.2.0
+numpy
+# filelock guards <input_dir>/.ctflow/_bank/.lock, and this is now the only
+# process that takes it (inference/bank.py).
+filelock>=3.13.0
+fastapi>=0.115.0
+uvicorn>=0.34.0

@@ -1,0 +1,82 @@
+{
+  "default": "yoloe-11s-seg",
+  "catalog": [
+    {
+      "id": "yoloe-v8s-seg",
+      "family": "YOLOE v8",
+      "size": "S",
+      "file": "yoloe-v8s-seg.pt",
+      "note": "oldest generation, smallest"
+    },
+    {
+      "id": "yoloe-v8m-seg",
+      "family": "YOLOE v8",
+      "size": "M",
+      "file": "yoloe-v8m-seg.pt",
+      "note": ""
+    },
+    {
+      "id": "yoloe-v8l-seg",
+      "family": "YOLOE v8",
+      "size": "L",
+      "file": "yoloe-v8l-seg.pt",
+      "note": ""
+    },
+    {
+      "id": "yoloe-11s-seg",
+      "family": "YOLOE 11",
+      "size": "S",
+      "file": "yoloe-11s-seg.pt",
+      "note": "current default"
+    },
+    {
+      "id": "yoloe-11m-seg",
+      "family": "YOLOE 11",
+      "size": "M",
+      "file": "yoloe-11m-seg.pt",
+      "note": ""
+    },
+    {
+      "id": "yoloe-11l-seg",
+      "family": "YOLOE 11",
+      "size": "L",
+      "file": "yoloe-11l-seg.pt",
+      "note": ""
+    },
+    {
+      "id": "yoloe-26n-seg",
+      "family": "YOLOE 26",
+      "size": "N",
+      "file": "yoloe-26n-seg.pt",
+      "note": "newest generation, smallest/fastest"
+    },
+    {
+      "id": "yoloe-26s-seg",
+      "family": "YOLOE 26",
+      "size": "S",
+      "file": "yoloe-26s-seg.pt",
+      "note": ""
+    },
+    {
+      "id": "yoloe-26m-seg",
+      "family": "YOLOE 26",
+      "size": "M",
+      "file": "yoloe-26m-seg.pt",
+      "note": ""
+    },
+    {
+      "id": "yoloe-26l-seg",
+      "family": "YOLOE 26",
+      "size": "L",
+      "file": "yoloe-26l-seg.pt",
+      "note": ""
+    },
+    {
+      "id": "yoloe-26x-seg",
+      "family": "YOLOE 26",
+      "size": "X",
+      "file": "yoloe-26x-seg.pt",
+      "note": "newest generation, largest, best accuracy"
+    }
+  ]
+}

@@ -1,5 +1,8 @@
 # T-01 — ผลการทดลอง conf threshold กับคลาส `defect`
 
+> **หมายเหตุ 2026-08-23:** backend ถูก port เป็น Go แล้ว (ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)) — ชื่อไฟล์ที่อ้างถึงในเอกสารนี้เป็นชื่อ ณ เวลาที่เขียน และ**ไม่ได้แก้ย้อนหลัง** ตัวที่ยังอยู่ย้ายที่แล้ว (`services/*` → `inference/`, `tools/`, หรือ `internal/*` ฝั่ง Go) ส่วน `app.py`, `deps.py`, `routers/*`, `services/{annotations_db,db,auth,events,images,job_tracker}.py` และ `_migrate_to_db.py` ถูกลบไปแล้ว หาได้จาก git history
+
+
 > **คำถามที่ทดลองเพื่อตอบ:** สัญญาณของคลาส `defect` "ไม่มี" จริง หรือ "มีแต่จมอยู่ใต้ threshold"
 > เอกสารอ้างอิง: [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md) — FR-33 / T-01 (เงื่อนไขก่อนเริ่ม T-08)
 >

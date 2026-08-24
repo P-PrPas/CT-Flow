@@ -8,6 +8,15 @@
 // database in the first place (docs/DB_MIGRATION_PLAN.md #4.1). Nothing here is
 // an improvement on the Python; that is deliberate.
 //
+// One divergence, and it is not a rewrite so much as restoring what the Python
+// had for free: reads resolve the project with projectID, not
+// getOrCreateProject. Python called get_or_create_project on its own
+// connection, which committed and dropped the row lock before the read ran.
+// Wrapping the same statements in one Go transaction quietly turned every read
+// into a writer queueing on the projects row -- same SQL, different isolation,
+// and only the second one serialises a whole project behind one export. See
+// getOrCreateProject.
+//
 // Prompt-bank embeddings are a separate concern and still live in a file, owned
 // by the inference sidecar -- see backend/inference/bank.py.
 //
@@ -87,6 +96,16 @@ func (s *Store) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, s.pool, fn)
 }
 
+// getOrCreateProject is for write paths only. The upsert takes an exclusive lock
+// on the projects row and, unlike the Python it was copied from, holds it for
+// the rest of the transaction -- there, get_or_create_project ran on its own
+// connection and committed before the caller did anything else.
+//
+// Read paths must therefore use projectID instead. Using this one would make
+// every GET /api/boxes take a write lock on the project, so an export reading a
+// whole project would block every label save for it, and two people working in
+// one folder would queue behind each other for no reason. That is the opposite
+// of what moving this storage into a database was for.
 func getOrCreateProject(ctx context.Context, q pgx.Tx, inputDir string) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx,
@@ -94,6 +113,25 @@ func getOrCreateProject(ctx context.Context, q pgx.Tx, inputDir string) (int64, 
 		 ON CONFLICT (input_dir) DO UPDATE SET input_dir = EXCLUDED.input_dir
 		 RETURNING id`, inputDir).Scan(&id)
 	return id, err
+}
+
+// projectID resolves a project without creating or locking one.
+//
+// found=false is a normal state, not an error: a folder that has been opened but
+// never labeled has no row yet, and every reader below answers that with an
+// empty result -- exactly what it answered before, when the read created the row
+// on the way past and then found nothing in it.
+func projectID(ctx context.Context, q pgx.Tx, inputDir string) (int64, bool, error) {
+	var id int64
+	switch err := q.QueryRow(ctx,
+		`SELECT id FROM projects WHERE input_dir=$1`, inputDir).Scan(&id); err {
+	case nil:
+		return id, true, nil
+	case pgx.ErrNoRows:
+		return 0, false, nil
+	default:
+		return 0, false, err
+	}
 }
 
 // getOrCreateClass is append-only and race-safe.
@@ -107,11 +145,11 @@ func getOrCreateProject(ctx context.Context, q pgx.Tx, inputDir string) (int64, 
 // common case of an already-known class; only a genuinely new name pays for
 // serialising on the project row, and only against writers to that same
 // project.
-func getOrCreateClass(ctx context.Context, q pgx.Tx, projectID int64, kind, name string) (int64, error) {
+func getOrCreateClass(ctx context.Context, q pgx.Tx, pid int64, kind, name string) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx,
 		`SELECT id FROM classes WHERE project_id=$1 AND kind=$2 AND name=$3`,
-		projectID, kind, name).Scan(&id)
+		pid, kind, name).Scan(&id)
 	if err == nil {
 		return id, nil
 	}
@@ -122,13 +160,13 @@ func getOrCreateClass(ctx context.Context, q pgx.Tx, projectID int64, kind, name
 	// Serialise everyone writing to this project before computing the next idx.
 	var lockedID int64
 	if err := q.QueryRow(ctx, `SELECT id FROM projects WHERE id=$1 FOR UPDATE`,
-		projectID).Scan(&lockedID); err != nil {
+		pid).Scan(&lockedID); err != nil {
 		return 0, err
 	}
 	// Re-check: another transaction may have created it while we waited.
 	err = q.QueryRow(ctx,
 		`SELECT id FROM classes WHERE project_id=$1 AND kind=$2 AND name=$3`,
-		projectID, kind, name).Scan(&id)
+		pid, kind, name).Scan(&id)
 	if err == nil {
 		return id, nil
 	}
@@ -139,27 +177,27 @@ func getOrCreateClass(ctx context.Context, q pgx.Tx, projectID int64, kind, name
 	var idx int
 	if err := q.QueryRow(ctx,
 		`SELECT COALESCE(MAX(idx), -1) + 1 FROM classes WHERE project_id=$1 AND kind=$2`,
-		projectID, kind).Scan(&idx); err != nil {
+		pid, kind).Scan(&idx); err != nil {
 		return 0, err
 	}
 	err = q.QueryRow(ctx,
 		`INSERT INTO classes (project_id, kind, idx, name) VALUES ($1, $2, $3, $4) RETURNING id`,
-		projectID, kind, idx, name).Scan(&id)
+		pid, kind, idx, name).Scan(&id)
 	return id, err
 }
 
-func getOrCreateImage(ctx context.Context, q pgx.Tx, projectID int64, kind, path string) (int64, error) {
+func getOrCreateImage(ctx context.Context, q pgx.Tx, pid int64, kind, path string) (int64, error) {
 	var id int64
 	err := q.QueryRow(ctx,
 		`INSERT INTO images (project_id, kind, path) VALUES ($1, $2, $3)
 		 ON CONFLICT (project_id, kind, path) DO UPDATE SET path = EXCLUDED.path
-		 RETURNING id`, projectID, kind, path).Scan(&id)
+		 RETURNING id`, pid, kind, path).Scan(&id)
 	return id, err
 }
 
-func classNames(ctx context.Context, q pgx.Tx, projectID int64, kind string) ([]string, error) {
+func classNames(ctx context.Context, q pgx.Tx, pid int64, kind string) ([]string, error) {
 	rows, err := q.Query(ctx,
-		`SELECT name FROM classes WHERE project_id=$1 AND kind=$2 ORDER BY idx`, projectID, kind)
+		`SELECT name FROM classes WHERE project_id=$1 AND kind=$2 ORDER BY idx`, pid, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -178,10 +216,10 @@ func classNames(ctx context.Context, q pgx.Tx, projectID int64, kind string) ([]
 // Classes returns the project's class names in idx order, not alphabetical --
 // append-only, the same contract classes.txt had.
 func (s *Store) Classes(ctx context.Context, inputDir, kind string) ([]string, error) {
-	var out []string
+	out := []string{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		id, err := getOrCreateProject(ctx, q, inputDir)
-		if err != nil {
+		id, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
 			return err
 		}
 		out, err = classNames(ctx, q, id, kind)
@@ -190,13 +228,13 @@ func (s *Store) Classes(ctx context.Context, inputDir, kind string) ([]string, e
 	return out, err
 }
 
-func boxesFor(ctx context.Context, q pgx.Tx, projectID int64, kind, imagePath string) ([]Box, error) {
+func boxesFor(ctx context.Context, q pgx.Tx, pid int64, kind, imagePath string) ([]Box, error) {
 	rows, err := q.Query(ctx,
 		`SELECT c.name, a.x1, a.y1, a.x2, a.y2 FROM annotations a
 		 JOIN images i ON i.id = a.image_id
 		 JOIN classes c ON c.id = a.class_id
 		 WHERE i.project_id=$1 AND i.kind=$2 AND i.path=$3
-		 ORDER BY a.id`, projectID, kind, imagePath)
+		 ORDER BY a.id`, pid, kind, imagePath)
 	if err != nil {
 		return nil, err
 	}
@@ -214,10 +252,10 @@ func boxesFor(ctx context.Context, q pgx.Tx, projectID int64, kind, imagePath st
 
 // ReadBoxes returns this image's saved boxes, or an empty slice.
 func (s *Store) ReadBoxes(ctx context.Context, inputDir, kind, imagePath string) ([]Box, error) {
-	var out []Box
+	out := []Box{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		id, err := getOrCreateProject(ctx, q, inputDir)
-		if err != nil {
+		id, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
 			return err
 		}
 		out, err = boxesFor(ctx, q, id, kind, imagePath)
@@ -242,19 +280,19 @@ func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string
 	boxes []Box, createdBy *string, merge bool) ([]string, error) {
 	var names []string
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := getOrCreateProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
 		final := boxes
 		if merge {
-			existing, err := boxesFor(ctx, q, projectID, kind, imagePath)
+			existing, err := boxesFor(ctx, q, pid, kind, imagePath)
 			if err != nil {
 				return err
 			}
 			final = append(existing, boxes...)
 		}
-		imageID, err := getOrCreateImage(ctx, q, projectID, kind, imagePath)
+		imageID, err := getOrCreateImage(ctx, q, pid, kind, imagePath)
 		if err != nil {
 			return err
 		}
@@ -262,7 +300,7 @@ func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string
 			return err
 		}
 		for _, b := range final {
-			classID, err := getOrCreateClass(ctx, q, projectID, kind, b.Cls)
+			classID, err := getOrCreateClass(ctx, q, pid, kind, b.Cls)
 			if err != nil {
 				return err
 			}
@@ -273,7 +311,7 @@ func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string
 				return err
 			}
 		}
-		names, err = classNames(ctx, q, projectID, kind)
+		names, err = classNames(ctx, q, pid, kind)
 		return err
 	})
 	return names, err
@@ -281,11 +319,11 @@ func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string
 
 func (s *Store) MarkLabeled(ctx context.Context, inputDir, kind, imagePath string) error {
 	return s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := getOrCreateProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
-		imageID, err := getOrCreateImage(ctx, q, projectID, kind, imagePath)
+		imageID, err := getOrCreateImage(ctx, q, pid, kind, imagePath)
 		if err != nil {
 			return err
 		}
@@ -302,12 +340,12 @@ func (s *Store) MarkAuto(ctx context.Context, inputDir string, imagePaths []stri
 		return nil
 	}
 	return s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := getOrCreateProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
 		for _, p := range imagePaths {
-			imageID, err := getOrCreateImage(ctx, q, projectID, KindPool, p)
+			imageID, err := getOrCreateImage(ctx, q, pid, KindPool, p)
 			if err != nil {
 				return err
 			}
@@ -331,14 +369,14 @@ type StatusLists struct {
 func (s *Store) ListByStatus(ctx context.Context, inputDir, kind string) (StatusLists, error) {
 	out := StatusLists{Labeled: []string{}, Auto: []string{}}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
-		if err != nil {
+		id, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
 			return err
 		}
 		rows, err := q.Query(ctx,
 			`SELECT path, status FROM images
 			 WHERE project_id=$1 AND kind=$2 AND status != 'unlabeled'
-			 ORDER BY path`, projectID, kind)
+			 ORDER BY path`, id, kind)
 		if err != nil {
 			return err
 		}
@@ -363,13 +401,13 @@ func (s *Store) ListByStatus(ctx context.Context, inputDir, kind string) (Status
 func (s *Store) ListTestImages(ctx context.Context, inputDir string) ([]string, error) {
 	out := []string{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
-		if err != nil {
+		id, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
 			return err
 		}
 		rows, err := q.Query(ctx,
 			`SELECT path FROM images WHERE project_id=$1 AND kind='testset' ORDER BY path`,
-			projectID)
+			id)
 		if err != nil {
 			return err
 		}
@@ -390,19 +428,19 @@ func (s *Store) ListTestImages(ctx context.Context, inputDir string) ([]string, 
 // teach the bank must check it and refuse, or a test image silently stops
 // measuring generalization.
 func (s *Store) IsTest(ctx context.Context, inputDir, imagePath string) (bool, error) {
-	found := false
+	isTest := false
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
-		if err != nil {
+		id, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
 			return err
 		}
 		var one int
 		err = q.QueryRow(ctx,
 			`SELECT 1 FROM images WHERE project_id=$1 AND kind='testset' AND path=$2`,
-			projectID, imagePath).Scan(&one)
+			id, imagePath).Scan(&one)
 		switch err {
 		case nil:
-			found = true
+			isTest = true
 			return nil
 		case pgx.ErrNoRows:
 			return nil
@@ -410,7 +448,7 @@ func (s *Store) IsTest(ctx context.Context, inputDir, imagePath string) (bool, e
 			return err
 		}
 	})
-	return found, err
+	return isTest, err
 }
 
 // MarkTest flags pool images as held-out. No file or row copy of the image --
@@ -419,7 +457,7 @@ func (s *Store) IsTest(ctx context.Context, inputDir, imagePath string) (bool, e
 func (s *Store) MarkTest(ctx context.Context, inputDir string, imagePaths []string) ([]string, error) {
 	added := []string{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := getOrCreateProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
@@ -427,7 +465,7 @@ func (s *Store) MarkTest(ctx context.Context, inputDir string, imagePaths []stri
 			var one int
 			err := q.QueryRow(ctx,
 				`SELECT 1 FROM images WHERE project_id=$1 AND kind='testset' AND path=$2`,
-				projectID, p).Scan(&one)
+				pid, p).Scan(&one)
 			if err == nil {
 				continue // already flagged
 			}
@@ -436,7 +474,7 @@ func (s *Store) MarkTest(ctx context.Context, inputDir string, imagePaths []stri
 			}
 			if _, err := q.Exec(ctx,
 				`INSERT INTO images (project_id, kind, path) VALUES ($1, 'testset', $2)`,
-				projectID, p); err != nil {
+				pid, p); err != nil {
 				return err
 			}
 			added = append(added, p)
@@ -452,7 +490,7 @@ func (s *Store) MarkTest(ctx context.Context, inputDir string, imagePaths []stri
 func (s *Store) UnmarkTest(ctx context.Context, inputDir string, imagePaths []string) ([]string, error) {
 	removed := []string{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := getOrCreateProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
@@ -460,7 +498,7 @@ func (s *Store) UnmarkTest(ctx context.Context, inputDir string, imagePaths []st
 			var id int64
 			err := q.QueryRow(ctx,
 				`DELETE FROM images WHERE project_id=$1 AND kind='testset' AND path=$2 RETURNING id`,
-				projectID, p).Scan(&id)
+				pid, p).Scan(&id)
 			if err == pgx.ErrNoRows {
 				continue
 			}
@@ -480,13 +518,13 @@ func (s *Store) UnmarkTest(ctx context.Context, inputDir string, imagePaths []st
 func (s *Store) LabeledStems(ctx context.Context, inputDir string) ([]string, error) {
 	out := []string{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
-		if err != nil {
+		id, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
 			return err
 		}
 		rows, err := q.Query(ctx,
 			`SELECT DISTINCT i.path FROM images i JOIN annotations a ON a.image_id = i.id
-			 WHERE i.project_id=$1 AND i.kind='testset'`, projectID)
+			 WHERE i.project_id=$1 AND i.kind='testset'`, id)
 		if err != nil {
 			return err
 		}
@@ -516,8 +554,8 @@ func (s *Store) LabeledStems(ctx context.Context, inputDir string) ([]string, er
 func (s *Store) LoadAnnotations(ctx context.Context, inputDir, kind string) (map[string][]Box, error) {
 	out := map[string][]Box{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		projectID, err := getOrCreateProject(ctx, q, inputDir)
-		if err != nil {
+		id, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
 			return err
 		}
 		rows, err := q.Query(ctx,
@@ -525,7 +563,7 @@ func (s *Store) LoadAnnotations(ctx context.Context, inputDir, kind string) (map
 			 JOIN annotations a ON a.image_id = i.id
 			 JOIN classes c ON c.id = a.class_id
 			 WHERE i.project_id=$1 AND i.kind=$2
-			 ORDER BY i.path, a.id`, projectID, kind)
+			 ORDER BY i.path, a.id`, id, kind)
 		if err != nil {
 			return err
 		}

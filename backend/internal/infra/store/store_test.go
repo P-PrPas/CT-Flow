@@ -6,6 +6,9 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/testsupport"
 )
@@ -347,6 +350,7 @@ func TestUnknownProjectReadsEmpty(t *testing.T) {
 	s, _ := open(t)
 	ctx := context.Background()
 	const missing = "/tmp/gostore-test/never-created"
+	t.Cleanup(func() { _ = s.DeleteProject(context.Background(), missing) })
 
 	if names, err := s.Classes(ctx, missing, KindPool); err != nil || len(names) != 0 {
 		t.Errorf("classes = %v (err %v), want none", names, err)
@@ -354,5 +358,67 @@ func TestUnknownProjectReadsEmpty(t *testing.T) {
 	if boxes, err := s.ReadBoxes(ctx, missing, KindPool, "/img/a.jpg"); err != nil || len(boxes) != 0 {
 		t.Errorf("boxes = %v (err %v), want none", boxes, err)
 	}
-	t.Cleanup(func() { _ = s.DeleteProject(context.Background(), missing) })
+	if err := s.tx(ctx, func(q pgx.Tx) error {
+		if _, found, err := projectID(ctx, q, missing); err != nil || found {
+			t.Errorf("reading created the project row (found=%v, err=%v)", found, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Reads must not queue behind a writer holding the project row.
+//
+// getOrCreateProject's upsert locks that row for the rest of its transaction,
+// which is fine for the writes that need it and ruinous for the reads that do
+// not: with reads going through it too, one export of a big project blocked
+// every label save for that project until it finished. The Python this was
+// ported from did not have the problem, because its get_or_create_project ran
+// on its own connection and committed immediately.
+//
+// So: hold a write open, and assert a read still answers.
+func TestReadsDoNotBlockOnAWriter(t *testing.T) {
+	s, dir := open(t)
+	ctx := context.Background()
+
+	if _, err := s.WriteBoxes(ctx, dir, KindPool, "/img/a.jpg",
+		[]Box{{Cls: "widget", Box: [4]float64{1, 1, 2, 2}}}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// A writer mid-transaction, holding the project row exactly as a real
+	// /api/label does between its upsert and its commit.
+	held := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.tx(ctx, func(q pgx.Tx) error {
+			if _, err := getOrCreateProject(ctx, q, dir); err != nil {
+				return err
+			}
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer func() {
+		close(release)
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+
+	// Generous enough that a slow CI box is not what fails this, short enough
+	// that a genuine block does. A read that waits for the writer times out here.
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	names, err := s.Classes(readCtx, dir, KindPool)
+	if err != nil {
+		t.Fatalf("reading while a writer holds the project row: %v", err)
+	}
+	if len(names) != 1 || names[0] != "widget" {
+		t.Errorf("classes = %v, want [widget]", names)
+	}
 }

@@ -30,21 +30,22 @@
 
 ### `POST /api/public/login/callback`
 - **Body:** `{"code": str, "state": str}`
-- **Response:** `{"enabled": true, "user": str, "mode": "oidc"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.)
+- **Response:** `{"enabled": true, "user": str, "oid": str, "mode": "oidc"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.) — `oid` คือ `sub` ของ provider ส่วน `user` คือ display name
 - **401** เมื่อ state ไม่ตรง, code exchange ล้มเหลว หรือ user-info ใช้ไม่ได้ — เทียบ state แบบ constant-time และลบ state cookie **ก่อน** แลก code
 - สำเร็จแล้ว upsert แถวใน `users` (`oid` = `sub` ของ provider) เพื่อให้ `sub` ที่ไปอยู่ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้ · เขียนไม่สำเร็จ **ไม่** ทำให้ login พัง (เป็นปัญหาฝั่ง reporting ไม่ใช่เหตุผลที่จะปฏิเสธ login ที่ถูกต้อง)
 
 ### `GET /api/auth/me`
-- **Response:** `{"enabled": true, "user": str|null, "mode": "local"|"oidc"}` — `user: null` แปลว่ายังไม่ได้ login · `enabled` เป็น `true` เสมอตั้งแต่ T-27 (ไม่มีเซิร์ฟเวอร์ที่ไม่มี login อีกแล้ว) เก็บฟิลด์ไว้เพราะ frontend กับ smoke test อ่านมันอยู่ การลบฟิลด์เป็น breaking change คนละเรื่องกับ T-27
+- **Response:** `{"enabled": true, "user": str|null, "oid": str|null, "mode": "local"|"oidc"}` — `user: null` แปลว่ายังไม่ได้ login · `enabled` เป็น `true` เสมอตั้งแต่ T-27 (ไม่มีเซิร์ฟเวอร์ที่ไม่มี login อีกแล้ว) เก็บฟิลด์ไว้เพราะ frontend กับ smoke test อ่านมันอยู่ การลบฟิลด์เป็น breaking change คนละเรื่องกับ T-27
+- **`oid` คือกุญแจ attribution ของคนที่เรียก** — ค่าเดียวกับที่ลงใน `projects.owner_oid` และ `annotations.created_by` · `user` คือ**ชื่อที่เอาไว้แสดง** ไม่ใช่ identity: บน OIDC มันคือ display name ที่ provider เปลี่ยนได้และซ้ำกันได้ ส่วน `oid` คือ `sub` · UI ต้องเทียบด้วย `oid` เมื่อจะตอบว่า "อันนี้ของฉันหรือเปล่า" (T-29) · บน local account ทั้งสองค่าเท่ากันคือ username ซึ่งเป็นเหตุผลที่การเทียบผิดจะดูถูกต้องตอน dev · `user` กับ `oid` มาคู่กันเสมอ ไม่มีทางที่ตัวหนึ่ง null อีกตัวไม่ null
 
 ### `POST /api/auth/login`
 - **Body:** `{"username": str, "password": str}`
-- **Response:** `{"enabled": true, "user": str, "mode": "local"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.)
+- **Response:** `{"enabled": true, "user": str, "oid": str, "mode": "local"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.) — local account ไม่มี subject แยก `oid` จึงเท่ากับ username
 - **401** เมื่อรหัสผ่านหรือชื่อผู้ใช้ผิด (ข้อความเดียวกันทั้งสองกรณี โดยตั้งใจ)
 - **400** ถ้า OIDC active อยู่ (local login เป็น fallback เท่านั้น) — เคส "เซิร์ฟเวอร์ไม่มี user เลย" ไม่มีอีกแล้ว process ตายตั้งแต่ boot
 
 ### `POST /api/auth/logout`
-- ลบ cookie · **Response:** `{"enabled": true, "user": null, "mode": "local"|"oidc", "logoutUrl"?: str}`
+- ลบ cookie · **Response:** `{"enabled": true, "user": null, "oid": null, "mode": "local"|"oidc", "logoutUrl"?: str}`
 - `logoutUrl` มีเฉพาะโหมด `oidc` และเฉพาะเมื่อ discovery document มี `end_session_endpoint` — frontend ต้องพา browser ไปที่ URL นั้น ไม่งั้น session ฝั่ง provider ยังอยู่ แล้วการกด "sign in" ครั้งถัดไปบนเครื่อง label ที่ใช้ร่วมกันจะ login เงียบ ๆ เป็นคนเดิม
 - **ไม่**แนบ `post_logout_redirect_uri`: parameter นั้นต้อง register กับ provider ก่อน และ logout ที่พังเพราะ URL ไม่ได้ register แย่กว่า logout ที่จบบนหน้า signed-out ของ provider เอง
 

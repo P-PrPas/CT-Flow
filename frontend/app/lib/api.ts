@@ -29,7 +29,13 @@ export type AuthState = {
   /** Always true since T-27 -- signing in is mandatory, and the server will not
    *  start without a way to do it. Kept because it is what the endpoint sends. */
   enabled: boolean;
+  /** The display name -- what to print. Not an identity: under OIDC a provider
+   *  can change it, and two people can share one. */
   user: string | null;
+  /** The caller's own attribution key: the same value as `Project.owner.oid`
+   *  and the `created_by` behind `contributors`. Compare on this to answer "is
+   *  this mine" -- `user` is a label, this is the identity behind it. */
+  oid: string | null;
   /** "local" is the CI and development credential path; people use "oidc". */
   mode: "local" | "oidc";
   /** Only on the logout response, and only under OIDC: where to send the

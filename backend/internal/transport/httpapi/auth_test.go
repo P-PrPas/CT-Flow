@@ -167,16 +167,21 @@ func TestAuthMeReportsWhoIsSignedIn(t *testing.T) {
 	// login screen or the app.
 	w := do(s, s.AuthMe, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
 	body := decode(t, w)
-	if body["enabled"] != true || body["user"] != nil {
-		t.Errorf("signed out: %v, want {enabled:true, user:null}", body)
+	if body["enabled"] != true || body["user"] != nil || body["oid"] != nil {
+		t.Errorf("signed out: %v, want {enabled:true, user:null, oid:null}", body)
 	}
 
 	withUser(t, "alice", "pw")
 	r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	r.AddCookie(&http.Cookie{Name: auth.Cookie, Value: s.Auth.Issue("alice")})
 	body = decode(t, do(s, s.AuthMe, r))
-	if body["enabled"] != true || body["user"] != "alice" {
-		t.Errorf("signed in: %v, want {enabled:true, user:alice}", body)
+	// oid is the caller's own attribution key, and it is what the home page
+	// compares against projects.owner_oid. For a local account it equals the
+	// username -- which is exactly why a UI that compares display names looks
+	// correct here and silently matches nothing under OIDC, where the subject
+	// is a UUID and the display name is not.
+	if body["enabled"] != true || body["user"] != "alice" || body["oid"] != "alice" {
+		t.Errorf("signed in: %v, want {enabled:true, user:alice, oid:alice}", body)
 	}
 }
 

@@ -64,11 +64,6 @@ func (s *Server) currentUser(r *http.Request) string {
 	return user
 }
 
-func (s *Server) currentDisplayUser(r *http.Request) string {
-	_, display := s.currentIdentity(r)
-	return display
-}
-
 func (s *Server) currentIdentity(r *http.Request) (string, string) {
 	c, err := r.Cookie(auth.Cookie)
 	if err != nil {
@@ -86,7 +81,15 @@ func (s *Server) currentIdentity(r *http.Request) (string, string) {
 type authState struct {
 	Enabled bool    `json:"enabled"`
 	User    *string `json:"user"`
-	Mode    string  `json:"mode"`
+	// OID is the caller's own attribution key -- the same value that lands in
+	// projects.owner_oid and annotations.created_by. User is the display name
+	// beside it, and under OIDC the two are different strings for the same
+	// person: the subject is a UUID, the display name is what a provider
+	// happens to call them today. The UI needs the subject to answer "is this
+	// mine", because comparing display names is comparing labels that can
+	// collide and can be renamed out from under a project.
+	OID  *string `json:"oid"`
+	Mode string  `json:"mode"`
 	// LogoutURL is set only by AuthLogout, and only when the provider offers
 	// RP-initiated logout. The browser has to be sent there for a sign-out to
 	// mean anything on a shared machine.
@@ -97,11 +100,16 @@ type authState struct {
 // the wire because the frontend and the smoke test both read it, and because
 // "is there a login on this server" is still the question the UI is asking --
 // the answer just cannot be no any more.
-func state(mode, user string) authState {
+//
+// oid and user travel together: either both are set or the caller is signed out
+// and both are null. Nothing on the wire should ever carry one without the
+// other, because a client with a name and no subject cannot tell its own work
+// apart from anyone else's.
+func state(mode, oid, user string) authState {
 	if user == "" {
-		return authState{Enabled: true, User: nil, Mode: mode}
+		return authState{Enabled: true, User: nil, OID: nil, Mode: mode}
 	}
-	return authState{Enabled: true, User: &user, Mode: mode}
+	return authState{Enabled: true, User: &user, OID: &oid, Mode: mode}
 }
 
 // authMode picks which credential the session cookie is expected to carry. OIDC
@@ -116,9 +124,11 @@ func (s *Server) authMode() string {
 }
 
 // AuthMe is what the UI calls on load to decide whether to draw a login screen
-// or the app. user:null means signed out.
+// or the app, and to tell its own projects from everyone else's. user:null
+// means signed out.
 func (s *Server) AuthMe(w http.ResponseWriter, r *http.Request) error {
-	writeJSON(w, http.StatusOK, state(s.authMode(), s.currentDisplayUser(r)))
+	oid, display := s.currentIdentity(r)
+	writeJSON(w, http.StatusOK, state(s.authMode(), oid, display))
 	return nil
 }
 
@@ -143,7 +153,8 @@ func (s *Server) AuthLogin(w http.ResponseWriter, r *http.Request) error {
 		return errStatus(http.StatusUnauthorized, "wrong username or password")
 	}
 	s.setSessionCookie(w, r, req.Username)
-	writeJSON(w, http.StatusOK, state(s.authMode(), req.Username))
+	// A local account has no separate subject: the username is both.
+	writeJSON(w, http.StatusOK, state(s.authMode(), req.Username, req.Username))
 	return nil
 }
 
@@ -188,7 +199,7 @@ func (s *Server) OIDCCallback(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.recordUser(r, identity)
 	s.setSessionCookie(w, r, auth.OIDCSessionIdentity(identity))
-	writeJSON(w, http.StatusOK, state("oidc", identity.Display))
+	writeJSON(w, http.StatusOK, state("oidc", identity.Subject, identity.Display))
 	return nil
 }
 
@@ -245,7 +256,7 @@ func (s *Server) AuthLogout(w http.ResponseWriter, r *http.Request) error {
 		Name: auth.Cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.secureCookie(r),
 	})
-	out := state(s.authMode(), "")
+	out := state(s.authMode(), "", "")
 	if s.OIDC != nil {
 		out.LogoutURL = s.OIDC.EndSession
 	}

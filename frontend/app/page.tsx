@@ -40,7 +40,7 @@ export default function Home() {
       .then(setAuth)
       // A failed call means the API is unreachable, not that nobody is signed
       // in -- but the login screen is where both are recoverable from.
-      .catch(() => setAuth({ enabled: true, user: null, mode: "oidc" }));
+      .catch(() => setAuth({ enabled: true, user: null, oid: null, mode: "oidc" }));
   }, []);
 
   useEffect(() => {
@@ -54,8 +54,14 @@ export default function Home() {
   }
   const me = auth.user;
 
-  const mine = projects?.filter((p) => p.owner?.oid === me) ?? [];
-  const others = projects?.filter((p) => p.owner?.oid !== me) ?? [];
+  // Split on the subject, never on the display name. Under OIDC `auth.user` is
+  // whatever the provider calls someone today while `owner.oid` is their `sub`
+  // -- comparing the two matches nothing, and every project would land under
+  // "everyone else's" on exactly the deployment that matters. With local
+  // accounts the two strings happen to be equal, which is how that goes
+  // unnoticed all the way through development.
+  const mine = projects?.filter((p) => p.owner?.oid === auth.oid) ?? [];
+  const others = projects?.filter((p) => p.owner?.oid !== auth.oid) ?? [];
 
   return (
     <>
@@ -118,7 +124,7 @@ export default function Home() {
         {mine.length > 0 && (
           <Section title="Yours">
             {mine.map((p) => (
-              <ProjectCard key={p.id} p={p} me={me} onChanged={reload}
+              <ProjectCard key={p.id} p={p} meOID={auth.oid} onChanged={reload}
                 onDelete={() => setConfirmDelete(p)} onError={setError} />
             ))}
           </Section>
@@ -129,7 +135,7 @@ export default function Home() {
             hint="Open any of them — this is a shared server, not a set of private folders."
           >
             {others.map((p) => (
-              <ProjectCard key={p.id} p={p} me={me} onChanged={reload}
+              <ProjectCard key={p.id} p={p} meOID={auth.oid} onChanged={reload}
                 onDelete={() => setConfirmDelete(p)} onError={setError} />
             ))}
           </Section>
@@ -151,11 +157,17 @@ export default function Home() {
             api.deleteProject(confirmDelete.id).then(reload).catch((e: Error) => setError(e.message))
           }
           body={
+            /* Says what survives, without recommending the one thing that
+               breaks: a new project on this folder starts its class list from
+               scratch while the prompt bank still holds the old order, which is
+               the divergence FR-51 exists to catch and nothing warns about yet
+               (docs/PHASE2_WORKSPACE.md #8). */
             <>
               Removes its labels, classes and test set from the database. The images in{" "}
               <code>{confirmDelete.input_dir}</code> and the taught examples in its{" "}
-              <code>.ctflow</code> folder are <strong>not</strong> touched — point a new
-              project at the same folder to pick them up again.
+              <code>.ctflow</code> folder are <strong>not</strong> touched — nothing on
+              disk is deleted. Labeling this folder again from a new project means
+              teaching it again from scratch.
             </>
           }
         />
@@ -177,9 +189,9 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
 }
 
 function ProjectCard({
-  p, me, onChanged, onDelete, onError,
+  p, meOID, onChanged, onDelete, onError,
 }: {
-  p: api.Project; me: string;
+  p: api.Project; meOID: string | null;
   onChanged: () => void; onDelete: () => void; onError: (m: string) => void;
 }) {
   const router = useRouter();
@@ -267,7 +279,7 @@ function ProjectCard({
           </button>
         </div>
 
-        {p.owner?.oid === me && <span className="xs faint">You own this project.</span>}
+        {p.owner?.oid === meOID && <span className="xs faint">You own this project.</span>}
       </div>
     </div>
   );

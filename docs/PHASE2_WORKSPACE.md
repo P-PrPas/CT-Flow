@@ -238,7 +238,8 @@ app/
 - `internal/transport/httpapi` — `GET /api/config` ตัดฟิลด์ `mode` · `auth.go` ตัด `authMode() == "none"` และ `state()` ไม่ต้องคืน `enabled: false` อีก · `upload.go` ตัดเงื่อนไข 403 ที่เป็นจริงเสมอแล้ว
 - `RequireLogin` ตัด bypass `!authEnabled()` ทิ้ง — **fail closed** ไม่ใช่พึ่ง boot check อย่างเดียว · `authMode()` ไม่มีค่า `"none"` อีกต่อไป
 - frontend — `page.tsx` ตัดสาขา `auth.enabled === false` · หน้า login ตัดสาขา `mode === "none"` · `SetupCard` ตัด chip "Shared VM / This machine" · `GET /api/config` ตัดฟิลด์ `mode` ทั้งฝั่ง Go และ TypeScript
-- `.env.example`, `docker-compose*.yml` — ตัด `LABEL_TOOL_MODE`
+- `backend/inference/service.py` — `checked()` ไม่มีเงื่อนไข `MODE == "vm"` อีกแล้ว ฝั่ง sidecar ต้อง confine เท่ากับฝั่ง Go ไม่งั้นขอบเขตแข็งแรงเท่ากับ process ที่ path ไปถึงก่อนเท่านั้น · default เดิมของมันคือ `local` = ไม่ confine เลย
+- `.env.example`, `docker-compose*.yml`, `backend/Dockerfile`, `backend/inference/Dockerfile` — ตัด `LABEL_TOOL_MODE`
 - **เกณฑ์รับ:** start แอปโดยไม่ตั้ง auth แล้วต้องตายพร้อมข้อความที่อ่านรู้เรื่อง (ไม่ใช่ panic) · `go test ./...` ผ่าน โดย test ของ `config` ที่ครอบ `local` mode ถูกลบ ไม่ใช่ถูก skip
 
 #### T-28 · เปิด auth ใน CI ✅

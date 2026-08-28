@@ -210,15 +210,15 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| FR-43 | สร้าง / ดู / เปลี่ยนชื่อ / ลบ โปรเจกต์ได้จาก UI โดยระบุชื่อ, โฟลเดอร์ dataset และชนิดงาน | ❌ | `POST/GET/PATCH/DELETE /api/projects` · ลบ = ลบแถวใน DB เท่านั้น **ไม่แตะไฟล์บนดิสก์** |
-| FR-44 | Home page แสดงรายการโปรเจกต์ทั้งหมด พร้อมเจ้าของ ความคืบหน้า และคนที่ลงมือทำ | ❌ | แบ่ง "ของฉัน" / "ทั้งหมด" · ไม่ซ่อนโปรเจกต์ของใครจากใคร · `labeled`/`auto` มาจาก SQL count ไม่มีการอ่านโฟลเดอร์ |
-| FR-45 | รองรับชนิดงาน label แบบอื่นในอนาคตโดยไม่ต้องรื้อของเดิม | ❌ | **คอลัมน์ `task_type` + โครง routing เท่านั้น** ไม่มี abstraction — วันนี้มีค่าเดียวคือ `detection` และปฏิเสธค่าอื่น |
-| FR-46 | แต่ละโปรเจกต์มี URL ของตัวเองที่แชร์กันได้ | ❌ | `/p/{project_id}` — `id` เป็นกุญแจสำหรับอ้างถึง ส่วน `input_dir` ยังเป็นกุญแจสำหรับเก็บ |
-| FR-47 | บังคับ login — ไม่มี OIDC และไม่มี `LABEL_TOOL_USERS` = แอปไม่ start | ❌ | พร้อมกับการลบ `LABEL_TOOL_MODE=local` ทิ้ง (ไม่มีใครใช้บนเครื่องตัวเองแล้ว) |
+| FR-43 | สร้าง / ดู / เปลี่ยนชื่อ / ลบ โปรเจกต์ได้จาก UI โดยระบุชื่อ, โฟลเดอร์ dataset และชนิดงาน | 🟡 | API ครบแล้ว (T-26): `POST/GET/PATCH/DELETE /api/projects` · ลบ = ลบแถวใน DB เท่านั้น **ไม่แตะไฟล์บนดิสก์** · UI ยังไม่มี (T-29) |
+| FR-44 | Home page แสดงรายการโปรเจกต์ทั้งหมด พร้อมเจ้าของ ความคืบหน้า และคนที่ลงมือทำ | 🟡 | `GET /api/projects` คืนครบแล้วทั้งเจ้าของ/`labeled`/`auto`/`contributors` (T-26) · หน้า home ยังไม่ได้เขียน (T-29) · ไม่ซ่อนโปรเจกต์ของใครจากใคร · `labeled`/`auto` มาจาก SQL count ไม่มีการอ่านโฟลเดอร์ |
+| FR-45 | รองรับชนิดงาน label แบบอื่นในอนาคตโดยไม่ต้องรื้อของเดิม | 🟡 | คอลัมน์ `task_type` มีแล้วและปฏิเสธค่าอื่นนอกจาก `detection` ที่ handler (T-26) · โครง routing ยังไม่มี · **ไม่มี abstraction** โดยตั้งใจ |
+| FR-46 | แต่ละโปรเจกต์มี URL ของตัวเองที่แชร์กันได้ | 🟡 | `GET /api/projects/{id}` พร้อมแล้ว (แปลง id → `input_dir`) · route `/p/{project_id}` ฝั่ง frontend ยังไม่มี (T-30) — `id` เป็นกุญแจสำหรับอ้างถึง ส่วน `input_dir` ยังเป็นกุญแจสำหรับเก็บ |
+| FR-47 | บังคับ login — ไม่มี OIDC และไม่มี `LABEL_TOOL_USERS` = แอปไม่ start | ✅ | T-27 · `cmd/api/main.go` exit non-zero พร้อมข้อความบอกทางแก้ · `RequireLogin` fail closed เองด้วย ไม่พึ่ง boot check อย่างเดียว · ลบ `LABEL_TOOL_MODE=local` ทิ้งแล้วทั้ง Go และ sidecar `PathAllowed` เหลือสาขาเดียว |
 | FR-48 | เห็นความคืบหน้าของคนอื่นในโปรเจกต์เดียวกันโดยไม่ต้อง refresh | ❌ | `GET /api/state` poll ทุก 15 วินาที · หยุด poll เมื่อ tab ไม่ active · ไม่ใช้ websocket |
 | FR-49 | สองคน label โปรเจกต์เดียวกันแล้วไม่ถูกเสนอภาพเดียวกัน | ❌ | จองภาพใน memory TTL 10 นาที · **เป็นคำแนะนำ ไม่ใช่ล็อก** — `POST /api/label` ไม่เคยปฏิเสธเพราะเรื่องจอง |
-| FR-50 | ดูได้ว่าใคร label กล่องไหน และใครทำงานในโปรเจกต์ไหนบ้าง | ❌ | derive จาก `annotations.created_by` join `users` — เก็บ *ความจริง* ไม่ใช่ *ความตั้งใจ* จึงไม่มีตาราง members · **ไม่ส่ง `oid` ดิบไปให้ UI แสดง** |
-| FR-51 | เตือนเมื่อ prompt bank กับ PostgreSQL ไม่ตรงกัน | ❌ | `POST /api/session` คืน `bank_orphaned` — bank มี embedding แต่ DB ไม่มีแถว `images` เลย (เกิดจาก `docker compose down -v` โดยไม่ลบ `.ctflow/`) |
+| FR-50 | ดูได้ว่าใคร label กล่องไหน และใครทำงานในโปรเจกต์ไหนบ้าง | 🟡 | `contributors` ใน `GET /api/projects` derive จาก `annotations.created_by` join `users` แล้ว (T-26) — เก็บ *ความจริง* ไม่ใช่ *ความตั้งใจ* จึงไม่มีตาราง members · UI ยังไม่แสดง (T-34) · ⚠️ **ข้อค้าง:** วันนี้ response ส่ง `oid` มาด้วยและ fallback ใช้ `oid` เป็น `username` เมื่อไม่มีแถวใน `users` (local login ทุกคน) ซึ่งขัดกับ "ไม่ส่ง `oid` ดิบไปให้ UI แสดง" — ต้องตัดสินก่อนทำ T-34 |
+| FR-51 | เตือนเมื่อ prompt bank กับ PostgreSQL ไม่ตรงกัน | ❌ | `POST /api/session` คืน `bank_orphaned` — bank มี embedding แต่ DB ไม่มีแถว `images` เลย · เกิดได้สองทาง: `docker compose down -v` โดยไม่ลบ `.ctflow/` **และตั้งแต่ T-26 คือ `DELETE /api/projects/{id}` แล้วเปิดโฟลเดอร์เดิมอีกครั้ง** (ดู comment ที่ `httpapi/projects.go::DeleteProject`) |
 
 **สิ่งที่ Phase 2 ตั้งใจไม่ทำ:** role/permission · ตาราง project members · upload UI · abstraction ต่อ task type · migration framework · deep link ถึงภาพรายตัว · real-time แบบ websocket
 

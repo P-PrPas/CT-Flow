@@ -36,7 +36,7 @@
 
 **Background job** การประมวลผลที่ใช้เวลานาน (score/evaluate/autolabel/reembed) ซึ่งรันเป็น goroutine โดย endpoint ที่สั่งงานคืน `job_id` ทันที ฝั่ง frontend ต้อง poll `GET /api/jobs/{id}` เองจนกว่าจะเสร็จ
 
-**`mode: local` vs `mode: vm`** ตั้งค่าผ่าน env `LABEL_TOOL_MODE` — `local` ยอมให้ browse ได้ทุก drive (ใช้ตอนรันบนเครื่องตัวเองนอก Docker), `vm` จำกัดการ browse ไว้แค่ใต้ `LABEL_TOOL_VM_ROOT` (ใช้เมื่อรันใน Docker บนเซิร์ฟเวอร์แชร์) · **`local` จะถูกลบทิ้งใน Phase 2 (T-27)** เพราะไม่มีใครรันบนเครื่องตัวเองแล้ว เหลือ `vm` เป็นพฤติกรรมเดียว
+**`LABEL_TOOL_VM_ROOT`** root เดียวที่ folder picker เดินได้ และเป็นขอบเขตที่ทุก path จาก browser ถูกจำกัดไว้ · เคยมี env `LABEL_TOOL_MODE` ที่สลับระหว่าง `local` (browse ได้ทุก drive) กับ `vm` (จำกัด) — **ลบทิ้งแล้วใน T-27** ไม่มีใครรันบนเครื่องตัวเองแล้ว และ setting ที่มีหน้าที่เดียวคือปิด path gate สุดท้ายจะถูกเปิดผิดที่สักวัน เหลือพฤติกรรมเดียวคือจำกัดเสมอ
 
 **`checkedPath()` / path safety** ตัวตรวจสอบกลางที่ทุก path จาก browser ต้องผ่านก่อนแตะดิสก์จริง ป้องกันไม่ให้ browser ขอเข้าถึงไฟล์นอกขอบเขตที่อนุญาต (โดยเฉพาะสำคัญใน `vm` mode) — resolve symlink แล้วเทียบเป็น path component ไม่ใช่ prefix ของ string
 

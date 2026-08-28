@@ -1,6 +1,6 @@
 # CT-Flow — API Reference
 
-> **Phase 2 จะเพิ่ม `/api/projects*`, `GET /api/state`, `POST /api/claim` และตัดฟิลด์ `mode` ออกจาก `GET /api/config`** — สัญญาของ endpoint ใหม่อยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 4 และจะย้ายมาที่นี่เมื่อ merge แล้ว เอกสารนี้อธิบายสิ่งที่มีอยู่จริงตอนนี้เท่านั้น
+> **Phase 2 ก้อนที่ 1 merge แล้ว** — `/api/projects*` อยู่ในเอกสารนี้แล้ว · `GET /api/state` กับ `POST /api/claim` ยังเป็นแผน สัญญาของสองตัวนั้นอยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 4 และจะย้ายมาที่นี่เมื่อ merge เอกสารนี้อธิบายสิ่งที่มีอยู่จริงตอนนี้เท่านั้น
 
 เอกสารนี้อ้างอิงจากโค้ดจริงใน `internal/transport/httpapi/*.go` ณ commit ปัจจุบัน ทุก endpoint อยู่ภายใต้ base path `/api` (ยกเว้น testset ที่อยู่ใต้ `/api/testset`) และถูกเรียกผ่าน Next.js proxy (`app/api/[...path]/route.ts`) เสมอ ไม่ใช่ตรงจาก browser
 
@@ -9,11 +9,12 @@
 ## Convention ที่ใช้ร่วมกัน
 
 - **รูปแบบ error:** ทุก endpoint คืน body เป็น `{"detail": "<ข้อความ>"}` เมื่อผิดพลาด ฝั่ง frontend (`lib/api.ts`) จับคู่กับสิ่งนี้โดยตรงใน `request()`: โยน `Error(data.detail)` เมื่อ response ไม่ ok · ฝั่ง Go บังคับด้วยการให้ทุก handler คืน `error` แทนการเขียน response เอง (`internal/transport/httpapi.Handle`) จึงไม่มี handler ไหนลืมรูปแบบนี้ได้ · **ข้อความ error ทุกตัวยกมาเหมือนเดิมทุกตัวอักษร** เพราะ smoke test เทียบตรง ๆ และ UI เอาไปแสดง
-- **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, รูปภาพ) ต้องผ่าน `Server.checkedPath()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.PathAllowed()` (นอกขอบเขต `vm` mode) จะได้ `403` · การตรวจใช้การ resolve symlink แล้วเทียบเป็น path component ไม่ใช่ prefix ของ string (มี test ครอบ 6 เคสใน `internal/platform/config`)
+- **Path safety:** endpoint ใดก็ตามที่รับ path จาก browser (`input_dir`, รูปภาพ) ต้องผ่าน `Server.checkedPath()` ก่อนแตะดิสก์จริง — ถ้า path ไม่ผ่าน `config.PathAllowed()` (resolve ออกนอก `LABEL_TOOL_VM_ROOT`) จะได้ `403` — การจำกัดขอบเขตเป็น **unconditional** ตั้งแต่ T-27 ไม่มีโหมดที่ปิดมันได้อีกแล้ว · การตรวจใช้การ resolve symlink แล้วเทียบเป็น path component ไม่ใช่ prefix ของ string (มี test ครอบ 6 เคสใน `internal/platform/config`)
 - **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank อยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()`) ส่วนป้ายและ test-set membership อยู่ใน PostgreSQL คีย์ด้วย `input_dir` เดียวกัน (T-21, ดู `internal/infra/store`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
 - **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
-- **Auth:** ถ้าตั้ง OIDC (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ENDPOINT`, `FRONTEND_URL`) หรือ `LABEL_TOOL_USERS` ทุก endpoint **ยกเว้น** config/login routes ต้องมี `labeltool_session` cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้งทั้งคู่ระบบเปิดเหมือนเดิม · OIDC มี priority เหนือ local fallback
+- **Auth (บังคับตั้งแต่ T-27):** ทุก endpoint **ยกเว้น** config/login routes ต้องมี `labeltool_session` cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ต้องตั้ง OIDC (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ENDPOINT`, `FRONTEND_URL`) หรือ `LABEL_TOOL_USERS` อย่างใดอย่างหนึ่ง **ไม่ตั้งเลย = API ไม่ start** · OIDC มี priority เหนือ local fallback
+- **`404 {"detail": "no project for this folder -- create it first"}`:** ทุก write path (`/api/label`, `/api/relabel`, `/api/testset/import`, `/api/testset/remove`, `/api/testset/label`, และ job ที่เขียนสถานะอย่าง `/api/autolabel`) ปฏิเสธ `input_dir` ที่ยังไม่มีแถวใน `projects` — ก่อน Phase 2 write path สร้างแถวให้เองเงียบ ๆ ทำให้เกิดโปรเจกต์ไร้ชื่อไร้เจ้าของจาก path ที่พิมพ์ผิด · สร้างโปรเจกต์ได้สองทางเท่านั้น: `POST /api/projects` หรือ `POST /api/session` (ดูหัวข้อ Projects) · แปลงจาก `store.ErrNoProject` ที่ `Handle` ที่เดียว status กับข้อความจึงไม่มีทางเพี้ยนกันระหว่าง endpoint
 - **`conf_by_class`:** `/api/predict`, `/api/evaluate`, `/api/autolabel` รับ dict `{ชื่อคลาส: threshold}` เพื่อ override `conf` เป็นรายคลาส (`{}` = พฤติกรรมเดิม) — เหตุผลและตัวเลขอยู่ใน [EXPERIMENT_T01_CONF.md](./history/EXPERIMENT_T01_CONF.md)
 
 ---
@@ -34,16 +35,16 @@
 - สำเร็จแล้ว upsert แถวใน `users` (`oid` = `sub` ของ provider) เพื่อให้ `sub` ที่ไปอยู่ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้ · เขียนไม่สำเร็จ **ไม่** ทำให้ login พัง (เป็นปัญหาฝั่ง reporting ไม่ใช่เหตุผลที่จะปฏิเสธ login ที่ถูกต้อง)
 
 ### `GET /api/auth/me`
-- **Response:** `{"enabled": bool, "user": str|null, "mode": "none"|"local"|"oidc"}` — `enabled=false` แปลว่าเซิร์ฟเวอร์นี้ไม่มีระบบ login ไม่ใช่ว่ายังไม่ได้ login
+- **Response:** `{"enabled": true, "user": str|null, "mode": "local"|"oidc"}` — `user: null` แปลว่ายังไม่ได้ login · `enabled` เป็น `true` เสมอตั้งแต่ T-27 (ไม่มีเซิร์ฟเวอร์ที่ไม่มี login อีกแล้ว) เก็บฟิลด์ไว้เพราะ frontend กับ smoke test อ่านมันอยู่ การลบฟิลด์เป็น breaking change คนละเรื่องกับ T-27
 
 ### `POST /api/auth/login`
 - **Body:** `{"username": str, "password": str}`
 - **Response:** `{"enabled": true, "user": str, "mode": "local"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.)
 - **401** เมื่อรหัสผ่านหรือชื่อผู้ใช้ผิด (ข้อความเดียวกันทั้งสองกรณี โดยตั้งใจ)
-- **400** ถ้าเซิร์ฟเวอร์ไม่ได้ตั้ง user ไว้เลย หรือ OIDC active อยู่ (local login เป็น fallback เท่านั้น)
+- **400** ถ้า OIDC active อยู่ (local login เป็น fallback เท่านั้น) — เคส "เซิร์ฟเวอร์ไม่มี user เลย" ไม่มีอีกแล้ว process ตายตั้งแต่ boot
 
 ### `POST /api/auth/logout`
-- ลบ cookie · **Response:** `{"enabled": bool, "user": null, "mode": "none"|"local"|"oidc", "logoutUrl"?: str}`
+- ลบ cookie · **Response:** `{"enabled": true, "user": null, "mode": "local"|"oidc", "logoutUrl"?: str}`
 - `logoutUrl` มีเฉพาะโหมด `oidc` และเฉพาะเมื่อ discovery document มี `end_session_endpoint` — frontend ต้องพา browser ไปที่ URL นั้น ไม่งั้น session ฝั่ง provider ยังอยู่ แล้วการกด "sign in" ครั้งถัดไปบนเครื่อง label ที่ใช้ร่วมกันจะ login เงียบ ๆ เป็นคนเดิม
 - **ไม่**แนบ `post_logout_redirect_uri`: parameter นั้นต้อง register กับ provider ก่อน และ logout ที่พังเพราะ URL ไม่ได้ register แย่กว่า logout ที่จบบนหน้า signed-out ของ provider เอง
 
@@ -56,7 +57,7 @@
 
 - **Form:** `dir` (โฟลเดอร์ปลายทาง, สร้างให้ถ้ายังไม่มี), `files` (หลายไฟล์ได้)
 - **Response:** `{"saved": [path...], "skipped": [{"name": str, "reason": str}], "images": [path...]}`
-- **403** เมื่อ `LABEL_TOOL_MODE=vm` แต่ยังไม่ได้ตั้ง OIDC หรือ `LABEL_TOOL_USERS` — เงื่อนไขของ T-13: ห้ามเปิดรับไฟล์บนเซิร์ฟเวอร์ที่ใครก็เข้าได้
+- เงื่อนไขของ T-13 ("ห้ามเปิดรับไฟล์บนเซิร์ฟเวอร์ที่ใครก็เข้าได้") เคยเป็น `403` ตรงนี้ — **ตัดออกแล้วใน T-27** เพราะเป็นจริงโดยโครงสร้าง: process ไม่ start ถ้าไม่มี login เงื่อนไขนั้นจึงเกิดไม่ได้
 - **เหตุผลที่ไฟล์ถูกข้าม:** `bad filename` (ชื่อว่าง/ขึ้นต้นด้วย `.`) · `not an image file type` (นามสกุลไม่อยู่ใน `IMAGE_EXTS`) · `not a readable image` (decode ไม่ผ่าน — ด่านจริง ไม่ใช่นามสกุล) · `already in this folder` (ไม่เขียนทับของเดิมเด็ดขาด) · `larger than N MB` (`LABEL_TOOL_MAX_UPLOAD_MB`, default 25)
 - ส่วน directory ในชื่อไฟล์ถูกตัดทิ้งเสมอ — `../x.jpg` กลายเป็น `x.jpg` ในโฟลเดอร์ปลายทาง ไม่ใช่ไฟล์นอกโฟลเดอร์
 
@@ -65,9 +66,10 @@
 ## System (`internal/transport/httpapi/system.go`)
 
 ### `GET /api/config`
-รายงานโหมดการทำงานปัจจุบัน + root ที่ browse ได้ + สีที่ใช้แสดงกล่องแต่ละคลาส + รายการโมเดลที่เลือกได้
+รายงาน root ที่ browse ได้ + สีที่ใช้แสดงกล่องแต่ละคลาส + รายการโมเดลที่เลือกได้
 
-- **Response:** `{"mode": "local"|"vm", "roots": [str...], "colors": [str...], "models": [ModelInfo...], "default_model": str}`
+- **Response:** `{"roots": [str...], "colors": [str...], "models": [ModelInfo...], "default_model": str}`
+- **ไม่มีฟิลด์ `mode` แล้ว** (T-27) — มันรายงาน `local` vs `vm` ซึ่งตอนนี้เหลือพฤติกรรมเดียว `roots` ยังอยู่
 - `ModelInfo` = `{"id": str, "family": str, "size": str, "note": str, "available": bool}` — ดู [`backend/models.json`](../backend/inference/models.py), `id` คือค่าที่ส่งเป็น `model_id` ใน `POST /api/label` · `available` เช็คสดจากดิสก์ทุกครั้งที่เรียก (มีไฟล์ `.pt` อยู่ใน `MODELS_DIR` จริงหรือไม่) — `false` ไม่ได้แปลว่าใช้ไม่ได้ แค่แปลว่า predict/label ครั้งแรกด้วยโมเดลนั้นจะไป auto-download จาก GitHub ก่อน (อาจช้าหรือเงียบล้มเหลวถ้าเน็ตไปไม่ถึง)
 - ใช้เป็น healthcheck endpoint ของ container `api` ด้วย (`docker-compose.yml`)
 
@@ -82,6 +84,51 @@
 
 ---
 
+## Projects (`internal/transport/httpapi/projects.go`, T-26)
+
+โปรเจกต์คือโฟลเดอร์ dataset หนึ่งโฟลเดอร์ที่มีคนลงทะเบียนไว้ พร้อมชื่อ เจ้าของ และชนิดงาน
+
+**`id` ใช้สำหรับอ้างถึง `input_dir` ใช้สำหรับเก็บ และสองอย่างนี้ไม่สลับหน้าที่กัน** — endpoint อื่นทุกตัวยังรับ `input_dir` เหมือนเดิมทั้งหมด `id` มีไว้ให้ UI เอาไปใส่ URL (`/p/{id}`) โดยไม่ต้องเอา path ของเซิร์ฟเวอร์ไปแปะ (ดู [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 2 decision 6)
+
+**Project** = `{"id": int, "input_dir": str, "name": str, "task_type": "detection", "owner": Person|null, "labeled": int, "auto": int, "contributors": [Contributor...], "created_at": str, "updated_at": str}`
+
+- `Person` = `{"oid": str, "username": str}` — `username` fallback เป็น `oid` เมื่อไม่มีแถวใน `users` (คือ local login ทั้งหมด รวม CI)
+- `Contributor` = `{"oid": str, "username": str, "boxes": int}` — **derive จาก `annotations.created_by`** ไม่ใช่ตาราง members: เก็บว่าใคร label จริง ไม่ใช่ใครถูกเชิญ (FR-50) เรียงตามจำนวนกล่องมากไปน้อย
+- `labeled`/`auto` นับจาก `images.status` ใน SQL (เฉพาะ `kind = 'pool'`) **ไม่มีการอ่านโฟลเดอร์** — card ที่เขียนว่า "34 of 3,000" ไม่ควรแลกมาด้วย readdir ต่อโปรเจกต์ทุกครั้งที่โหลดหน้า home
+
+### `GET /api/projects`
+- **Response:** `{"projects": [Project...]}` เรียงตาม `updated_at` ใหม่สุดก่อน
+- **ไม่กรองตามเจ้าของ** — UI แบ่ง "ของฉัน"/"ทั้งหมด" เอง การซ่อนงานคนอื่นที่ระดับ endpoint จะเป็นการสร้าง permission boundary ซึ่ง Phase 2 ตั้งใจไม่มี (ใครที่ login แล้วก็เดินไปโฟลเดอร์ไหนก็ได้ผ่าน `GET /api/browse` อยู่แล้ว)
+- สองคำสั่ง SQL เสมอไม่ว่าจะมีกี่โปรเจกต์: หนึ่งคำสั่งสำหรับแถว+ตัวนับ อีกหนึ่งสำหรับ contributor ทั้งหมด
+
+### `POST /api/projects`
+- **Body:** `{"name": str, "input_dir": str, "task_type"?: "detection"}`
+- **Response:** `{"project": Project}` — เจ้าของคือคนที่เรียก
+- **400** `a project needs a name` (ชื่อว่างหรือมีแต่ช่องว่าง) · `unknown task type: <x>` (ค่าอื่นนอกจาก `detection` — เก็บค่าที่ยังไม่มีโมดูลไหนรับผิดชอบไว้ = สัญญาที่แอปทำไม่ได้) · `input dir not found: <dir>` · `no images in <dir>` (สองอันหลังคือด่านเดียวกับที่ `POST /api/session` ตรวจมาตลอด แค่ย้ายมาตรวจตอนเลือกโฟลเดอร์แทนตอนจะ label)
+- **403** ถ้า `input_dir` อยู่นอก `LABEL_TOOL_VM_ROOT`
+- **409** `this folder is already the project "<ชื่อ>"` — ไม่รับช่วงเงียบ ๆ เด็ดขาด คนที่สั่ง "สร้าง" ไม่รู้ตัวว่ากำลังจะเข้าไปร่วมงานของคนอื่น และชื่อคือสิ่งที่บอกเขาว่าของใคร · **สร้าง = ตั้งใจ, เปิด = รับช่วง** (`POST /api/session` รับช่วงให้)
+
+### `GET /api/projects/{id}`
+- **Response:** `{"project": Project}` — `/p/{id}` เรียกตอน mount เพื่อแปลง id ใน URL เป็น `input_dir` ที่ endpoint อื่นพูดกัน
+- **404** `no such project` — รวมถึงกรณี id ไม่ใช่ตัวเลข
+
+### `PATCH /api/projects/{id}`
+- **Body:** `{"name"?: str, "claim_ownership"?: bool}` — ส่งมาอย่างใดอย่างหนึ่งหรือทั้งคู่ก็ได้
+- **Response:** `{"project": Project}`
+- **400** `a project needs a name` (ส่ง `name` มาแต่ว่าง) · `nothing to update` (ไม่ได้ส่งอะไรมาเลย)
+- **404** `no such project`
+- **`claim_ownership` เติมเจ้าของที่ว่างอยู่เท่านั้น ไม่แย่งของใคร** — โปรเจกต์ที่มีเจ้าของแล้วเรียกไปก็ไม่เปลี่ยน (SQL เป็น `COALESCE(owner_oid, $3)`) และไม่มีฟิลด์สำหรับระบุชื่อคนอื่น เพราะ "โอนให้ Bob" เป็นคำถามเรื่องสิทธิ์ที่ Phase 2 ตั้งใจไม่ตอบ
+- เปลี่ยน `input_dir` หรือ `task_type` ไม่ได้: ชี้ไปโฟลเดอร์อื่น = คนละโปรเจกต์ ส่วนเปลี่ยนชนิดงานจะทำให้ label ที่มีอยู่กำพร้า
+- rename ไม่ล้างเจ้าของ และ claim ไม่ rename — ฟิลด์ที่ไม่ได้ส่งมาคงเดิมเสมอ
+
+### `DELETE /api/projects/{id}`
+- **Response:** `{"deleted": int, "kept_on_disk": str}`
+- **404** `no such project` (เรียกซ้ำได้ ครั้งที่สองได้ 404)
+- ลบ `classes`, `images`, `annotations` ตาม cascade — **ไม่แตะไฟล์บนดิสก์เลย** ทั้งไฟล์ภาพและ prompt bank ใน `.ctflow/` `kept_on_disk` บอกตรง ๆ ว่าอะไรยังอยู่ เพื่อให้ UI บอกผู้ใช้ได้
+- ⚠️ **เพดานที่รู้ตัว:** ลบแล้วเปิดโฟลเดอร์เดิมอีกครั้งจะได้โปรเจกต์ใหม่ที่ `classes.idx` เริ่มที่ 0 ขณะที่ `_bank/embeddings.pt` ยังจำลำดับคลาสเก่าและ `metadata.json` ยังล็อก checkpoint เก่า — เป็น DB/bank split ตัวเดียวกับ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 8 วันนี้ยังไม่กัดเพราะ prediction คืนมาเป็นชื่อคลาสไม่ใช่ index · ล้าง bank ตรงนี้ไม่ใช่ทางแก้ (invariant 5: มีแต่ sidecar ที่แตะไฟล์สองตัวนั้นได้) ทางแก้ที่วางไว้คือ `bank_orphaned` ใน `POST /api/session` (ข้อ 4.3)
+
+---
+
 ## Pool labeling (`internal/transport/httpapi/pool.go`, `label.go`, `project.go`)
 
 วงจร label หลักของพูลภาพ
@@ -90,8 +137,10 @@
 เปิด session label: ตรวจสอบ input dir, list ภาพ, โหลดหรือสร้าง bank ใต้ `<input_dir>/.ctflow/` — คืน state ของ test set มาในคำตอบเดียวกันเลย ไม่ต้องเรียกแยก
 
 - **Body:** `{"input_dir": str}`
-- **Response:** `{"images": [str...], "bank": BankSummary, "testset": {"images": [str...], "labeled": [stem...], "classes": [str...]}}`
+- **Response:** `{"images": [str...], "bank": BankSummary, "testset": {"images": [str...], "labeled": [stem...], "classes": [str...]}, "project": Project}`
 - **400** ถ้า input dir ไม่มีอยู่จริงหรือไม่มีภาพเลย
+- **สร้างโปรเจกต์ให้ถ้าโฟลเดอร์นี้ยังไม่มี** (`EnsureProject` — ชื่อ = ชื่อโฟลเดอร์, เจ้าของ = คนที่เปิด) · ถ้ามีอยู่แล้วคือ**รับช่วง** ไม่เปลี่ยนชื่อและไม่เปลี่ยนเจ้าของ · นี่คือจุดสร้างโปรเจกต์จุดที่สองนอกจาก `POST /api/projects` และเป็นเหตุผลที่ frontend เดิมยังทำงานได้โดยไม่ต้องแก้ (ดู [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) T-26)
+- `project` มาด้วยเพื่อให้ client ที่เปิดโฟลเดอร์ตรง ๆ ได้ `id` ไปทำลิงก์ และได้ชื่อ/เจ้าของโดยไม่ต้องยิงซ้ำ
 
 ### `GET /api/image`
 เสิร์ฟไฟล์ภาพดิบ

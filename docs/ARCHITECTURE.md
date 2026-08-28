@@ -103,13 +103,13 @@ Environment variables หลัก:
 |---|---|---|
 | `DATA_DIR` | `../data` | โฟลเดอร์บนเครื่อง host ที่ mount เข้า `/opt/mount/project` ใน container `api` |
 | `WEB_PORT` | `3000` | พอร์ตที่ UI เปิดให้ใช้งาน |
-| `LABEL_TOOL_MODE` | `vm` เมื่อรันใน Docker | `vm` = จำกัดการ browse ไว้แค่ `LABEL_TOOL_VM_ROOT`, `local` = browse ได้ทุก drive (สำหรับรันนอก Docker บนเครื่องตัวเอง) |
-| `LABEL_TOOL_VM_ROOT` | `/opt/mount/project` | รากของขอบเขตที่ยอมให้เข้าถึงใน `vm` mode |
+| `LABEL_TOOL_VM_ROOT` | `/opt/mount/project` | root เดียวที่ browse ได้ และเป็นขอบเขตที่ทุก path จาก browser ถูกจำกัดไว้ — **unconditional** ตั้งแต่ T-27 ไม่มีโหมดที่ปิดได้ · ทั้ง API และ sidecar อ่านตัวเดียวกัน รันนอก Docker ต้องตั้งเอง ไม่งั้นทุก path ได้ `403` |
+| `LABEL_TOOL_USERS` / `OAUTH_*` | — | ต้องตั้งอย่างใดอย่างหนึ่ง **ไม่ตั้งเลย = API ไม่ start** (T-27) ดู [README](../README.md#multi-user--security) |
 | `MODELS_DIR` | `/models` (Docker) / `label_tool/models` (นอก Docker) | โฟลเดอร์เก็บ checkpoint ที่ดาวน์โหลดมาแล้ว — ใน Docker คือ named volume `models` |
 | `POSTGRES_PASSWORD` | — (ต้องตั้งเอง ไม่มี default) | รหัสผ่านของ service `db` — `docker-compose.yml` ปฏิเสธ start ถ้าไม่ได้ตั้งใน `.env` |
 | `DATABASE_URL` | `postgresql://labeltool:${POSTGRES_PASSWORD}@db:5432/labeltool` (ตั้งให้อัตโนมัติใน compose) | connection string ที่ `internal/infra/store` ใช้ — override ได้ตอนรันนอก Docker (เช่น ชี้ไปที่ Postgres local) |
 
-**Path safety:** ทุก path ที่ browser ส่งมาต้องผ่าน `deps.checked_path()` ซึ่งเรียก `config.path_allowed()` — ใน `vm` mode จะปฏิเสธ path ที่ resolve ออกนอก `VM_DATA_ROOT` ด้วย HTTP 403 ส่วนใน `local` mode ยอมทุก path เพราะถือว่าเป็นเครื่องส่วนตัวของผู้ใช้เอง
+**Path safety:** ทุก path ที่ browser ส่งมาต้องผ่าน `Server.checkedPath()` ซึ่งเรียก `config.PathAllowed()` — ปฏิเสธ path ที่ resolve ออกนอก `LABEL_TOOL_VM_ROOT` ด้วย HTTP 403 **เสมอ ไม่มีเงื่อนไข** (T-27 ลบ `local` mode ทิ้ง: setting ที่มีหน้าที่เดียวคือปิด path gate สุดท้ายจะถูกเปิดบนเครื่องที่ใช้ร่วมกันสักวัน) · `backend/inference/service.py::checked()` บังคับ root เดียวกันฝั่ง sidecar
 
 **ปัญหา TLS ตอน build:** ทั้งสอง Dockerfile มีขั้นตอน copy root certificate จาก `label_tool/certs/*.crt` เข้า system CA bundle ก่อน `pip install`/`npm ci` — เป็นทางแก้สำหรับเครื่องพัฒนาที่อยู่หลัง proxy ตรวจสอบ TLS ขององค์กร (พบไฟล์ `avg-web-shield.crt` จริงในโฟลเดอร์ `certs/`) ไม่เกี่ยวกับการเสิร์ฟแอปผ่าน HTTPS ตอนรันจริงแต่อย่างใด — **แอปนี้ไม่มี HTTPS ในตัวเอง**
 

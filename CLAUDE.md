@@ -13,6 +13,7 @@ backend/inference/        the Python sidecar: everything that needs torch
 backend/db/schema.sql     applied at boot, idempotent, no migration framework
 backend/tests/            smoke_test.py, golden vectors, parity harness
 frontend/app/             Next.js 15 App Router, all client components
+frontend/app/modules/     one folder per labeling module; shared code never imports from here
 frontend/app/modules/     one folder per labeling module; the shell must not
                           import from here -- CI enforces it (T-30)
 docs/                     active docs -- must be true right now
@@ -47,7 +48,23 @@ docs/history/             records of completed work -- context, not status
    `transport/httpapi`.** Handlers never touch the database directly.
 8. **Every path from the browser goes through `checkedPath()`** before it
    reaches the disk. It resolves symlinks and compares path components, not
-   string prefixes.
+   string prefixes. The Python sidecar confines separately against the same
+   `LABEL_TOOL_VM_ROOT` — both processes must be given it, or the boundary
+   holds only in whichever process a path happens to reach first.
+9. **A subject is not a name.** Attribution stores the OIDC `sub` everywhere
+   (`annotations.created_by`, the bank's `labeled_by`, `projects.owner_oid`)
+   because it survives a rename. `store.UserNames` is the only place that turns
+   one back into a person: compare on `oid`, display `username`, and never put
+   a raw subject where a person is meant to be read. Under a local login the
+   two are the same string, so a confusion between them passes dev and CI and
+   fails only on a real OIDC deployment.
+10. **Writes require a project that already exists** (`store.ErrNoProject`,
+    surfaced as one 404 in `Handle`). Only `EnsureProject` creates one, from
+    `POST /api/projects` or `POST /api/session` — so every project has a name
+    and an owner.
+11. **Shared frontend code must not import from `app/modules/`.** Enforced by
+    `.github/workflows/frontend.yml`, not by comment. If the home page needs to
+    know what a prompt bank is, the seam is in the wrong place.
 
 ## Testing
 
@@ -91,7 +108,9 @@ cd frontend && npx tsc --noEmit && npm run build
 ## Known ceilings (documented, not bugs to fix on sight)
 
 - Job tracker and image claims are in-memory: one API process, no TTL
-  persistence, no horizontal scale (NFR-06).
+  persistence, no horizontal scale (NFR-06). Two replicas would not see each
+  other's claims, which degrades to "two people, one image" rather than
+  breaking.
 - Models are cached per `model_id` per process with no VRAM eviction.
 - Duplicate detection uses an 8×8 thumbnail hash, not embedding distance.
 - The app serves no HTTPS of its own; that is a reverse proxy's job.

@@ -1,17 +1,18 @@
 # CT-Flow — สถาปัตยกรรมระบบ
 
-> เอกสารนี้อธิบาย **สิ่งที่เป็นอยู่จริงตอนนี้** · สิ่งที่กำลังจะเปลี่ยนใน Phase 2 (workspace, routing, บังคับ login, ลบ `local` mode) อยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) และจะถูกรวมเข้าเอกสารนี้เมื่อ merge แล้ว
+> เอกสารนี้อธิบาย **สิ่งที่เป็นอยู่จริงตอนนี้** · Phase 2 ก้อนที่ 1–3 (workspace, routing, บังคับ login, multi-user) merge เข้า `main` แล้วและถูกรวมเข้าเอกสารนี้แล้ว · เหตุผลเบื้องหลังการตัดสินใจแต่ละข้ออยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
 
 ## Tech stack
 
 | ชั้น | เทคโนโลยี |
 |---|---|
-| Frontend | Next.js 15 (App Router) + React 19 + TypeScript — ไม่มี UI/state library เพิ่ม ใช้ `useState`/`useEffect` ล้วน และ CSS แบบ utility class ของตัวเอง (`globals.css`) |
+| Frontend | Next.js 15 (App Router) + React 19 + TypeScript — ไม่มี UI/state library เพิ่ม ใช้ `useState`/`useEffect` ล้วน และ CSS แบบ utility class ของตัวเอง (`globals.css`) · แบ่งเป็น **ของกลาง** กับ **โมดูล** ดูหัวข้อ "โครง frontend" ด้านล่าง |
 | Backend API | **Go** (`backend/cmd/api`, `backend/internal/*`) — stdlib `net/http` ล้วน ไม่มี framework · dependency หลักคือ `jackc/pgx/v5`, `coreos/go-oidc/v3`, `x/oauth2`, `x/crypto/pbkdf2`, `x/image/bmp` (ดู [REFACTOR_PLAN.md](./history/REFACTOR_PLAN.md)) |
 | Inference sidecar | **FastAPI (Python)** — `backend/inference/service.py` เหลือแค่ส่วนที่ต้องใช้ torch: YOLOE + prompt bank |
 | Model / Inference | Ultralytics **YOLOE** ผ่าน `YOLOEVPSegPredictor` (SAVPE) — **เลือก checkpoint ได้จากรายการที่กำหนดไว้ล่วงหน้า** (`inference/models.py`) ตั้งแต่ `yoloe-v8s-seg` เล็กสุด ถึง `yoloe-26x-seg` รุ่นล่าสุดและใหญ่สุด ไม่ hardcode ตัวเดียวอีกต่อไป |
 | ML runtime | PyTorch — build ด้วย CUDA (`cu126`) เป็นค่าเริ่มต้นใน Docker image, override เป็น CPU ได้ด้วย build arg |
 | Background job tracking | map ในหน่วยความจำ, guard ด้วย `sync.Mutex` (`internal/platform/jobs`) — พฤติกรรมเหมือน `job_tracker.py` เดิมทุกประการ ไม่มี TTL ไม่ persist |
+| การจองภาพ (FR-49) | map ในหน่วยความจำ + `sync.Mutex` + TTL 10 นาที (`internal/platform/claims`) — โครงเดียวกับ `jobs` และมีข้อจำกัด "process เดียว" ข้อเดียวกัน · **ตั้งใจไม่เก็บใน DB**: มันควรหายไปตอน restart, แถว `images` ถูกสร้างแบบ lazy เฉพาะตอน label จริง และการเก็บใน DB จะต้องมีงานเก็บกวาดแถวหมดอายุ |
 | การจัดเก็บข้อมูล | **label/box metadata อยู่ใน PostgreSQL** (`internal/infra/store`, T-21) — prompt bank (`embeddings.pt` torch pickle + `metadata.json`) ยังเป็นไฟล์เหมือนเดิม ดูหัวข้อ "รูปแบบการจัดเก็บข้อมูล" ด้านล่าง |
 | การป้องกันการเขียนชนกัน | DB: row lock บนแถว `projects` ตอนสร้างคลาสใหม่ (`internal/infra/store.getOrCreateClass`) · ไฟล์ (prompt bank เท่านั้น): `filelock.FileLock` บน `_bank/.lock` ถือโดย sidecar ผู้เดียว · โมเดล: `RLock` ต่อ `model_id` ครอบ `arm()`→predict ทั้ง batch (`inference/vpe.py::armed`) |
 | Containerization | Docker Compose (4 services: `db`, `vpe`, `api`, `web`) |
@@ -61,6 +62,27 @@ Job ทั้งสี่ตัว (`score`, `evaluate`, `autolabel`, `reembed`)
 - `inference/vpe.py` เก็บ model instance แยก dict ต่อ `model_id` (ไม่ใช่ singleton ตัวเดียวเหมือนก่อนหน้านี้) — เปิดสองโปรเจกต์ (สอง `input_dir`) ที่ใช้คนละโมเดลพร้อมกันได้ในหนึ่ง process แต่ VRAM จะโตตามจำนวนโมเดลที่เคยถูกเรียกใช้ (มีคอมเมนต์ `ponytail:` กำกับไว้ว่ายังไม่มี eviction)
 - **`arm()` แก้ state ระดับ process จึงต้องมี lock** — `arm()` และ `set_prompts()` เขียนทับ `model.names`/`nc`/SAVPE vectors บน object ที่แชร์กันทั้ง process แล้ว `predict()`/`get_vpe()` อ่านกลับทันที สองโปรเจกต์ที่ใช้ checkpoint เดียวกันจึงรันพร้อมกันไม่ได้: `arm()` ตัวที่สองจะทับ class list ของตัวแรกกลางคัน แล้ว prediction ที่เหลือถูกถอดรหัสด้วยคลาสผิด **ไม่ error ไม่ crash แค่ตอบผิด** เดิมรอดเพราะ sync FastAPI endpoint บังเอิญเรียงคิวให้ พอ Go เรียกขนานได้จริงจึงต้องทำให้ชัดเจน: `RLock` ต่อ `model_id` และ context manager `armed()` ที่ถือ lock ตั้งแต่ arm จนจบ batch
 - `/api/predict`, `/api/score`, `/api/evaluate`, `/api/autolabel` **ไม่รับ `model_id` จาก client** — อ่านจาก `bank.model` ที่ backend เท่านั้น กัน mismatch ระหว่างสิ่งที่ผู้ใช้เห็นกับสิ่งที่ bank ถูกสอนมาจริง
+
+## โครง frontend: ของกลาง กับ โมดูล (T-30)
+
+```
+app/
+  page.tsx                  home — รายการโปรเจกต์ ไม่รู้จักคำว่า YOLOE
+  p/[id]/page.tsx           workspace ของโมดูล detection
+  components/               ของกลาง: DirPicker · Confirm · ProgressBar
+  lib/api.ts                ของกลาง: request/post · auth · browse · projects
+  lib/ui.tsx                ของกลาง: icon set · tooltip · Empty · Soon
+  modules/detection/
+    session.ts · history.ts · types.ts · api.ts
+    panels/      Pool · Testset · Report · Insights
+    components/  BoxCanvas · EvalOverlay · LearningCurve · ModelPicker · ShortcutsDialog
+```
+
+**กติกาเดียวที่ต้องรักษา: โค้ดส่วนกลางห้าม import อะไรจาก `modules/`** — ถ้าวันหนึ่ง home page ต้องรู้จัก `BankSummary` แปลว่าเส้นแบ่งวางผิดที่ · **บังคับด้วย CI ไม่ใช่คอมเมนต์** (`.github/workflows/frontend.yml` ตรวจเฉพาะ import statement ไม่ใช่ prose)
+
+`lib/api.ts` ผ่าตามเส้นเดียวกันและ export `request`/`post` ให้โมดูลใช้ต่อ — มันคงสภาพเดิมไว้ไม่ได้เพราะ import `Box` จาก `BoxCanvas` และ `BankSummary` จาก `types` ซึ่งเป็นของ detection ทั้งคู่
+
+**`id` ใช้อ้างถึง `input_dir` ใช้เก็บ** — `/p/{id}` resolve เป็น project ครั้งเดียวตอน mount แล้วส่ง `input_dir` ลงไป จากนั้นทุก request ยังส่งโฟลเดอร์เหมือนเดิมทุกตัว นี่คือเหตุผลที่ Phase 2 ราคาเท่ากับคอลัมน์ในตารางเดียว ไม่ใช่การเขียน transport layer ใหม่
 
 ## รูปแบบการจัดเก็บข้อมูล (storage format)
 
@@ -115,9 +137,10 @@ Environment variables หลัก:
 
 ## ข้อจำกัดด้าน scalability ปัจจุบัน
 
-- **Job tracker อยู่ในหน่วยความจำของ process เดียว.** `internal/platform/jobs` เก็บ progress เป็น map เดียวไม่มีการลบทิ้ง (TTL) และไม่ persist ข้าม restart — **ตั้งใจ port มาเหมือนเดิมทุกประการ ไม่ได้ถือโอกาสแก้** เพราะ refactor ที่เปลี่ยนพฤติกรรมไปด้วยจะแยกไม่ออกว่าบั๊กมาจาก port หรือจากของใหม่ ข้อจำกัดเดิมยังอยู่ครบ: รองรับ API instance เดียว ไม่ scale แนวนอน (มีคอมเมนต์ `ponytail:` ระบุทางแก้เป็น Redis/TTL eviction ไว้แล้ว)
+- **Job tracker และการจองภาพอยู่ในหน่วยความจำของ process เดียว.** `internal/platform/jobs` เก็บ progress เป็น map เดียวไม่มีการลบทิ้ง (TTL) และไม่ persist ข้าม restart — **ตั้งใจ port มาเหมือนเดิมทุกประการ ไม่ได้ถือโอกาสแก้** เพราะ refactor ที่เปลี่ยนพฤติกรรมไปด้วยจะแยกไม่ออกว่าบั๊กมาจาก port หรือจากของใหม่ ข้อจำกัดเดิมยังอยู่ครบ: รองรับ API instance เดียว ไม่ scale แนวนอน (มีคอมเมนต์ `ponytail:` ระบุทางแก้เป็น Redis/TTL eviction ไว้แล้ว) · `internal/platform/claims` มีข้อจำกัดเดียวกันและควรย้ายไป Redis พร้อมกัน — แต่ผลของการมีสอง replica ต่างกัน: การจองที่มองไม่เห็นกันทำให้พฤติกรรมเสื่อมกลับไปเป็นก่อน FR-49 (สองคนได้ภาพเดียวกัน) ส่วน job ที่มองไม่เห็นกันทำให้ poll ได้ 404
 - **โมเดลโหลดต่อ `model_id` ต่อ process** ผ่าน dict ระดับ module (`_models`/`_predictors` ใน `inference/vpe.py`) ไม่ใช่ singleton ตัวเดียวอีกต่อไปตั้งแต่รองรับหลายโมเดล — เหมาะกับ 1 worker และโมเดลไม่กี่ตัวต่อการรัน แต่ (ก) ถ้ารันหลาย worker แต่ละตัวโหลดซ้ำ ใช้ RAM/VRAM คูณตามจำนวน worker เหมือนเดิม และ (ข) ยังไม่มีการปลดโมเดลที่ไม่ได้ใช้แล้วออกจาก VRAM — สลับไปสอนหลาย output_dir ที่ใช้คนละโมเดลในโปรเซสเดียวนานๆ จะสะสม VRAM โดยไม่มีเพดาน (มีคอมเมนต์ `ponytail:` กำกับจุดนี้ไว้)
 - **GPU (CUDA) โดย default** — Dockerfile ติดตั้ง PyTorch จาก `--extra-index-url https://download.pytorch.org/whl/cu126` และ `docker-compose.yml` ขอ GPU ผ่าน `deploy.resources.reservations.devices` (ต้องมี NVIDIA GPU + driver + NVIDIA Container Toolkit บน host) ไม่มี GPU ก็ build แบบ CPU ได้ด้วย `--build-arg TORCH_INDEX_URL=.../whl/cpu` โดยไม่ต้องแก้ Dockerfile
+- **ไม่มีการทดสอบที่รัน React จริงเลย** — CI ฝั่ง frontend มีสามด่าน (module boundary → `tsc --noEmit` → `next build`) และไม่มีด่านไหน *รัน* โค้ด · `smoke_test.py` ยิง HTTP โดยไม่มี React อยู่ในภาพเลย · ช่องนี้ปล่อยของจริงหลุดมาแล้ว: heartbeat ของการจองภาพเคยวนเรียกตัวเอง (`setClaims` → `heldByOthers` → `nextTodo` → effect → `POST /api/claim` → `setClaims`) ยิงเร็วเท่าที่ round trip จะไหว และไม่มีด่านไหนเห็น เพราะมันเห็นได้แค่ใน network panel ของ browser — แก้แล้วด้วยการเทียบค่าก่อน `setState` และคงอ้างอิงเดิมไว้เมื่อเนื้อหาเท่าเดิม
 - **ไม่มี CORS header เลยแล้ว** — ของเดิมตั้ง `allow_origins=["*"]` ไว้ใน `app.py` ซึ่งไม่เคยจำเป็นตั้งแต่แรก เพราะ browser คุยผ่าน Next.js proxy อย่างเดียว ไม่เคยยิงตรงมาที่ backend จาก origin ภายนอก · ถ้าวันหนึ่งจะเปิดให้เข้าถึงตรง ต้องเพิ่ม CORS แบบระบุ origin ไม่ใช่ `*`
 - **ทุก container ไม่รันเป็น root** — `ARG APP_UID` + `USER app` ในทั้ง `backend/Dockerfile` และ `backend/inference/Dockerfile` (NFR-07) · **`api` กับ `vpe` ต้องใช้ UID เดียวกัน** เพราะเขียนลง `DATA_DIR` ทั้งคู่ (`api` เขียน uploads/history/events, `vpe` เขียน `_bank/`) ตั้ง `--build-arg APP_UID=$(id -u)` ให้ตรงกับเจ้าของ `DATA_DIR` บน Linux host มิฉะนั้นเขียนไฟล์ไม่ได้
 - ~~**Label storage เขียนชนกันได้ถ้าหลายคนแก้ project เดียวกันพร้อมกัน**~~ **แก้แล้ว (T-21)** — ย้ายไป PostgreSQL, row lock ระดับ transaction แทน `filelock` ทั้งไฟล์ (ดูหัวข้อ "รูปแบบการจัดเก็บข้อมูล" ด้านบน) — คอขวดที่เหลือคือ job tracker กับโมเดลใน VRAM สองข้อด้านบน ไม่ใช่ label storage อีกต่อไป

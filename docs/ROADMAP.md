@@ -34,11 +34,11 @@
 - ตาราง `users` (`oid` = `sub`) upsert ทุก login เพื่อให้ attribution แปลกลับเป็นชื่อคนได้
 - provider token อยู่ฝั่ง Go เท่านั้น browser ได้แค่ session cookie อายุ 12 ชั่วโมง
 
-## Phase 2 — Workspace & Multi-user ← **งานปัจจุบัน**
+## Phase 2 — Workspace & Multi-user ✅
 
-**แผนเต็ม: [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)** — อ่านเอกสารนั้นก่อนเริ่มเขียนโค้ด
+เสร็จ 2026-08-28 · **เหตุผลเบื้องหลังทุกการตัดสินใจ: [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)**
 
-สิ่งที่จะได้: home page ที่ตอบได้ว่าในระบบมีงานอะไร ใครทำ ไปถึงไหน · โปรเจกต์มีชื่อ เจ้าของ ชนิดงาน และ URL ของตัวเอง · สองคน label โปรเจกต์เดียวกันโดยไม่หยิบภาพชนกัน · โครงไฟล์ที่ทำให้โมดูล label แบบอื่นในอนาคตเป็น "โฟลเดอร์พี่น้อง" ไม่ใช่การรื้อของเดิม
+สิ่งที่ได้: home page ที่ตอบได้ว่าในระบบมีงานอะไร ใครทำ ไปถึงไหน · โปรเจกต์มีชื่อ เจ้าของ ชนิดงาน และ URL ของตัวเอง · สองคน label โปรเจกต์เดียวกันโดยไม่หยิบภาพชนกัน · โครงไฟล์ที่ทำให้โมดูล label แบบอื่นในอนาคตเป็น "โฟลเดอร์พี่น้อง" ไม่ใช่การรื้อของเดิม
 
 | ก้อน | งาน | สรุป |
 |---|---|---|
@@ -47,17 +47,19 @@
 | 1 | T-28 ✅ | เปิด auth ใน CI ให้บล็อก auth ของ smoke test เดินจริงครั้งแรก |
 | 2 | T-29 ✅ | Home page + route `/p/{id}` + ทิ้ง `localStorage` |
 | 2 | T-30 ✅ | ผ่าไฟล์โมดูล detection ออกจากของกลาง + workflow `frontend` (boundary → tsc → build) |
-| 3 | T-31 | `GET /api/state` + polling ทุก 15 วินาที |
-| 3 | T-32 | จองภาพ (in-memory, TTL 10 นาที) กันหยิบงานชนกัน |
-| 3 | T-33 | แสดงว่าใคร label กล่องไหน / ใครทำงานในโปรเจกต์นี้ |
-| 3 | T-34 | ยามตรวจ prompt bank กับ DB ไม่ตรงกัน |
-| 4 | T-35 | sync เอกสารกับสิ่งที่ทำจริง |
+| 3 | T-31 ✅ | `GET /api/state` + polling ทุก 15 วินาที (หยุดเมื่อ tab ไม่ active) |
+| 3 | T-32 ✅ | จองภาพ (in-memory, TTL 10 นาที) กันหยิบงานชนกัน |
+| 3 | T-33 ✅ | แสดงว่าใคร label ภาพไหน / ใครทำงานในโปรเจกต์นี้ |
+| 3 | T-34 ✅ | ยามตรวจ prompt bank กับ DB ไม่ตรงกัน (`bank_orphaned`) |
+| 4 | T-35 ✅ | sync เอกสารกับสิ่งที่ทำจริง |
 
-**บังคับก่อน deploy:** ล้าง DB **และ** `.ctflow/` พร้อมกัน — ดูหัวข้อ 8 ของ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
+**บังคับก่อน deploy (ครั้งแรกที่ขึ้น Phase 2):** ล้าง DB **และ** `.ctflow/` พร้อมกัน — ดูหัวข้อ 8 ของ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) · schema ของ `projects` เปลี่ยนโดยไม่มี migration path และ boot check จะตายพร้อมข้อความบอกทางแก้ถ้าลืม
 
 **สิ่งที่ Phase 2 ตั้งใจไม่ทำ:** role/permission · ตาราง project members · upload UI · abstraction ต่อ task type · migration framework · websocket
 
-## Phase 3 — Model quality: small-object classes
+**สิ่งที่เพิ่มระหว่างทางโดยไม่ได้อยู่ในแผน:** workflow `frontend` (T-30 ย้าย 12 ไฟล์โดยไม่มีตาข่ายรองรับเลย) · แก้บั๊ก attribution ที่ `mode="update"` เขียน `created_by` ทับกล่องของคนอื่น (มองไม่เห็นจนกระทั่ง FR-50 อ่านมัน)
+
+## Phase 3 — Model quality: small-object classes ← **งานปัจจุบัน**
 
 **เลื่อนมาจากตำแหน่งเดิม (เคยเป็น Phase 2) ตามการตัดสินใจของเจ้าของโปรเจกต์ 2026-08-28** — workspace มาก่อนเพราะเป็นงานที่รู้ว่าจบตรงไหน ส่วน T-08 เป็นการทดลองที่ผลอาจเป็น "ไม่ช่วย"
 
@@ -73,7 +75,8 @@
 
 - **T-13 · Upload dropzone** ที่เรียก `POST /api/upload` (backend เสร็จแล้ว) — ต้องตอบก่อนว่าไฟล์ที่อัปโหลดไปลงโฟลเดอร์ไหน ใครตั้งชื่อ ลบโปรเจกต์แล้วไฟล์หายไหม
 - ส่ง usage event จาก frontend ให้สถิติข้าม session และข้ามเครื่องได้จริง (backend สรุปได้แล้ว ดู REQUIREMENTS §7)
-- เพิ่ม frontend type-check/build เข้า CI — **ควรทำก่อน T-30** ถ้ามีเวลา เพราะการย้ายไฟล์ทั้งชุดไม่มีตาข่ายรองรับเลยตอนนี้
+- ~~เพิ่ม frontend type-check/build เข้า CI~~ **ทำแล้วใน T-30** (`.github/workflows/frontend.yml`: module boundary → `tsc --noEmit` → `next build`)
+- **การทดสอบที่รัน React จริง** — ไม่มีด่านไหนใน CI *รัน* โค้ด frontend เลย และ smoke test ยิง HTTP โดยไม่มี React อยู่ในภาพ · ช่องนี้ปล่อย render loop ของ claim heartbeat หลุดมาแล้ว (`setClaims` → `heldByOthers` → `nextTodo` → effect → `POST /api/claim` → `setClaims`) ซึ่งเห็นได้แค่ใน network panel ของ browser · **เงื่อนไขเริ่มงาน:** มี bug ประเภทนี้หลุดอีกครั้ง หรือเริ่มมี state logic ที่ซับซ้อนกว่านี้
 - export-format picker บน UI (`GET /api/export` รองรับ YOLO/COCO/VOC อยู่แล้ว)
 
 ## Phase 5 — Scale และ operations (conditional)
@@ -96,7 +99,7 @@
 
 ## Decision gates
 
-- **Workspace:** ทำแล้ว (Phase 2) · เพิ่ม role/permission เฉพาะเมื่อมี policy จริง ไม่ใช่เพราะ "น่าจะมี"
+- **Workspace:** ทำแล้ว (Phase 2 ครบทั้งสี่ก้อน) · เพิ่ม role/permission เฉพาะเมื่อมี policy จริง ไม่ใช่เพราะ "น่าจะมี" — วันนี้ทุกคนที่ login เปิดโปรเจกต์ไหนก็ได้ และหน้าจอไม่ได้ทำท่าว่าปิด
 - **Model quality:** ทำ crop experiment ก่อน NN-matching เสมอ
 - **Scale:** วัดจำนวนผู้ใช้, instance และ job concurrency ก่อนเพิ่ม Redis/eviction
 - **โมดูลที่สอง:** เริ่มเมื่อมีงานจริง ไม่ใช่เพื่อพิสูจน์ว่าโครงรองรับ — abstraction ถูกค้นพบจากโมดูลที่สอง ไม่ได้ถูกประดิษฐ์ก่อน
@@ -110,5 +113,6 @@
 | โมเดลถูก cache ต่อ `model_id` ต่อ process ไม่มี VRAM eviction | สลับหลาย checkpoint ใหญ่ในโปรเซสเดียวจน OOM จริง |
 | ตรวจภาพซ้ำด้วย thumbnail hash 8×8 ไม่ใช่ระยะห่าง embedding จริง | มีหลักฐานว่ามันเลือกภาพผิดจนเสียเวลา label (การเปลี่ยนจะทำให้ rescore ช้าขึ้นราวเท่าตัว) |
 | ไม่มี HTTPS ในตัวแอป | deploy นอก network ที่ควบคุมได้ — แก้ด้วย reverse proxy ไม่ใช่แก้ในแอป |
-| ไม่มี integration test ฝั่ง frontend | มี regression ที่ `tsc` จับไม่ได้เกิดซ้ำ |
+| ไม่มีการทดสอบที่ **รัน** React — CI มีแค่ boundary/`tsc`/`build` | เกิดขึ้นแล้วหนึ่งครั้ง (render loop ใน claim heartbeat) · เริ่มงานเมื่อหลุดอีกครั้ง |
+| การจองภาพอยู่ใน memory ของ process เดียว | ต้องรัน API มากกว่าหนึ่ง process — ย้ายไป Redis พร้อม job tracker (T-15) |
 | `annotations.created_by` เป็น `TEXT` ไม่ใช่ FK ไป `users(oid)` | เลิกใช้ `LABEL_TOOL_USERS` (local login ไม่มีแถวใน `users`) |

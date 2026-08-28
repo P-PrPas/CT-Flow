@@ -1,0 +1,51 @@
+# The frontend had no CI at all until T-30 moved twelve files between folders
+# with nothing to catch a broken import but someone remembering to run tsc.
+#
+# Three checks, cheapest first. Deliberately not a test suite: there are no
+# frontend tests to run yet, and inventing some to justify a workflow is the
+# wrong order. This catches what actually breaks -- types, the build, and the
+# module boundary.
+name: frontend
+
+on:
+  push:
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+  pull_request:
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+
+      # The module boundary from docs/PHASE2_WORKSPACE.md #5.2, as a check
+      # rather than a comment: the shared shell must not know what a prompt bank
+      # is, or a second labeling module means editing the first one.
+      - name: Module boundary
+        run: |
+          # Import statements only -- prose about the boundary is not a breach
+          # of it, and the filename grep prepends defeats any line anchor.
+          leaks=$(grep -rnE "from [\"'][^\"']*modules/" \
+                    app/page.tsx app/layout.tsx app/lib app/components app/entry \
+                    --include='*.ts' --include='*.tsx' || true)
+          if [ -n "$leaks" ]; then
+            echo "shared code imports from a module:"; echo "$leaks"; exit 1
+          fi
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build

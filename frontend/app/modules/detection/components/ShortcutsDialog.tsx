@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { Icon } from "../lib/ui";
+import { Icon } from "../../../lib/ui";
 
 /** FR-20 — the shortcut sheet, opened with `?`. Every repeated action in the
  *  labeling loop has a key, so a full image can be labeled without the mouse

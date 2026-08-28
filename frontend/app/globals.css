@@ -667,3 +667,30 @@ kbd {
   .appbar { padding: var(--s2) var(--s3) 0; }
   .appbar-inner { height: auto; flex-wrap: wrap; padding: var(--s2) var(--s3); border-radius: var(--r-lg); }
 }
+
+/* ================================================================ projects (home) */
+/* auto-fill, not auto-fit: a lone project should keep a card's width rather
+   than stretch across the page like a table row. */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--s3);
+}
+.project-card { transition: border-color var(--fast); }
+.project-card:hover { border-color: var(--line-strong, var(--brand)); }
+/* The project name is the primary way into a project, so it is a real button
+   for keyboard and screen readers while looking like the heading it is. */
+.link-title {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.link-title:hover { color: var(--brand); }

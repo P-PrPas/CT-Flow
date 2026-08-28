@@ -1,13 +1,12 @@
-/** Thin client for backend/routers/*.py -- every fetch call in the app goes
- *  through here, so page.tsx only deals with state, not HTTP. All requests
- *  go through /api/*, proxied to FastAPI by app/api/[...path]/route.ts. */
-import type { Box } from "../components/BoxCanvas";
-import type { JobProgress } from "../components/ProgressBar";
-import type { BankSummary, EvalResult, ModelInfo, Score } from "./types";
+/** The API calls that are not about labeling: signing in, browsing the server's
+ *  folders, and projects.
+ *
+ *  Everything tied to the labeling loop lives in the module that owns it
+ *  (app/modules/detection/api.ts) and reuses `request`/`post` from here. That is
+ *  the boundary in one sentence: this file must not import anything from
+ *  app/modules/, so a second module cannot make this one grow. */
 
-export type { JobProgress };
-
-async function request(url: string, init?: RequestInit) {
+export async function request(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
   const data = await res.json();
   if (res.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/entry/")) {
@@ -17,7 +16,7 @@ async function request(url: string, init?: RequestInit) {
   return data;
 }
 
-const post = (url: string, body: unknown) =>
+export const post = (url: string, body: unknown) =>
   request(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -59,152 +58,66 @@ export function logout(): Promise<AuthState> {
   return post("/api/auth/logout", {});
 }
 
-export function getConfig(): Promise<{
-  roots: string[]; colors: string[]; models: ModelInfo[]; default_model: string;
-}> {
-  return request("/api/config");
-}
-
 export function browse(path: string) {
   return request(`/api/browse?path=${encodeURIComponent(path)}`);
 }
 
-export function getBoxes(
-  input_dir: string, image: string, kind: "pool" | "test" = "pool"
-): Promise<{ boxes: Box[] }> {
-  return request(
-    `/api/boxes?input_dir=${encodeURIComponent(input_dir)}&image=${encodeURIComponent(image)}&kind=${kind}`
-  );
+// --- projects (FR-43, FR-44, FR-50) --------------------------------------
+// Generic on purpose: nothing here knows what a prompt bank is. A project has a
+// folder and a task type, and which module renders it is decided by the route.
+
+export type Person = { oid: string; username: string };
+
+/** Someone who has actually labeled here, counted from annotations.created_by
+ *  -- what happened, not who was invited, which is why there is no member list
+ *  to maintain. `username` falls back to the raw subject when the provider
+ *  never wrote a users row (a local login). */
+export type Contributor = Person & { boxes: number };
+
+export type Project = {
+  id: number;
+  input_dir: string;
+  name: string;
+  task_type: string;
+  /** null when nobody has claimed it. */
+  owner: Person | null;
+  labeled: number;
+  auto: number;
+  contributors: Contributor[];
+  created_at: string;
+  updated_at: string;
+};
+
+export function listProjects(): Promise<{ projects: Project[] }> {
+  return request("/api/projects");
 }
 
-// --- pool -------------------------------------------------------------
-
-/** One folder in, everything else comes back in one shot: the prompt bank
- *  (labels + taught examples) and the test-set manifest both live in a fixed
- *  subfolder of input_dir server-side (see backend/deps.py), so there is
- *  nothing else to pick and no second request to make. */
-export function openSession(input_dir: string): Promise<{
-  images: string[]; bank: BankSummary;
-  testset: { images: string[]; labeled: string[]; classes: string[] };
-}> {
-  return post("/api/session", { input_dir });
+export function createProject(
+  name: string, input_dir: string, task_type = "detection"
+): Promise<{ project: Project }> {
+  return post("/api/projects", { name, input_dir, task_type });
 }
 
-export function saveLabel(
-  input_dir: string, image: string, boxes: Box[], mode: "replace" | "update", model_id: string
-): Promise<{ bank: BankSummary }> {
-  return post("/api/label", { input_dir, image, boxes, mode, model_id });
+/** What /p/{id} calls on mount to turn the URL into the input_dir every other
+ *  endpoint speaks. */
+export function getProject(id: number): Promise<{ project: Project }> {
+  return request(`/api/projects/${id}`);
 }
 
-/** Rewrites the image's label file directly -- no embedding extraction, for
- *  fixing an auto-generated label without treating the edit as a new prompt. */
-export function relabel(
-  input_dir: string, image: string, boxes: Box[], mode: "replace" | "update" = "replace"
-): Promise<{ bank: BankSummary }> {
-  return post("/api/relabel", { input_dir, image, boxes, mode });
+/** Rename, and/or claim an unowned project. There is no field for handing it to
+ *  someone else: claiming can only fill an empty owner, never replace one. */
+export function updateProject(
+  id: number, patch: { name?: string; claim_ownership?: boolean }
+): Promise<{ project: Project }> {
+  return request(`/api/projects/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
 }
 
-/** FR-19 — the model's guesses for one image, drawn as drafts the user accepts
- *  or ignores. Returns [] instantly when the bank is empty. */
-export function predict(
-  input_dir: string, image: string, conf: number
-): Promise<{ boxes: (Box & { conf: number })[] }> {
-  return post("/api/predict", { input_dir, image, conf });
-}
-
-// --- evaluate history (T-07) -------------------------------------------
-
-export function getHistory(input_dir: string): Promise<{ history: unknown[] }> {
-  return request(`/api/history?input_dir=${encodeURIComponent(input_dir)}`);
-}
-
-export function addHistory(input_dir: string, point: unknown): Promise<{ history: unknown[] }> {
-  return post("/api/history", { input_dir, point });
-}
-
-export function dropHistory(input_dir: string): Promise<{ history: unknown[] }> {
-  return request(`/api/history?input_dir=${encodeURIComponent(input_dir)}`, { method: "DELETE" });
-}
-
-// --- test set -------------------------------------------------------------
-// Flags pool images as held out -- no copy, no second folder. See
-// backend/services/groundtruth.py's manifest.
-
-export function importTestset(input_dir: string, images: string[]) {
-  return post("/api/testset/import", { input_dir, images }) as Promise<{
-    images: string[]; labeled: string[]; classes: string[]; imported: string[];
-  }>;
-}
-
-export function removeTestset(input_dir: string, images: string[]) {
-  return post("/api/testset/remove", { input_dir, images }) as Promise<{
-    images: string[]; labeled: string[]; classes: string[]; removed: string[];
-  }>;
-}
-
-export function labelTestset(
-  input_dir: string, image: string, boxes: Box[], mode: "replace" | "update"
-): Promise<{ classes: string[]; labeled: string[] }> {
-  return post("/api/testset/label", { input_dir, image, boxes, mode });
-}
-
-// --- background jobs: evaluate / autolabel / rescore --------------------
-
-function jobStatus(jobId: string) {
-  return request(`/api/jobs/${jobId}`);
-}
-
-/** Starts a job and polls /api/jobs/{id} until it finishes, reporting
- *  progress along the way -- the shared engine behind rescorePool,
- *  evaluateTestSet, and autoLabelRemaining below. */
-export function runJob(url: string, body: unknown, onProgress: (p: JobProgress) => void): Promise<any> {
-  return post(url, body).then(
-    (started) =>
-      new Promise((resolve, reject) => {
-        const poll = () => {
-          jobStatus(started.job_id)
-            .then((j) => {
-              onProgress({ done: j.done, total: j.total, startedAt: j.started_at, now: j.now });
-              if (j.finished) {
-                if (j.error) reject(new Error(j.error));
-                else resolve(j.result);
-              } else {
-                setTimeout(poll, 400);
-              }
-            })
-            .catch(reject);
-        };
-        onProgress({ done: 0, total: started.total, startedAt: 0, now: 0 });
-        poll();
-      })
-  );
-}
-
-export function rescorePool(input_dir: string, images: string[], onProgress: (p: JobProgress) => void) {
-  return runJob("/api/score", { input_dir, images }, onProgress) as Promise<{
-    scores: Record<string, Score>;
-  }>;
-}
-
-export function evaluateTestSet(
-  input_dir: string, conf: number, onProgress: (p: JobProgress) => void
-): Promise<EvalResult> {
-  return runJob("/api/evaluate", { input_dir, conf }, onProgress);
-}
-
-export function autoLabelRemaining(
-  input_dir: string, images: string[], conf: number, onProgress: (p: JobProgress) => void
-) {
-  return runJob("/api/autolabel", { input_dir, images, conf }, onProgress) as Promise<{
-    written: number; no_detection: number; no_detection_images: string[]; bank: BankSummary;
-  }>;
-}
-
-/** The only sanctioned way to change a project's model after its first label
- *  -- re-extracts every taught instance's embedding under the new checkpoint.
- *  Label files are untouched; only the prompt bank's vectors change. */
-export function reembedBank(
-  input_dir: string, model_id: string, onProgress: (p: JobProgress) => void
-) {
-  return runJob("/api/reembed", { input_dir, model_id }, onProgress) as Promise<{ bank: BankSummary }>;
+/** Drops the labels, never the files. `kept_on_disk` is the folder that stays,
+ *  so the confirmation can say what survives. */
+export function deleteProject(id: number): Promise<{ deleted: number; kept_on_disk: string }> {
+  return request(`/api/projects/${id}`, { method: "DELETE" });
 }

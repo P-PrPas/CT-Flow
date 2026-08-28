@@ -1,6 +1,6 @@
 # CT-Flow — Phase 2: Workspace & Multi-user
 
-> **สถานะ:** ก้อนที่ 1 (T-26, T-27, T-28) implement แล้ว · ก้อนที่ 2–4 ยังเป็นแผน · ตกลง scope กับเจ้าของโปรเจกต์ 2026-08-28
+> **สถานะ:** ก้อนที่ 1 (T-26–T-28) merge เข้า `main` แล้ว · ก้อนที่ 2 (T-29, T-30) implement แล้ว · ก้อนที่ 3–4 ยังเป็นแผน · ตกลง scope กับเจ้าของโปรเจกต์ 2026-08-28
 > **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [REQUIREMENTS.md](./REQUIREMENTS.md) · [ROADMAP.md](./ROADMAP.md)
 
 เอกสารนี้คือแผนงานฉบับเดียวของ Phase 2 — อ่านจบแล้วต้องลงมือเขียนโค้ดได้โดยไม่ต้องถามอะไรเพิ่ม
@@ -248,15 +248,16 @@ app/
 
 ### ก้อนที่ 2 — Frontend routing + home
 
-#### T-29 · Home page + route `/p/{id}`
+#### T-29 · Home page + route `/p/{id}` ✅
 - `app/page.tsx` เขียนใหม่เป็น home · `app/p/[id]/page.tsx` รับช่วง workspace เดิม
 - dialog สร้างโปรเจกต์ (ชื่อ + `DirPicker` + chip ชนิดงาน)
-- ลบ `DIRS_KEY`/`localStorage` · `SetupCard` เหลือเฉพาะ `ModelPicker` + สถานะ session (พิจารณายุบรวมเข้า workspace ไปเลย)
+- ลบ `DIRS_KEY`/`localStorage` · **ลบ `SetupCard.tsx` ทิ้งทั้งไฟล์** — ช่องเลือกโฟลเดอร์ย้ายไป home, `ModelPicker` มีอยู่ใน `PoolPanel` อยู่แล้ว, และปุ่ม "Open session" ไม่จำเป็นเมื่อ route รู้โฟลเดอร์อยู่แล้ว (`useSession` เปิดเองตอน mount)
 - **เกณฑ์รับ:** สร้างโปรเจกต์จาก home → เปิด → label → refresh หน้า → ยังอยู่ที่โปรเจกต์เดิม (route จำให้) · เปิดลิงก์ `/p/{id}` จากอีก browser ที่ login คนละคน แล้วเข้าถึงงานเดียวกันได้
 
-#### T-30 · ผ่าโมดูล detection ออกจากของกลาง
+#### T-30 · ผ่าโมดูล detection ออกจากของกลาง ✅
 - ย้ายไฟล์ตามข้อ 5.2 · แยก `app/lib/api.ts` เป็นของกลาง + `modules/detection/api.ts`
-- **เกณฑ์รับ:** `npx tsc --noEmit` ผ่าน · `grep -r "modules/detection" app/page.tsx` ต้องไม่เจออะไรเลย
+- **เกณฑ์รับ:** `npx tsc --noEmit` + `npm run build` ผ่าน · ไม่มี import จาก `modules/` ในโค้ดส่วนกลาง — **บังคับด้วย CI ไม่ใช่คอมเมนต์** (`.github/workflows/frontend.yml`, ทดสอบแล้วว่า fail จริงเมื่อจงใจละเมิด)
+- เพิ่ม workflow `frontend` (boundary check → `tsc --noEmit` → `next build`) — ปิดช่องว่าง "ไม่มี CI ฝั่ง frontend" ที่ความเสี่ยง R4 ระบุไว้ว่าเป็นตาข่ายที่ขาดสำหรับการย้ายไฟล์ทั้งชุดพอดี
 
 ### ก้อนที่ 3 — รู้ว่ามีคนอื่นอยู่
 

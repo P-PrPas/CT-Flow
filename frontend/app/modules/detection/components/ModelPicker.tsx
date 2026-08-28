@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import Confirm from "./Confirm";
-import type { Session } from "../lib/session";
-import type { ModelInfo } from "../lib/types";
-import { HelpDot, Icon, Tip } from "../lib/ui";
+import Confirm from "../../../components/Confirm";
+import type { Session } from "../session";
+import type { ModelInfo } from "../types";
+import { HelpDot, Icon, Tip } from "../../../lib/ui";
 
 const groupByFamily = (models: ModelInfo[]) =>
   models.reduce<Record<string, ModelInfo[]>>((by, m) => {

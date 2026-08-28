@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import BoxCanvas from "../components/BoxCanvas";
-import { imgUrl } from "../lib/api";
-import type { Session } from "../lib/session";
-import { Empty, fileOf, Icon, stemOf, Term } from "../lib/ui";
+import { imgUrl } from "../api";
+import type { Session } from "../session";
+import { Empty, fileOf, Icon, stemOf, Term } from "../../../lib/ui";
 
 /** Ground-truth prep. A separate flow on purpose: these labels are written
  *  straight to disk and the images are never turned into teaching examples --
@@ -119,11 +119,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
                 icon="target"
                 title={total ? "All test images are labeled" : "No test images yet"}
                 action={
-                  !s.inputDir ? (
-                    <button className="btn primary" onClick={() => s.setShowSetup(true)}>
-                      <Icon name="folder" size={14} /> Open a session first
-                    </button>
-                  ) : !total && s.poolCandidates.length ? (
+                  !total && s.poolCandidates.length ? (
                     /* The sidebar can do this too, but an empty screen should
                        carry the one action that gets you off it. */
                     <button className="btn primary" onClick={s.addRandomFromPool} disabled={s.busy}>
@@ -167,10 +163,8 @@ export default function TestsetPanel({ s }: { s: Session }) {
             <span className="card-title"><Icon name="copy" size={13} /> Bring in from the pool</span>
           </div>
           <div className="card-body tight col" style={{ gap: 10 }}>
-            {!s.inputDir ? (
-              <span className="xs muted">Open a session in Session setup first.</span>
-            ) : !s.images.length ? (
-              <span className="xs muted">Open an image folder on the Label tab — this list mirrors that pool.</span>
+            {!s.images.length ? (
+              <span className="xs muted">This list mirrors the pool on the Label tab, which has not loaded yet.</span>
             ) : (
               <>
                 <div className="row" style={{ gap: 8 }}>

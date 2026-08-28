@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import BoxCanvas from "../components/BoxCanvas";
-import Confirm from "../components/Confirm";
+import Confirm from "../../../components/Confirm";
 import ModelPicker from "../components/ModelPicker";
-import { imgUrl } from "../lib/api";
-import { VERDICT_STYLE } from "../lib/history";
-import type { Session } from "../lib/session";
-import { Empty, fileOf, gradeColor, HelpDot, Icon, pct, READY_F1, Term } from "../lib/ui";
+import { imgUrl } from "../api";
+import { VERDICT_STYLE } from "../history";
+import type { Session } from "../session";
+import { Empty, fileOf, gradeColor, HelpDot, Icon, pct, READY_F1, Term } from "../../../lib/ui";
 
 export default function PoolPanel({ s }: { s: Session }) {
   const [confirmAuto, setConfirmAuto] = useState(false);
@@ -226,18 +226,23 @@ export default function PoolPanel({ s }: { s: Session }) {
               </>
             ) : s.images.length ? (
               <Empty icon="check" title="Nothing left in the queue">
-                Every image in this folder is labeled. Measure accuracy on the test set, or open a
-                different folder.
+                Every image in this folder is labeled. Measure accuracy on the test set, or start a
+                project on another folder.
               </Empty>
             ) : (
+              /* The route opens the session itself, so an empty pool is the
+                 folder loading -- or a folder whose images went away since the
+                 project was created. */
               <Empty
                 icon="image"
-                title="No session open"
-                action={<button className="btn primary" onClick={() => s.setShowSetup(true)}>
-                  <Icon name="folder" size={14} /> Choose folders
-                </button>}
+                title={s.busy ? "Opening…" : "No images in this folder"}
+                action={!s.busy && <a className="btn" href="/">
+                  <Icon name="folder" size={14} /> All projects
+                </a>}
               >
-                Pick an image folder and an output folder, then open the session to start labeling.
+                {s.busy
+                  ? "Reading the folder and the taught examples."
+                  : "The folder this project points at has no images in it any more."}
               </Empty>
             )}
           </div>

@@ -5,12 +5,12 @@
  *  instead of forty. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Box } from "../components/BoxCanvas";
-import type { JobProgress } from "../components/ProgressBar";
+import type { Box } from "./components/BoxCanvas";
+import type { JobProgress } from "../../components/ProgressBar";
 import * as api from "./api";
 import { adviseAll, appendHistory, clearHistory, loadHistory, type EvalPoint } from "./history";
 import type { BankSummary, EvalImage, EvalResult, ModelInfo, Score } from "./types";
-import { stemOf } from "./ui";
+import { stemOf } from "../../lib/ui";
 
 export type Panel = "pool" | "testset" | "report" | "insights";
 
@@ -63,28 +63,20 @@ function useBoxStack(limit = 40) {
   };
 }
 
-/** The one folder path, remembered between visits. Typing a server path is
- *  the single most annoying step in the tool and it almost never changes from
- *  one day to the next. Labels, the prompt bank, and the test-set manifest
- *  all live in a fixed subfolder of it server-side -- nothing else to ask for. */
-const DIRS_KEY = "labeltool.dirs.v1";
-
-const readDirs = (): { input?: string } => {
-  if (typeof window === "undefined") return {};
-  try { return JSON.parse(window.localStorage.getItem(DIRS_KEY) ?? "{}"); } catch { return {}; }
-};
-
-const saveDirs = (d: { input: string }) => {
-  try { window.localStorage.setItem(DIRS_KEY, JSON.stringify(d)); } catch { /* private mode */ }
-};
-
 /** Sum of absolute differences between two 8x8 thumbnails (FR-18). */
 const distance = (a: number[], b: number[]) =>
   a.length && a.length === b.length
     ? a.reduce((n, v, i) => n + Math.abs(v - b[i]), 0) / a.length
     : Infinity;
 
-export function useSession() {
+/** `inputDir` comes from the route now, not from this hook.
+ *
+ *  It used to be typed in and remembered in localStorage, which meant the one
+ *  thing identifying your work lived in one browser: a different machine, or a
+ *  cleared cache, and you were typing a server path again. /p/{id} resolves the
+ *  project and hands the folder down, so the URL is what remembers -- and it is
+ *  shareable, which localStorage never was. */
+export function useSession(inputDir: string) {
   // --- environment ------------------------------------------------------
   const [colors, setColors] = useState<string[]>([]);
   const [reachable, setReachable] = useState<boolean | null>(null);
@@ -102,12 +94,9 @@ export function useSession() {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<JobProgress | null>(null);
-  const [picking, setPicking] = useState<null | "input">(null);
-  const [showSetup, setShowSetup] = useState(true);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   // --- session config ---------------------------------------------------
-  const [inputDir, setInputDir] = useState("");
   const [conf, setConf] = useState(0.25);
   // Read by the pre-annotation effect without being a dependency of it --
   // dragging the threshold slider must not fire a predict per step.
@@ -188,11 +177,6 @@ export function useSession() {
         setModels(c.models); setModelId(c.default_model);
       })
       .catch(() => { setReachable(false); setStatus("Backend not reachable — is the API running?"); });
-  }, []);
-
-  useEffect(() => {
-    const d = readDirs();
-    if (d.input) setInputDir(d.input);
   }, []);
 
   useEffect(() => {
@@ -351,7 +335,7 @@ export function useSession() {
     setProgress(null);
   }, []);
 
-  const openSession = () =>
+  const openSession = useCallback(() =>
     guard("Opening session…", async () => {
       // One folder in, everything back in one shot -- the bank and the
       // test-set manifest both live under it server-side (see
@@ -373,10 +357,8 @@ export function useSession() {
       setLabelSecs([]);
       setReviewed(0);
       setFirstAutoSecs(null);
-      saveDirs({ input: inputDir });
       const done = new Set<string>([...d.bank.labeled, ...d.bank.auto]);
       setCurrent(d.images.find((p) => !done.has(p)) ?? d.images[0] ?? null);
-      setShowSetup(false);
       setPanel("pool");
       setStatus(`${d.images.length} image(s) · ${d.bank.labeled.length} labeled by hand`);
 
@@ -385,7 +367,12 @@ export function useSession() {
       setTsClasses(d.testset.classes);
       const tsDone = new Set<string>(d.testset.labeled);
       setTsCurrent(d.testset.images.find((p) => !tsDone.has(stemOf(p))) ?? d.testset.images[0] ?? null);
-    });
+    }), [inputDir, guard, poolReset]);
+
+  /** Opening is no longer a button. The route already resolved which project
+   *  this is, so asking the user to confirm the folder they just clicked would
+   *  be a step that answers nothing. */
+  useEffect(() => { if (inputDir) openSession(); }, [inputDir, openSession]);
 
   /** FR-19 — take the model's guesses into the editable set. Nothing reaches a
    *  label file until this happens, so a suggestion is never silently saved. */
@@ -550,10 +537,9 @@ export function useSession() {
   return {
     // env + shell
     colors, reachable, panel, setPanel, simple, setSimple,
-    status, setStatus, busy, progress, picking, setPicking,
-    showSetup, setShowSetup, showShortcuts, setShowShortcuts,
+    status, setStatus, busy, progress, showShortcuts, setShowShortcuts,
     // config
-    inputDir, setInputDir, conf, setConf,
+    inputDir, conf, setConf,
     models, modelId, setModelId, reembedModel,
     // pool
     images, bank, scores, current, savedBoxes, cls, setCls, updateMode, setUpdateMode, selected, setSelected,

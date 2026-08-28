@@ -146,6 +146,18 @@ func (s *Server) UpdateProject(w http.ResponseWriter, r *http.Request) error {
 // images and annotations cascade, and nothing on disk is touched -- not the
 // images, not the prompt bank in .ctflow/. The response says so explicitly so
 // the UI can tell someone what they are about to keep.
+//
+// ponytail: this leaves the same DB/bank split docs/PHASE2_WORKSPACE.md #8
+// describes, only reachable from one HTTP call instead of a forgotten reset.
+// Delete a project and open the folder again and it is a new project with
+// classes.idx back at 0, while _bank/embeddings.pt still holds the old class
+// order and metadata.json still locks the old checkpoint -- invariant 1 in
+// CLAUDE.md, broken quietly. It does not bite today because predictions come
+// back as class names, never as indexes (#8 again). Clearing the bank here is
+// not the fix: invariant 5 says only the sidecar may touch those two files, so
+// it would need an endpoint over there, and this response promises the opposite
+// anyway. The planned fix is bank_orphaned on POST /api/session (#4.3, FR-51),
+// which makes the split visible where someone can act on it.
 func (s *Server) DeleteProject(w http.ResponseWriter, r *http.Request) error {
 	id, err := projectPathID(r)
 	if err != nil {

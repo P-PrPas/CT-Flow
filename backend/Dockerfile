@@ -35,7 +35,6 @@ COPY backend/db/schema.sql /app/db/schema.sql
 ENV MODELS_DIR=/models \
     MODELS_CATALOG=/app/models.json \
     SCHEMA_PATH=/app/db/schema.sql \
-    LABEL_TOOL_MODE=vm \
     LABEL_TOOL_VM_ROOT=/opt/mount/project \
     PORT=8000
 

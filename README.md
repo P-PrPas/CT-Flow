@@ -80,7 +80,7 @@ pool.
 | Per-label attribution (`labeled_by`) | Ready | every box and every taught prompt records who wrote it |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
 | Embedding-distance duplicate detection | Approximated | an 8×8 thumbnail hash stands in for true embedding distance — good enough today, see [limitations](#known-limitations--roadmap) |
-| Project workspaces + multi-user queue | Planned | home page, per-project ownership and attribution, image claiming, mandatory login — [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) |
+| Project workspaces + multi-user queue | In progress | projects with an owner, the `/api/projects` API and mandatory login are in; home page, `/p/{id}`, image claiming and attribution in the UI are next — [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) |
 
 ## Repository layout
 
@@ -426,12 +426,13 @@ docker compose up -d db
 
 # 2. inference sidecar -- needs torch + ultralytics
 pip install -r backend/inference/requirements.txt
+# Both processes confine paths to this root, so they have to agree on it.
+export LABEL_TOOL_VM_ROOT=$PWD/data     # wherever your datasets are
 uvicorn backend.inference.service:app --port 8001 --reload
 
 # 3. API -- signing in is mandatory, and there is no "browse the whole disk"
 #    mode any more, so a dev run needs a credential and a root it can reach.
 export DATABASE_URL=postgresql://labeltool:<password>@localhost:5433/labeltool
-export LABEL_TOOL_VM_ROOT=$PWD/../data   # wherever your datasets are
 export LABEL_TOOL_SECRET=dev
 export LABEL_TOOL_USERS="$(cd backend && go run ./cmd/api -hash-password dev 'dev')"
 cd backend && go run ./cmd/api      # :8000, VPE_URL defaults to 127.0.0.1:8001

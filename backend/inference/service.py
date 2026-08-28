@@ -38,20 +38,24 @@ from .vpe import armed, extract_embedding, model_lock, predict_one
 
 app = FastAPI(title="CT-Flow VPE", version="1.0.0")
 
-# Same two variables the API service reads, so a vm-mode deployment confines
-# both processes to the same root. Duplicated rather than imported because
-# backend/config.py belongs to the API service and goes away with it.
-MODE = os.getenv("LABEL_TOOL_MODE", "local").lower()
+# The same root the API service confines to, so both processes agree on what is
+# reachable. Duplicated rather than imported because backend/config.py belongs to
+# the API service and goes away with it.
+#
+# LABEL_TOOL_MODE is gone with T-27: it had a "local" value that switched this
+# check off entirely, and it defaulted to it, so the sidecar was unconfined
+# anywhere the variable was not set. The API service's gate is unconditional now
+# and this one has to match, or the confinement is only as strong as whichever
+# process a path happens to reach first.
 VM_DATA_ROOT = Path(os.getenv("LABEL_TOOL_VM_ROOT", "/opt/mount/project"))
 
 
 def checked(path: str) -> Path:
     p = Path(path)
-    if MODE == "vm":
-        try:
-            p.resolve().relative_to(VM_DATA_ROOT.resolve())
-        except ValueError:
-            raise HTTPException(403, f"path outside {VM_DATA_ROOT} (vm mode)")
+    try:
+        p.resolve().relative_to(VM_DATA_ROOT.resolve())
+    except ValueError:
+        raise HTTPException(403, f"path outside {VM_DATA_ROOT}")
     return p
 
 

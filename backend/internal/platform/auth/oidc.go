@@ -29,7 +29,7 @@ type OIDC struct {
 	// EndSession is the provider's RP-initiated logout endpoint, "" when the
 	// discovery document has none. Without it "sign out" only clears the
 	// CT-Flow cookie, and on the shared labelling machine this tool is
-	// deployed on (LABEL_TOOL_MODE=vm) the next click on "sign in" walks
+	// deployed on, the next click on "sign in" walks
 	// straight back in as the same person with no prompt.
 	EndSession string
 

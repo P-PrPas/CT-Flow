@@ -446,8 +446,16 @@ assert all("labeled_by" in i for insts in meta["instances"].values() for i in in
 listed = c.get("/api/projects").json()["projects"]
 mine = next(p for p in listed if p["input_dir"] == POOL)
 assert mine["id"] == PROJECT_ID, mine
-assert mine["labeled"] >= 1 and mine["auto"] >= 1, mine
 assert mine["owner"]["oid"] == SMOKE_USER, mine
+# Compared against the session's own lists rather than a fixed number: both
+# read images.status, so this checks the card agrees with the workspace --
+# including the kind='pool' filter, which is where a miscount would come from.
+# A fixed ">= 1 auto" would instead be asserting that YOLOE detects something
+# in these fixtures, which it does not and was never meant to.
+state = c.post("/api/session", json={"input_dir": POOL}).json()["bank"]
+assert mine["labeled"] == len(state["labeled"]), (mine, state["labeled"])
+assert mine["auto"] == len(state["auto"]), (mine, state["auto"])
+assert mine["labeled"] >= 1, "the run hand-labeled at least one image"
 # A local login has no users row, so the stored subject is the best name there
 # is -- an unreadable contributor still beats a missing one.
 assert [m["oid"] for m in mine["contributors"]] == [SMOKE_USER], mine["contributors"]
@@ -457,7 +465,8 @@ r = c.patch(f"/api/projects/{PROJECT_ID}", json={"name": "Renamed by smoke"})
 assert r.status_code == 200 and r.json()["project"]["name"] == "Renamed by smoke", r.text
 assert r.json()["project"]["owner"]["oid"] == SMOKE_USER, "a rename must not clear the owner"
 assert c.patch(f"/api/projects/{PROJECT_ID}", json={}).status_code == 400
-print("projects:", len(listed), "listed ·", mine["labeled"], "labeled /", mine["auto"], "auto")
+print("projects:", len(listed), "listed ·", mine["labeled"], "labeled /", mine["auto"],
+      "auto · agrees with the session")
 
 # --- §7: effort metrics outlive the browser tab ---
 for e in [{"kind": "session", "session": "s1"},

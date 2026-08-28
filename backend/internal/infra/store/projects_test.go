@@ -165,6 +165,29 @@ func TestDeleteProjectByIDRemovesOnlyTheRows(t *testing.T) {
 	}
 }
 
+// Claiming fills an empty owner and never replaces one. The endpoint has no
+// field for naming someone else, so if this ever regresses, "claim" quietly
+// becomes "take" and one PATCH hands anyone someone else's work.
+func TestClaimingCannotTakeAnOwnedProject(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	dir := fmt.Sprintf("/tmp/gostore-test/%s-dir", t.Name())
+	t.Cleanup(func() { _ = s.DeleteProject(context.Background(), dir) })
+
+	p, _, err := s.EnsureProject(ctx, dir, "Alice's work", "sub-alice", TaskDetection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob := "sub-bob"
+	got, found, err := s.UpdateProject(ctx, p.ID, nil, &bob)
+	if err != nil || !found {
+		t.Fatalf("UpdateProject: found=%v err=%v", found, err)
+	}
+	if got.Owner == nil || got.Owner.OID != "sub-alice" {
+		t.Errorf("owner = %+v after bob claimed it, want sub-alice", got.Owner)
+	}
+}
+
 // Renaming must not clear an owner, and claiming must not rename -- the two
 // fields travel in the same request and COALESCE is what keeps them independent.
 func TestUpdateProjectLeavesOmittedFieldsAlone(t *testing.T) {

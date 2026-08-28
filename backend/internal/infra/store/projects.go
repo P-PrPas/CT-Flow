@@ -212,12 +212,19 @@ func (s *Store) oneProject(ctx context.Context, where string, arg any) (Project,
 	return p, found, nil
 }
 
-// UpdateProject renames a project and/or hands it an owner.
+// UpdateProject renames a project and/or hands an unowned one an owner.
 //
 // input_dir and task_type are deliberately not updatable: pointing a project at
 // a different folder is a different project, and changing its type would orphan
-// every label under it. COALESCE keeps an omitted field as it was, so a rename
-// cannot silently clear an owner.
+// every label under it.
+//
+// The two COALESCEs read in opposite directions on purpose. name takes the new
+// value when one is given, so a rename works; owner_oid takes the *existing*
+// one first, so ownerOID can only fill a NULL. Claiming is for a project nobody
+// has claimed -- the other order would let anyone hand themselves someone
+// else's work with one PATCH, which is a permission question Phase 2 does not
+// answer (docs/PHASE2_WORKSPACE.md #2, decision 1). Either way an omitted field
+// stays as it was, so a rename cannot clear an owner.
 func (s *Store) UpdateProject(ctx context.Context, id int64, name, ownerOID *string) (Project, bool, error) {
 	var p Project
 	found := false
@@ -226,7 +233,7 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, name, ownerOID *str
 		err := q.QueryRow(ctx, `
 			UPDATE projects
 			   SET name = COALESCE($2, name),
-			       owner_oid = COALESCE($3, owner_oid),
+			       owner_oid = COALESCE(owner_oid, $3),
 			       updated_at = now()
 			 WHERE id = $1
 			 RETURNING id, input_dir, name, owner_oid, task_type, created_at, updated_at`,

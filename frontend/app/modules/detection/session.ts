@@ -63,6 +63,24 @@ function useBoxStack(limit = 40) {
   };
 }
 
+/** Polling hands back a fresh object every time, whether or not anything
+ *  changed -- and to React a new reference *is* a change. Every useMemo and
+ *  useEffect keyed off that state then re-runs, which is how a 15-second poll
+ *  becomes a request per render: claims -> heldByOthers -> nextTodo -> the
+ *  claim effect -> POST /api/claim -> claims again, as fast as the round trip
+ *  allows. Keeping the old reference when the content matches is what breaks
+ *  the cycle, so these two compare before they set.
+ *
+ *  Order-sensitive on purpose, because both lists arrive ordered: images by
+ *  `ORDER BY path`, test-set stems sorted by the handler. */
+const sameList = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
+const sameClaims = (a: Record<string, string>, b: Record<string, string>) => {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+};
+
 /** Sum of absolute differences between two 8x8 thumbnails (FR-18). */
 const distance = (a: number[], b: number[]) =>
   a.length && a.length === b.length
@@ -425,9 +443,12 @@ export function useSession(inputDir: string, me: string) {
       api.getState(inputDir)
         .then((st) => {
           if (cancelled) return;
-          setClaims(st.claims);
-          setBank((cur) => (cur ? { ...cur, labeled: st.labeled, auto: st.auto } : cur));
-          setTsLabeled(st.testset_labeled);
+          setClaims((cur) => (sameClaims(cur, st.claims) ? cur : st.claims));
+          setBank((cur) =>
+            !cur || (sameList(cur.labeled, st.labeled) && sameList(cur.auto, st.auto))
+              ? cur
+              : { ...cur, labeled: st.labeled, auto: st.auto });
+          setTsLabeled((cur) => (sameList(cur, st.testset_labeled) ? cur : st.testset_labeled));
         })
         .catch(() => { /* stale numbers, not an error */ });
     };
@@ -452,7 +473,11 @@ export function useSession(inputDir: string, me: string) {
     let cancelled = false;
     const take = () =>
       api.claimImage(inputDir, current)
-        .then((d) => { if (!cancelled) { setClaims(d.claims); setClaimNote(""); } })
+        .then((d) => {
+          if (cancelled) return;
+          setClaims((cur) => (sameClaims(cur, d.claims) ? cur : d.claims));
+          setClaimNote("");
+        })
         .catch((e: Error) => {
           if (cancelled) return;
           setClaimNote(e.message);

@@ -114,11 +114,13 @@ assert default_entry["available"] is True, default_entry  # CI/dev always has th
 # --- FR-43 / FR-47: writing needs a project, and it has an owner ----------
 # Before Phase 2 any endpoint could conjure a project row out of an input_dir,
 # which left nameless, ownerless rows behind whenever anyone typo'd a path.
+# Asserted through /api/testset/import, which is the shortest path from a
+# request to a write: it reaches store.MarkTest without going through the
+# inference sidecar first. /api/label would answer 400 "cannot read image"
+# before the store is ever consulted, because the sidecar reads the image to
+# extract an embedding -- a real refusal, just not this one.
 NO_PROJECT = str(HERE / "fixtures" / "pool") + "-not-a-project"
-r = c.post("/api/label", json={
-    "input_dir": NO_PROJECT, "image": "nope.jpg",
-    "boxes": [{"cls": "test_item", "box": [1, 1, 2, 2]}],
-})
+r = c.post("/api/testset/import", json={"input_dir": NO_PROJECT, "images": []})
 assert r.status_code == 404, (r.status_code, r.text)
 assert r.json()["detail"] == "no project for this folder -- create it first", r.json()
 
@@ -572,11 +574,10 @@ assert Path(POOL).is_dir() and len(list(Path(POOL).glob("*.jpg"))) > 0, "delete 
 assert (OUT / "_bank" / "metadata.json").exists(), "delete removed the prompt bank"
 assert c.get(f"/api/projects/{PROJECT_ID}").status_code == 404
 assert c.delete(f"/api/projects/{PROJECT_ID}").status_code == 404
-# And with the project gone, writing to the folder is refused again.
-assert c.post("/api/label", json={
-    "input_dir": POOL, "image": images[0],
-    "boxes": [{"cls": "test_item", "box": [1, 1, 2, 2]}],
-}).status_code == 404
+# And with the project gone, writing to the folder is refused again. Same
+# endpoint as the check at the top, and for the same reason.
+assert c.post("/api/testset/import",
+              json={"input_dir": POOL, "images": []}).status_code == 404
 print("projects: deleted, dataset and prompt bank untouched")
 
 # Teardown must not be able to fail the run. The prompt bank is written by the

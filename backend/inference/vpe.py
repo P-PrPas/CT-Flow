@@ -139,7 +139,7 @@ def predict_one(model: YOLOE, names: list[str], image_path: str,
     conf_by_class overrides `conf` for the classes it names (FR-33). Classes in
     one dataset do not share a good threshold: on conveyor_pvc, `defect` peaks
     at 0.05 and scores exactly zero at 0.25, while `good_part` wants 0.25 --
-    see docs/EXPERIMENT_T01_CONF.md. One global number has to sacrifice one of
+    see docs/history/EXPERIMENT_T01_CONF.md. One global number has to sacrifice one of
     them.
 
     Runs inference at the lowest threshold in play and filters afterwards.

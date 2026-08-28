@@ -1,4 +1,6 @@
-# Label Tool — API Reference
+# CT-Flow — API Reference
+
+> **Phase 2 จะเพิ่ม `/api/projects*`, `GET /api/state`, `POST /api/claim` และตัดฟิลด์ `mode` ออกจาก `GET /api/config`** — สัญญาของ endpoint ใหม่อยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 4 และจะย้ายมาที่นี่เมื่อ merge แล้ว เอกสารนี้อธิบายสิ่งที่มีอยู่จริงตอนนี้เท่านั้น
 
 เอกสารนี้อ้างอิงจากโค้ดจริงใน `internal/transport/httpapi/*.go` ณ commit ปัจจุบัน ทุก endpoint อยู่ภายใต้ base path `/api` (ยกเว้น testset ที่อยู่ใต้ `/api/testset`) และถูกเรียกผ่าน Next.js proxy (`app/api/[...path]/route.ts`) เสมอ ไม่ใช่ตรงจาก browser
 
@@ -12,7 +14,7 @@
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
 - **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
 - **Auth:** ถ้าตั้ง OIDC (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ENDPOINT`, `FRONTEND_URL`) หรือ `LABEL_TOOL_USERS` ทุก endpoint **ยกเว้น** config/login routes ต้องมี `labeltool_session` cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ถ้าไม่ตั้งทั้งคู่ระบบเปิดเหมือนเดิม · OIDC มี priority เหนือ local fallback
-- **`conf_by_class`:** `/api/predict`, `/api/evaluate`, `/api/autolabel` รับ dict `{ชื่อคลาส: threshold}` เพื่อ override `conf` เป็นรายคลาส (`{}` = พฤติกรรมเดิม) — เหตุผลและตัวเลขอยู่ใน [EXPERIMENT_T01_CONF.md](./EXPERIMENT_T01_CONF.md)
+- **`conf_by_class`:** `/api/predict`, `/api/evaluate`, `/api/autolabel` รับ dict `{ชื่อคลาส: threshold}` เพื่อ override `conf` เป็นรายคลาส (`{}` = พฤติกรรมเดิม) — เหตุผลและตัวเลขอยู่ใน [EXPERIMENT_T01_CONF.md](./history/EXPERIMENT_T01_CONF.md)
 
 ---
 

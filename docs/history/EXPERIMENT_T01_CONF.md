@@ -4,7 +4,7 @@
 
 
 > **คำถามที่ทดลองเพื่อตอบ:** สัญญาณของคลาส `defect` "ไม่มี" จริง หรือ "มีแต่จมอยู่ใต้ threshold"
-> เอกสารอ้างอิง: [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md) — FR-33 / T-01 (เงื่อนไขก่อนเริ่ม T-08)
+> เอกสารอ้างอิง: [REQUIREMENTS.md](../REQUIREMENTS.md) — FR-33 / T-01 (เงื่อนไขก่อนเริ่ม T-08)
 >
 > **วิธีรันซ้ำ:** `label_tool/` → `.venv\Scripts\python.exe -m backend._experiment_conf 20`
 > (arg ที่ 2 เป็นต้นไปคือค่า conf ที่อยากลอง เช่น `... 20 0.03 0.05 0.07`)

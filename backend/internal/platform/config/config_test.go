@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// The cases from docs/REFACTOR_PLAN.md section 4.2. Every one of these is a way
+// The cases from docs/history/REFACTOR_PLAN.md section 4.2. Every one of these is a way
 // a naive port of config.path_allowed() lets a request out of the root, and the
 // browser picks the string, so each is reachable by anyone who can load the UI.
 func TestPathAllowedVMMode(t *testing.T) {

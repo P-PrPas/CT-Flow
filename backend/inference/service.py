@@ -1,6 +1,6 @@
 """The inference sidecar: everything that needs torch, and nothing else.
 
-This is the half of the backend that stays Python (docs/REFACTOR_PLAN.md).
+This is the half of the backend that stays Python (docs/history/REFACTOR_PLAN.md).
 YOLOE's SAVPE head has no Go equivalent and will not get one, and the prompt
 bank is a torch.save of per-class tensor lists, so the bank and the model
 cannot live on opposite sides of the port -- Bank.lock_model()/reembed() commit

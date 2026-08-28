@@ -1,6 +1,6 @@
-# Label Tool — ภาพรวมผลิตภัณฑ์
+# CT-Flow — ภาพรวมผลิตภัณฑ์
 
-**Label Tool คือเครื่องมือ label ภาพแบบ human-in-the-loop ที่สร้างชุด "prompt bank" (SAVPE embedding) ให้โมเดล YOLOE ทีละคลาส แทนที่จะ label ภาพทั้งหมดด้วยมือ**
+**CT-Flow คือเครื่องมือ label ภาพแบบ human-in-the-loop ที่สร้างชุด "prompt bank" (SAVPE embedding) ให้โมเดล YOLOE ทีละคลาส แทนที่จะ label ภาพทั้งหมดด้วยมือ**
 
 ## เครื่องมือนี้ทำอะไรได้แล้วบ้าง (ทำงานจบ end-to-end)
 
@@ -15,7 +15,7 @@
 9. เมื่อ F1 เป็นที่พอใจ ผู้ใช้กด **Auto-label remaining** เพื่อให้โมเดลเขียน label ให้ภาพที่เหลือทั้งหมดในพูลจาก bank ปัจจุบัน โดยระบบจะแยกบันทึกว่าภาพไหน label ด้วยมือ (`labeled`) และภาพไหน label โดยโมเดล (`auto`)
 10. ภาพที่ auto-label แล้วสามารถเปิดใน **review mode** เพื่อแก้กล่องที่โมเดลทำนายผิด (ผ่าน `/api/relabel`) — การแก้ไขนี้ไม่สร้าง embedding ใหม่เข้า bank เพราะถือเป็นการแก้ ไม่ใช่การสอนคลาสใหม่
 
-เครื่องมือนี้ **ไม่มีแนวคิด "workspace" หรือโฟลเดอร์ผลลัพธ์แยก** — โฟลเดอร์ภาพ (`input_dir`) *คือ* ตัวโปรเจกต์เอง สิ่งที่ระบบเขียนแบ่งเป็นสองที่: prompt bank อยู่ใต้ subfolder ซ่อน `.ctflow/` ของโฟลเดอร์นั้นเอง ส่วนป้าย/กล่อง/สถานะ label อยู่ใน PostgreSQL (T-21, ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md)) คีย์ด้วย `input_dir` เดียวกัน:
+**โฟลเดอร์ภาพ (`input_dir`) *คือ* ตัวโปรเจกต์** ไม่มีโฟลเดอร์ผลลัพธ์แยก สิ่งที่ระบบเขียนแบ่งเป็นสองที่: prompt bank อยู่ใต้ subfolder ซ่อน `.ctflow/` ของโฟลเดอร์นั้นเอง ส่วนป้าย/กล่อง/สถานะ label อยู่ใน PostgreSQL (T-21, ดู [DB_MIGRATION_PLAN.md](./history/DB_MIGRATION_PLAN.md)) คีย์ด้วย `input_dir` เดียวกัน:
 
 ```
 <input_dir>/
@@ -36,10 +36,10 @@ PostgreSQL (internal/infra/store):
 
 - **Bank ใช้ mean-pooling ต่อคลาส ไม่ใช่ NN-matching ต่อ instance.** เอกสารออกแบบเดิม (`../docs/yoloe-auto-label-tool-design.md`) ตั้งใจให้ bank แยกแยะ variation ภายในคลาสเดียวกันด้วยการ match แบบ nearest-neighbor แต่ implementation จริงเฉลี่ย embedding ทุกตัวในคลาสให้เหลือตัวแทนเดียว (`inference/bank.py`, `mean_vpe()`) — เพียงพอสำหรับคลาสที่รูปลักษณ์ค่อนข้างสม่ำเสมอ แต่จะเริ่มด้อยลงถ้าคลาสมีความหลากหลายสูง (multi-modal)
 - **ไม่มี active-learning selector จริง** สิ่งที่ใกล้เคียงที่สุดคือการเรียงภาพในพูลจาก "confidence ต่ำสุดก่อน" บนหน้า UI ซึ่งเป็นการประมาณ ไม่ใช่ตัวเลือกภาพเชิงกลยุทธ์ตามที่เอกสารออกแบบเดิมตั้งใจ
-- **มี OIDC authentication แบบเดียวกับ `corpus-core` ครบทั้ง backend/frontend** พร้อม login, callback, HttpOnly session, logout และ local username/password fallback
-- **ไม่มีปุ่มอัปโหลดไฟล์** การนำภาพเข้าโฟลเดอร์ `/opt/mount/project` เป็นเรื่อง filesystem หรือ network share ที่อยู่นอกขอบเขตของแอป (ออกแบบมาให้รันบนเซิร์ฟเวอร์ที่แชร์ ไม่ใช่เครื่องส่วนตัว)
+- **ไม่มีหน้ารวมโปรเจกต์** — path ของโฟลเดอร์ถูกจำไว้ใน `localStorage` ของ browser คนที่เปิด ไม่มีที่ไหนตอบได้ว่าในระบบมีงานอะไร ใครเป็นเจ้าของ ไปถึงไหน · **สองคนที่เปิดโฟลเดอร์เดียวกันจะถูกเสนอภาพเดียวกัน** เพราะคิวเรียงเหมือนกันทุกคนและไม่มีการ refresh ระหว่างกัน → กำลังแก้ใน [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
+- **ไม่มีปุ่มอัปโหลดไฟล์** — backend (`POST /api/upload`) เสร็จและทดสอบแล้ว แต่ยังไม่มี dropzone และยังไม่มีคำตอบว่าไฟล์ที่อัปโหลดควรไปลงโฟลเดอร์ไหน วันนี้การนำภาพเข้าจึงเป็นเรื่อง filesystem หรือ network share ที่อยู่นอกขอบเขตของแอป
 - **การ retrain closed-set detector จากป้ายที่สะสมได้ยังไม่ implement** เป็นเป้าหมายระยะยาวตามเอกสารออกแบบเดิม (เมื่อมีข้อมูล label สะสมมากพอ) แต่ยังไม่มีส่วนใดของโค้ดที่ทำสิ่งนี้
-- **ระบบ OIDC login/workspace เต็มรูปแบบยังไม่มี** — local session auth ฝั่ง backend พร้อมแล้ว แต่ยังไม่มี UI และการเชื่อมกับ Identity Provider; งานนี้อยู่ใน milestone ถัดไป ส่วนการย้าย label/box storage ไป PostgreSQL (T-21) และ export หลาย format ทำเสร็จแล้ว ดู [NEXT_STEPS.md](./NEXT_STEPS.md)
+- **รองรับงาน object detection ชนิดเดียว** — ถ้าจะให้ CT-Flow เป็นศูนย์กลางการ label ของทั้งองค์กร โมดูลแบบอื่น (เช่น license-plate recognition) ต้องมีที่ให้อยู่ · Phase 2 วางโครงนั้นไว้ (`projects.task_type` + การผ่าโฟลเดอร์โมดูล) **แต่ยังไม่มีการออกแบบโมดูลที่สอง**
 
 ## Use case หลัก
 
@@ -52,6 +52,6 @@ PostgreSQL (internal/infra/store):
 
 ## ข้อจำกัดที่ควรรู้ตอนนี้
 
-- annotation และ box metadata ใน PostgreSQL รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันได้แล้ว แต่ prompt bank ยังใช้ file lock (`filelock`) และยังไม่มี user/workspace authorization แยกต่อ project
+- annotation และ box metadata ใน PostgreSQL รองรับหลายคนแก้ project (`input_dir`) เดียวกันพร้อมกันได้แล้วในระดับ **storage** — แต่ยังไม่ได้แก้ปัญหา **"หยิบงานชิ้นเดียวกัน"** ซึ่งเป็นคนละเรื่อง (Phase 2, FR-49) · prompt bank ยังใช้ file lock (`filelock`) และยังไม่มี authorization แยกต่อ project (ตั้งใจ — ทีมภายในที่ไว้ใจกัน)
 - ลำดับคลาสเป็น **append-only** ทั้งใน prompt bank และ PostgreSQL ห้ามลบหรือเรียงลำดับใหม่ เพราะ label ที่มีอยู่แล้วอ้างอิงคลาสด้วย index
-- คลาสที่มีลักษณะเล็กและปะปนกับพื้นหลัง (เช่น defect เล็ก ๆ บนชิ้นงาน) ยังเป็นจุดอ่อนของ SAVPE ที่ความละเอียด 640px — วัดได้จริงจากชุดข้อมูล `conveyor_pvc`: F1 ของคลาส `defect` อยู่ที่ราว 0.04–0.07 แทบไม่ขยับแม้เพิ่มจำนวน prompt ในขณะที่ `good_part` ทำได้ถึง F1 ~0.78–0.80 จากแค่ 1–20 prompt (ดูรายละเอียดใน [PROJECT_STATUS.md](./PROJECT_STATUS.md))
+- คลาสที่มีลักษณะเล็กและปะปนกับพื้นหลัง (เช่น defect เล็ก ๆ บนชิ้นงาน) ยังเป็นจุดอ่อนของ SAVPE ที่ความละเอียด 640px — วัดได้จริงจากชุดข้อมูล `conveyor_pvc`: F1 ของคลาส `defect` อยู่ที่ราว 0.04–0.07 แทบไม่ขยับแม้เพิ่มจำนวน prompt ในขณะที่ `good_part` ทำได้ถึง F1 ~0.78–0.80 จากแค่ 1–20 prompt (ดูรายละเอียดใน [history/EXPERIMENT_T01_CONF.md](./history/EXPERIMENT_T01_CONF.md))

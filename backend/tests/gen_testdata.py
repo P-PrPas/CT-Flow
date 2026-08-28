@@ -1,7 +1,7 @@
 """The cross-language golden vectors in backend/testdata/.
 
 These files were how the Go port was held to Python's behaviour
-(docs/REFACTOR_PLAN.md phase 0): Python produced them, and Go's unit tests
+(docs/history/REFACTOR_PLAN.md phase 0): Python produced them, and Go's unit tests
 reproduce them exactly. That is the only practical way to check a pure function
 -- a pbkdf2 hash, an F1 score, a COCO document -- across two languages without
 standing both implementations up and diffing over HTTP.

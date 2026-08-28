@@ -1,6 +1,6 @@
 -- T-21: label/box storage. Everything the prompt bank itself needs
 -- (embeddings.pt, metadata.json's instances/model) stays file-based --
--- see docs/DB_MIGRATION_PLAN.md for why the split. This is only the part
+-- see docs/history/DB_MIGRATION_PLAN.md for why the split. This is only the part
 -- that used to be labels/*.txt + classes.txt + testset.json.
 --
 -- ponytail: no migration framework (Alembic etc) -- this schema is small
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 -- Append-only, stable idx -- the DB-native replacement for classes.txt's
 -- "line N = index N, never reordered". pool and testset are separate index
--- spaces (see docs/DB_MIGRATION_PLAN.md #2), hence `kind`.
+-- spaces (see docs/history/DB_MIGRATION_PLAN.md #2), hence `kind`.
 CREATE TABLE IF NOT EXISTS classes (
     id          BIGSERIAL PRIMARY KEY,
     project_id  BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

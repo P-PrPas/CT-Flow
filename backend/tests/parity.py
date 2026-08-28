@@ -1,7 +1,7 @@
 """Diff two running backends endpoint by endpoint.
 
 The smoke test answers "does this backend work". This answers the question that
-actually matters during the strangler phase (docs/REFACTOR_PLAN.md phase 2):
+actually matters during the strangler phase (docs/history/REFACTOR_PLAN.md phase 2):
 "does the Go one answer *identically* to the Python one". A port can satisfy
 every assertion in the smoke test and still round a float differently, order a
 list differently, or drop a field the UI reads.

@@ -1,10 +1,10 @@
 # CT-Flow — แผน Refactor Backend จาก Python เป็น Go
 
-> **สถานะ: ✅ เสร็จและ merge เข้า `main` แล้ว (2026-08-24)** — merge commit `40b0c7f` จาก PR #2 · ดูบันทึกความคืบหน้าจริงที่หัวข้อ 10 · เอกสารนี้เป็นบันทึกของ refactor ที่เสร็จแล้ว งานถัดไปอยู่ใน [NEXT_STEPS.md](./NEXT_STEPS.md)
+> **สถานะ: ✅ เสร็จและ merge เข้า `main` แล้ว (2026-08-24)** — merge commit `40b0c7f` จาก PR #2 · ดูบันทึกความคืบหน้าจริงที่หัวข้อ 10 · เอกสารนี้เป็นบันทึกของ refactor ที่เสร็จแล้ว งานถัดไปอยู่ใน [ROADMAP.md](../ROADMAP.md)
 >
 > **ที่มา:** ระบบ login ของบริษัทเป็น Go — backend ตัวนี้ต้องปรับตามเพื่อให้ integrate กันได้ ไม่ใช่เพราะ Python มีปัญหาด้าน performance **หลักการที่ตามมาจากเหตุผลนี้: ส่วนไหนคงเป็น Python service ได้ ให้คงไว้ ไม่ต้องฝืน**
 >
-> **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) (แผนก่อนหน้าที่ใช้เป็นแม่แบบของเอกสารนี้) · [PROJECT_STATUS.md](./PROJECT_STATUS.md)
+> **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](../ARCHITECTURE.md) · [API_REFERENCE.md](../API_REFERENCE.md) · [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) (แผนก่อนหน้าที่ใช้เป็นแม่แบบของเอกสารนี้) · [ROADMAP.md](../ROADMAP.md)
 
 ---
 
@@ -526,7 +526,7 @@ CT-Flow/
 
 1. Job tracker ยังอยู่ใน memory ไม่มี TTL ไม่ persist (`internal/platform/jobs`)
 2. VRAM ไม่มี eviction — โมเดลที่โหลดแล้วอยู่ยาวจนจบ process (`inference/vpe.py`)
-3. ยังไม่มีหน้า login บน UI — งานถัดไปจะออกแบบเป็น OIDC Login System ตาม [NEXT_STEPS.md](./NEXT_STEPS.md)
+3. ยังไม่มีหน้า login บน UI — งานถัดไปจะออกแบบเป็น OIDC Login System ตาม [ROADMAP.md](../ROADMAP.md)
 
 ---
 

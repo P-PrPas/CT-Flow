@@ -7,7 +7,7 @@
 >
 > **ที่มา:** งานแทรกที่ตกลงกับทีม (2026-08-21) แรงจูงใจหลักคือ (1) ต้องการรองรับหลายคนแก้ project เดียวกันพร้อมกัน โดยมีแผนทำระบบ login + workspace ในอนาคตแบบ Label Studio และ (2) ทีม infra อยากวาง DB เป็นรากฐานสำหรับอนาคต ส่วน scope ที่ตกลงกันคือ **ย้ายเฉพาะ label/box metadata (สิ่งที่ตอนนี้เป็น YOLO txt) ไปเป็นตาราง — `embeddings.pt` (prompt bank) ยังเป็นไฟล์เหมือนเดิม**
 >
-> **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [REQUIREMENTS_STAKEHOLDER_ANALYSIS.md](./REQUIREMENTS_STAKEHOLDER_ANALYSIS.md) · [NEXT_STEPS.md](./NEXT_STEPS.md)
+> **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](../ARCHITECTURE.md) · [API_REFERENCE.md](../API_REFERENCE.md) · [REQUIREMENTS.md](../REQUIREMENTS.md) · [ROADMAP.md](../ROADMAP.md)
 
 ---
 

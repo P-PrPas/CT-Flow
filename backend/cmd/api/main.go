@@ -2,7 +2,7 @@
 //
 // Inference and the prompt bank are not here. They live in the Python sidecar
 // (backend/inference/service.py) behind VPE_URL, because YOLOE's SAVPE head has no Go
-// equivalent and the bank is a torch.save -- see docs/REFACTOR_PLAN.md.
+// equivalent and the bank is a torch.save -- see docs/history/REFACTOR_PLAN.md.
 //
 // The strangler proxy this started as is gone; it existed only to keep the
 // application working while routes moved across one group at a time.

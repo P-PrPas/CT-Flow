@@ -2,7 +2,7 @@
 
 Deliberately does NOT import the FastAPI annotations_db module: the smoke test has to
 keep working after that module is ported to Go and deleted (see
-docs/REFACTOR_PLAN.md phase 3). Duplicating five SELECTs here is what lets the
+docs/history/REFACTOR_PLAN.md phase 3). Duplicating five SELECTs here is what lets the
 harness outlive the implementation it checks -- a test that imports the code
 under test can only ever verify Python.
 

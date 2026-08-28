@@ -9,7 +9,7 @@
 //	         your datasets have to live there (a mounted share, usually).
 //
 // Set with the LABEL_TOOL_MODE env var. Ported from backend/config.py and
-// backend/deps.py -- see docs/REFACTOR_PLAN.md.
+// backend/deps.py -- see docs/history/REFACTOR_PLAN.md.
 package config
 
 import (

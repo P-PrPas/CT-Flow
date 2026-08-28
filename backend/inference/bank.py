@@ -7,7 +7,7 @@ the output dir IS the project:
 
 Labels, classes.txt and the labeled/auto status that used to live here moved
 to PostgreSQL (T-21/T-22) -- see the FastAPI annotations_db module and
-docs/DB_MIGRATION_PLAN.md. Only the prompt bank itself -- embeddings and
+docs/history/DB_MIGRATION_PLAN.md. Only the prompt bank itself -- embeddings and
 their provenance -- is still a file; there's no pain point DB storage would
 fix there, and torch tensors don't belong in a relational column.
 
@@ -167,7 +167,7 @@ class Bank:
         it has been taught, and which checkpoint taught it.
 
         Split out from summary() because this is everything the inference
-        sidecar can know (docs/REFACTOR_PLAN.md) -- `labeled`/`auto` are image
+        sidecar can know (docs/history/REFACTOR_PLAN.md) -- `labeled`/`auto` are image
         status in PostgreSQL, which belongs to the API service, not to the
         process holding the embeddings. Keeping them apart is what lets the
         sidecar drop its database dependency entirely."""

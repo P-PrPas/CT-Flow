@@ -4,7 +4,7 @@ The catalog itself lives in backend/models.json, not in this file. Two
 processes need it and they are written in different languages: the Python
 inference sidecar resolves an id to a weight file to load, and the Go API
 serves the list to the frontend and reports which weights are already on disk
-(docs/REFACTOR_PLAN.md). A shared data file is the only arrangement where
+(docs/history/REFACTOR_PLAN.md). A shared data file is the only arrangement where
 adding a checkpoint is one edit instead of two that can disagree -- and a
 disagreement here is not a crash, it is `GET /api/config` advertising a model
 the sidecar cannot load.

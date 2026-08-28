@@ -1,11 +1,13 @@
-# Label Tool — สถาปัตยกรรมระบบ
+# CT-Flow — สถาปัตยกรรมระบบ
+
+> เอกสารนี้อธิบาย **สิ่งที่เป็นอยู่จริงตอนนี้** · สิ่งที่กำลังจะเปลี่ยนใน Phase 2 (workspace, routing, บังคับ login, ลบ `local` mode) อยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) และจะถูกรวมเข้าเอกสารนี้เมื่อ merge แล้ว
 
 ## Tech stack
 
 | ชั้น | เทคโนโลยี |
 |---|---|
 | Frontend | Next.js 15 (App Router) + React 19 + TypeScript — ไม่มี UI/state library เพิ่ม ใช้ `useState`/`useEffect` ล้วน และ CSS แบบ utility class ของตัวเอง (`globals.css`) |
-| Backend API | **Go** (`backend/cmd/api`, `backend/internal/*`) — stdlib `net/http` ล้วน ไม่มี framework · dependency หลักคือ `jackc/pgx/v5`, `coreos/go-oidc/v3`, `x/oauth2`, `x/crypto/pbkdf2`, `x/image/bmp` (ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)) |
+| Backend API | **Go** (`backend/cmd/api`, `backend/internal/*`) — stdlib `net/http` ล้วน ไม่มี framework · dependency หลักคือ `jackc/pgx/v5`, `coreos/go-oidc/v3`, `x/oauth2`, `x/crypto/pbkdf2`, `x/image/bmp` (ดู [REFACTOR_PLAN.md](./history/REFACTOR_PLAN.md)) |
 | Inference sidecar | **FastAPI (Python)** — `backend/inference/service.py` เหลือแค่ส่วนที่ต้องใช้ torch: YOLOE + prompt bank |
 | Model / Inference | Ultralytics **YOLOE** ผ่าน `YOLOEVPSegPredictor` (SAVPE) — **เลือก checkpoint ได้จากรายการที่กำหนดไว้ล่วงหน้า** (`inference/models.py`) ตั้งแต่ `yoloe-v8s-seg` เล็กสุด ถึง `yoloe-26x-seg` รุ่นล่าสุดและใหญ่สุด ไม่ hardcode ตัวเดียวอีกต่อไป |
 | ML runtime | PyTorch — build ด้วย CUDA (`cu126`) เป็นค่าเริ่มต้นใน Docker image, override เป็น CPU ได้ด้วย build arg |
@@ -62,7 +64,7 @@ Job ทั้งสี่ตัว (`score`, `evaluate`, `autolabel`, `reembed`)
 
 ## รูปแบบการจัดเก็บข้อมูล (storage format)
 
-**T-21 (2026-08-21):** label/box metadata ทั้งหมดย้ายจากไฟล์ YOLO txt ไปตาราง PostgreSQL แล้ว — เหตุผลและ scope เต็มอยู่ที่ [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md) แรงจูงใจหลักคือรองรับหลายคนแก้ project เดียวกันพร้อมกันจริง (row lock ระดับ transaction แทน `filelock` ทั้งไฟล์) เตรียมทางสำหรับ login + workspace แบบ Label Studio ในอนาคต
+**T-21 (2026-08-21):** label/box metadata ทั้งหมดย้ายจากไฟล์ YOLO txt ไปตาราง PostgreSQL แล้ว — เหตุผลและ scope เต็มอยู่ที่ [DB_MIGRATION_PLAN.md](./history/DB_MIGRATION_PLAN.md) แรงจูงใจหลักคือรองรับหลายคนแก้ project เดียวกันพร้อมกันจริง (row lock ระดับ transaction แทน `filelock` ทั้งไฟล์) เตรียมทางสำหรับ login + workspace แบบ Label Studio ในอนาคต
 
 - **ตาราง PostgreSQL (`backend/db/schema.sql`, `internal/infra/store`) — `schema.sql` เป็นไฟล์เดียวที่ Go อ่านตอน start (idempotent, ไม่มี migration step):**
   - `projects` — หนึ่งแถวต่อ `input_dir` หนึ่งโฟลเดอร์ (ยังไม่มีแนวคิด workspace/multi-tenant จริง แค่เตรียม `id` ไว้ให้ระบบ user/workspace ในอนาคตอ้างอิงได้)
@@ -120,4 +122,17 @@ Environment variables หลัก:
 - **ทุก container ไม่รันเป็น root** — `ARG APP_UID` + `USER app` ในทั้ง `backend/Dockerfile` และ `backend/inference/Dockerfile` (NFR-07) · **`api` กับ `vpe` ต้องใช้ UID เดียวกัน** เพราะเขียนลง `DATA_DIR` ทั้งคู่ (`api` เขียน uploads/history/events, `vpe` เขียน `_bank/`) ตั้ง `--build-arg APP_UID=$(id -u)` ให้ตรงกับเจ้าของ `DATA_DIR` บน Linux host มิฉะนั้นเขียนไฟล์ไม่ได้
 - ~~**Label storage เขียนชนกันได้ถ้าหลายคนแก้ project เดียวกันพร้อมกัน**~~ **แก้แล้ว (T-21)** — ย้ายไป PostgreSQL, row lock ระดับ transaction แทน `filelock` ทั้งไฟล์ (ดูหัวข้อ "รูปแบบการจัดเก็บข้อมูล" ด้านบน) — คอขวดที่เหลือคือ job tracker กับโมเดลใน VRAM สองข้อด้านบน ไม่ใช่ label storage อีกต่อไป
 
-**Bottom line:** ระบบนี้ออกแบบมาสำหรับผู้ใช้จำนวนน้อยต่อ instance เดียวบนเซิร์ฟเวอร์ภายใน ไม่ใช่สถาปัตยกรรมที่พร้อม scale แนวนอนหรือรองรับผู้ใช้พร้อมกันจำนวนมาก — **การ port ไป Go ไม่ได้เปลี่ยนข้อนี้ และไม่ได้ตั้งใจจะเปลี่ยน** สิ่งที่มันเปลี่ยนคือแยก torch ออกจาก API (image 12.3 GB → 35 MB) และทำให้ API เป็น process ที่ scale แยกได้ *ถ้า* job tracker ย้ายออกจาก memory ในอนาคต จุดคอขวดหลักยังคงเป็น job tracker และโมเดลที่ผูกกับหน่วยความจำของ process เดียว — ดูรายการข้อจำกัดเชิงปฏิบัติการเพิ่มเติมใน [PROJECT_STATUS.md](./PROJECT_STATUS.md)
+**Bottom line:** ระบบนี้ออกแบบมาสำหรับผู้ใช้จำนวนน้อยต่อ instance เดียวบนเซิร์ฟเวอร์ภายใน ไม่ใช่สถาปัตยกรรมที่พร้อม scale แนวนอนหรือรองรับผู้ใช้พร้อมกันจำนวนมาก — **การ port ไป Go ไม่ได้เปลี่ยนข้อนี้ และไม่ได้ตั้งใจจะเปลี่ยน** สิ่งที่มันเปลี่ยนคือแยก torch ออกจาก API (image 12.3 GB → 35 MB) และทำให้ API เป็น process ที่ scale แยกได้ *ถ้า* job tracker ย้ายออกจาก memory ในอนาคต จุดคอขวดหลักยังคงเป็น job tracker และโมเดลที่ผูกกับหน่วยความจำของ process เดียว — รายการข้อจำกัดที่ตั้งใจปล่อยไว้พร้อมเงื่อนไขที่จะทำให้ต้องแก้ อยู่ท้าย [ROADMAP.md](./ROADMAP.md)
+
+## สถานะที่ถูกแบ่งกันอยู่คนละที่ — กับดักที่ต้องรู้
+
+ตั้งแต่ T-21 state ของหนึ่งโปรเจกต์อยู่ **สองที่** และเครื่องมือล้างของสองที่นั้นเป็นคนละคำสั่งกัน:
+
+| อยู่ที่ไหน | ล้างด้วย | รอด `docker compose down -v` ไหม |
+|---|---|---|
+| กล่อง, คลาส, สถานะ labeled/auto, test set → PostgreSQL | `docker compose down -v` (volume `pgdata`) | **หาย** |
+| embedding, model lock, provenance, eval history, events → `<input_dir>/.ctflow/` | `rm -rf` (bind mount ของ `DATA_DIR`) | **รอด** |
+
+ล้างครึ่งเดียวแล้วจะได้สถานะที่ **bank จำได้ว่าเคยสอนอะไร แต่ DB จำไม่ได้ว่าสอนจากภาพไหน** — `Bank.classes` ยังมีคลาสครบตามลำดับเดิมใน `embeddings.pt` ในขณะที่ตาราง `classes` ว่างเปล่า พอ label ใหม่แล้วบังเอิญเริ่มด้วยคลาสอื่น `getOrCreateClass()` จะให้ `idx` ที่ไม่ตรงกับลำดับใน bank ซึ่งขัดกับ invariant ข้อ 2.3 ของ [history/DB_MIGRATION_PLAN.md](./history/DB_MIGRATION_PLAN.md)
+
+วันนี้ยังไม่พังจริงเพราะ prediction ส่งกลับมาเป็นชื่อคลาสไม่ใช่ index — แต่เป็น invariant ที่แตกอยู่โดยไม่มีใครเห็น **dev loop ประจำวันจึงควรใช้ `docker compose down` (ไม่มี `-v`) และเมื่อไหร่ที่ใช้ `-v` ต้องลบ `.ctflow/` ด้วยเสมอ** (FR-51 จะทำให้สถานะนี้มองเห็นได้ ดู [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 8)

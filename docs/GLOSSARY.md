@@ -36,16 +36,30 @@
 
 **Background job** การประมวลผลที่ใช้เวลานาน (score/evaluate/autolabel/reembed) ซึ่งรันเป็น goroutine โดย endpoint ที่สั่งงานคืน `job_id` ทันที ฝั่ง frontend ต้อง poll `GET /api/jobs/{id}` เองจนกว่าจะเสร็จ
 
-**`mode: local` vs `mode: vm`** ตั้งค่าผ่าน env `LABEL_TOOL_MODE` — `local` ยอมให้ browse ได้ทุก drive (ใช้ตอนรันบนเครื่องตัวเองนอก Docker), `vm` จำกัดการ browse ไว้แค่ใต้ `LABEL_TOOL_VM_ROOT` (ใช้เมื่อรันใน Docker บนเซิร์ฟเวอร์แชร์)
+**`mode: local` vs `mode: vm`** ตั้งค่าผ่าน env `LABEL_TOOL_MODE` — `local` ยอมให้ browse ได้ทุก drive (ใช้ตอนรันบนเครื่องตัวเองนอก Docker), `vm` จำกัดการ browse ไว้แค่ใต้ `LABEL_TOOL_VM_ROOT` (ใช้เมื่อรันใน Docker บนเซิร์ฟเวอร์แชร์) · **`local` จะถูกลบทิ้งใน Phase 2 (T-27)** เพราะไม่มีใครรันบนเครื่องตัวเองแล้ว เหลือ `vm` เป็นพฤติกรรมเดียว
 
 **`checkedPath()` / path safety** ตัวตรวจสอบกลางที่ทุก path จาก browser ต้องผ่านก่อนแตะดิสก์จริง ป้องกันไม่ให้ browser ขอเข้าถึงไฟล์นอกขอบเขตที่อนุญาต (โดยเฉพาะสำคัญใน `vm` mode) — resolve symlink แล้วเทียบเป็น path component ไม่ใช่ prefix ของ string
 
 **`ponytail:`** convention คอมเมนต์ที่พบในโค้ดของ repo นี้ — ใช้ทำเครื่องหมายจุดที่ตั้งใจเลือกวิธีง่ายที่สุดที่ยังใช้งานได้ พร้อมระบุขีดจำกัดและแนวทางอัพเกรดถ้าจำเป็นในอนาคต (เช่นใน `bank.py`'s mean-pooling และ `internal/platform/jobs`'s in-memory storage)
 
-**Inference sidecar (`vpe`)** service Python ที่เหลืออยู่หลัง port backend เป็น Go — ถือ YOLOE, torch และ prompt bank ไว้ทั้งหมด (`backend/inference/service.py`) API service ที่เป็น Go คุยกับมันผ่าน HTTP (JSON สำหรับงานสั้น, NDJSON สำหรับ inference pass ยาว ๆ เพื่อรายงาน progress ทีละภาพ) เหตุผลที่แยกไม่ได้: SAVPE head ไม่มีของเทียบเท่าใน Go และ `embeddings.pt` เป็น `torch.save` ดู [REFACTOR_PLAN.md](./REFACTOR_PLAN.md)
+**Inference sidecar (`vpe`)** service Python ที่เหลืออยู่หลัง port backend เป็น Go — ถือ YOLOE, torch และ prompt bank ไว้ทั้งหมด (`backend/inference/service.py`) API service ที่เป็น Go คุยกับมันผ่าน HTTP (JSON สำหรับงานสั้น, NDJSON สำหรับ inference pass ยาว ๆ เพื่อรายงาน progress ทีละภาพ) เหตุผลที่แยกไม่ได้: SAVPE head ไม่มีของเทียบเท่าใน Go และ `embeddings.pt` เป็น `torch.save` ดู [REFACTOR_PLAN.md](./history/REFACTOR_PLAN.md)
 
 **Golden vector** ไฟล์ใน `backend/tests/testdata/` ที่บันทึกผลลัพธ์ของฟังก์ชัน pure ฝั่ง Python ไว้ (pbkdf2 hash, cookie ที่เซ็นแล้ว, ค่า F1, ไฟล์ COCO/VOC/YOLO) เพื่อให้ unit test ฝั่ง Go ต้อง reproduce ให้ตรงเป๊ะ — วิธีเดียวที่ใช้ได้จริงในการยืนยันว่าโค้ดสองภาษาให้คำตอบเดียวกัน ส่วนใหญ่ถูก "แช่แข็ง" แล้วเพราะ Python ที่สร้างมันถูกลบไปตอนจบ port
 
-**Annotation storage (T-21)** ตั้งแต่ 2026-08-21 ป้าย/กล่อง/สถานะ label ทั้งหมด (สิ่งที่เคยเป็น `labels/*.txt`, `classes.txt`, `testset.json`) ย้ายจากไฟล์ไปตาราง PostgreSQL แล้ว (`internal/infra/store` ตั้งแต่ port เป็น Go, เดิมคือ `services/annotations_db.py`) เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกัน — **prompt bank (embedding) ไม่ย้าย ยังเป็นไฟล์เหมือนเดิม** เพราะเป็นคนละปัญหากัน (ดู [DB_MIGRATION_PLAN.md](./DB_MIGRATION_PLAN.md))
+**Annotation storage (T-21)** ตั้งแต่ 2026-08-21 ป้าย/กล่อง/สถานะ label ทั้งหมด (สิ่งที่เคยเป็น `labels/*.txt`, `classes.txt`, `testset.json`) ย้ายจากไฟล์ไปตาราง PostgreSQL แล้ว (`internal/infra/store` ตั้งแต่ port เป็น Go, เดิมคือ `services/annotations_db.py`) เพื่อรองรับหลายคนแก้ project เดียวกันพร้อมกัน — **prompt bank (embedding) ไม่ย้าย ยังเป็นไฟล์เหมือนเดิม** เพราะเป็นคนละปัญหากัน (ดู [DB_MIGRATION_PLAN.md](./history/DB_MIGRATION_PLAN.md))
 
 **Export** การดาวน์โหลด annotation ของโปรเจกต์เป็นไฟล์ในรูปแบบที่เลือกได้ (`GET /api/export`) — YOLO (กลับไปเป็น `labels/*.txt` + `classes.txt` แบบเดิม), COCO (JSON เดียว), หรือ Pascal VOC (XML ต่อภาพ) แทนที่การมีไฟล์ YOLO ติดอยู่บนดิสก์ตลอดเวลาแบบเดิมก่อน T-21
+
+---
+
+## คำที่จะปรากฏหลัง Phase 2 (ดู [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md))
+
+**Project / Workspace** แถวหนึ่งในตาราง `projects` — มีชื่อ เจ้าของ (`owner_oid`) ชนิดงาน (`task_type`) และโฟลเดอร์ dataset (`input_dir`) หนึ่งโฟลเดอร์ต่อหนึ่งโปรเจกต์เสมอ (`input_dir` เป็น `UNIQUE`) · **`input_dir` ยังเป็น identity ที่ทุก endpoint ใช้** ส่วน `projects.id` เป็นแค่กุญแจสำหรับอ้างถึงใน URL (`/p/{id}`) ไม่ได้แทนที่กัน
+
+**`task_type`** ชนิดของงาน label ของโปรเจกต์ · วันนี้มีค่าเดียวคือ `detection` และค่าอื่นถูกปฏิเสธ · มีไว้เพื่อให้โมดูล label แบบอื่นในอนาคต (เช่น license-plate recognition) มีที่ให้แยกแขนง **ไม่ใช่จุดเริ่มของ abstraction** — โมดูลที่สองจะเป็นโฟลเดอร์พี่น้องใต้ `frontend/app/modules/` ไม่ใช่การแทรกโค้ดเข้าไปในของเดิม
+
+**Claim (การจองภาพ)** การบอกคนอื่นว่า "ฉันกำลังทำภาพนี้อยู่" · เก็บใน memory (`internal/platform/claims`) TTL 10 นาที หนึ่งคนถือได้หนึ่งภาพต่อหนึ่งโปรเจกต์ · **เป็นคำแนะนำ ไม่ใช่ล็อก** — มันทำให้คิวของแต่ละคนไม่ชี้ไปที่ภาพเดียวกัน แต่ `POST /api/label` ไม่เคยปฏิเสธเพราะเรื่องจอง
+
+**Contributor** คนที่ *ลงมือ label จริง* ในโปรเจกต์หนึ่ง — derive จาก `annotations.created_by` join `users` ไม่ใช่รายชื่อที่ใครไปเพิ่มไว้ · ระบบเก็บ **ความจริง** ว่าใครทำ ไม่ใช่ **ความตั้งใจ** ว่าใครควรทำ จึงไม่มีตาราง members
+
+**`bank_orphaned`** ธงที่ `POST /api/session` คืนมาเมื่อ prompt bank มี embedding อยู่แต่ฐานข้อมูลไม่มีป้ายของโปรเจกต์นั้นเลย — อาการของการล้าง `pgdata` โดยไม่ล้าง `.ctflow/` (ดูหัวข้อ "สถานะที่ถูกแบ่งกันอยู่คนละที่" ใน [ARCHITECTURE.md](./ARCHITECTURE.md))

@@ -5,7 +5,7 @@
 // copied statement for statement rather than rewritten: this schema and these
 // queries are what the existing data was written by, and the concurrency
 // guarantee in getOrCreateClass is the entire reason label storage moved to a
-// database in the first place (docs/DB_MIGRATION_PLAN.md #4.1). Nothing here is
+// database in the first place (docs/history/DB_MIGRATION_PLAN.md #4.1). Nothing here is
 // an improvement on the Python; that is deliberate.
 //
 // One divergence, and it is not a rewrite so much as restoring what the Python

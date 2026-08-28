@@ -4,7 +4,7 @@ reembed's atomic commit.
     python -m backend.tests.bank_test
 
 Split out of tests/smoke_test.py when the bank moved to the inference sidecar
-(docs/REFACTOR_PLAN.md phase 1). These assertions construct Bank() directly and
+(docs/history/REFACTOR_PLAN.md phase 1). These assertions construct Bank() directly and
 therefore need torch, while everything left in the smoke test speaks HTTP -- and
 the smoke test has to stay runnable without torch, because from phase 2 it
 drives a Go binary from a machine that has no reason to have a CUDA wheel on it.

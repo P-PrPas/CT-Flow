@@ -2,7 +2,7 @@
 annotations in PostgreSQL land and survive a reload, then rescore the pool.
 
 It drives a running server over HTTP, which is the point -- this is the parity
-harness for the Go port (docs/REFACTOR_PLAN.md phase 0), not only a Python test:
+harness for the Go port (docs/history/REFACTOR_PLAN.md phase 0), not only a Python test:
 
     SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test
 

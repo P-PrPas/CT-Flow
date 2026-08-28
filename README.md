@@ -14,9 +14,9 @@ rescored instantly, and a held-out test set tells you — with an actual
 precision/recall/F1 number, not a guess — when the model is ready to
 auto-label the rest.
 
-No project workspaces, no training run, no label taxonomy to pre-declare.
-**One image folder is the whole config** — labels, the prompt bank, and the
-test set you hold back all live in a hidden `.ctflow/` subfolder inside it.
+No training run, no label taxonomy to pre-declare. **One image folder is the
+whole config** — the prompt bank lives in a hidden `.ctflow/` subfolder
+inside it, and the labels live in PostgreSQL keyed by that same folder.
 
 ---
 
@@ -80,6 +80,7 @@ pool.
 | Per-label attribution (`labeled_by`) | Ready | recorded once auth is on |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
 | Embedding-distance duplicate detection | Approximated | an 8×8 thumbnail hash stands in for true embedding distance — good enough today, see [limitations](#known-limitations--roadmap) |
+| Project workspaces + multi-user queue | Planned | home page, per-project ownership and attribution, image claiming, mandatory login — [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) |
 
 ## Repository layout
 
@@ -142,7 +143,7 @@ negotiable in either direction: YOLOE's SAVPE head has no Go equivalent, and
 across the boundary (`Bank.lock_model()` and `reembed()` commit atomically under
 one file lock, which only works with a single writer). In exchange the sidecar
 owns nothing else: no database, no uploads, no auth. Full reasoning and the
-migration record: [`docs/REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md).
+migration record: [`docs/history/REFACTOR_PLAN.md`](docs/history/REFACTOR_PLAN.md).
 
 A handler never touches the database directly and no package under `internal/`
 imports `net/http` except `internal/transport/httpapi` — that split is what lets
@@ -319,6 +320,12 @@ Opens with **`?`** in the app; inert while a text field or dialog has focus.
 
 ## Multi-user & security (optional)
 
+> Login becomes **mandatory** in Phase 2 (T-27) — with neither OIDC nor
+> `LABEL_TOOL_USERS` set the API will refuse to start, and
+> `LABEL_TOOL_MODE=local` goes away entirely. See
+> [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md). What follows
+> describes the current behaviour.
+
 Off by default: with no OIDC variables or `LABEL_TOOL_USERS` set, there is no login, and
 `POST /api/upload` refuses to run in `vm` mode — a shared server that takes
 files from anyone who knows the URL is worse than no upload at all. To use the
@@ -372,7 +379,7 @@ the Go port, so an existing `LABEL_TOOL_USERS` value keeps working.
 | `LABEL_TOOL_VM_ROOT` | `/opt/mount/project` | the confinement root in `vm` mode |
 | `MODELS_DIR` | `/models` in Docker | where YOLOE checkpoints are cached after auto-download — a named volume in Docker, a plain repo-local folder otherwise |
 | `POSTGRES_PASSWORD` | *(none — required)* | password for the `db` service; `docker compose up` refuses to start without it |
-| `DATABASE_URL` | set automatically in compose | where label/box storage lives (PostgreSQL, see [docs/DB_MIGRATION_PLAN.md](docs/DB_MIGRATION_PLAN.md)) — override to point at a different Postgres when running outside Docker |
+| `DATABASE_URL` | set automatically in compose | where label/box storage lives (PostgreSQL, see [docs/history/DB_MIGRATION_PLAN.md](docs/history/DB_MIGRATION_PLAN.md)) — override to point at a different Postgres when running outside Docker |
 | `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — empty means no login and no upload |
 | `LABEL_TOOL_SECRET` | *(random per restart)* | signs the session cookie; unset = everyone signed out on every restart |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | *(empty)* | company OIDC client credentials; both required when OIDC is enabled |
@@ -509,7 +516,7 @@ before you rely on this tool for a similar dataset:
 `defect` vs. 43.45% for `good_part`, a ~20x gap. `conf_by_class` gets both
 classes their own threshold in one evaluation pass instead of trading one off
 against the other. Full methodology and every intermediate number:
-[`docs/EXPERIMENT_T01_CONF.md`](docs/EXPERIMENT_T01_CONF.md).
+[`docs/history/EXPERIMENT_T01_CONF.md`](docs/history/EXPERIMENT_T01_CONF.md).
 
 `/opt/mount/project/iron_ore` (235 frames of rock/ore on a moving belt) is the dataset
 that matches the real production use case; label ~15 images into `test/`
@@ -517,12 +524,20 @@ first to get a readiness number for it.
 
 ## Known limitations & roadmap
 
-Full gap analysis: [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) and
-[`docs/REQUIREMENTS_STAKEHOLDER_ANALYSIS.md`](docs/REQUIREMENTS_STAKEHOLDER_ANALYSIS.md).
+Full gap analysis: [`docs/ROADMAP.md`](docs/ROADMAP.md) and
+[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
 The headline items:
 
+- **No project workspaces yet.** The folder path lives in the browser's
+  `localStorage`, so nothing can answer "what work exists here, who owns it,
+  how far along is it" — and two people on the same folder are handed the
+  same image, because the queue is ordered identically for everyone and
+  never refreshes. Both are what
+  [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) is for; that is the
+  work in flight.
 - **No upload UI.** `POST /api/upload` is built and protected by auth, but the
-  frontend still has no dropzone.
+  frontend still has no dropzone — and there is no answer yet for where an
+  uploaded file should land.
 - **`defect`-class recall is still low even with `conf_by_class`** (0.25 F1).
   The box-size gap above points at cropping around each detection before
   running SAVPE on it as the next lever — unblocked and prioritized ahead of
@@ -541,22 +556,53 @@ The headline items:
 
 ## Documentation index
 
-Deeper design and requirements docs live in `docs/` (Thai, written for
-whoever picks this project up next):
+Docs in `docs/` are Thai, written for whoever picks this project up next.
+`docs/` holds what is **true right now**; `docs/history/` holds records of
+work that is already finished — read those for the *why*, never for status.
+
+Coming in cold? [`CLAUDE.md`](CLAUDE.md) → [`ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+→ the plan for whatever you're working on.
 
 | Doc | What's in it |
 |---|---|
+| [`CLAUDE.md`](CLAUDE.md) | The invariants you must not break, and where things live |
 | [`PRODUCT_OVERVIEW.md`](docs/PRODUCT_OVERVIEW.md) | What the tool does and doesn't do, in plain terms |
 | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Tech stack + system design |
 | [`API_REFERENCE.md`](docs/API_REFERENCE.md) | Every endpoint, request/response shapes, conventions |
-| [`REQUIREMENTS_STAKEHOLDER_ANALYSIS.md`](docs/REQUIREMENTS_STAKEHOLDER_ANALYSIS.md) | Requirement-by-requirement status, the source of truth for "is X done" |
-| [`PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | Test coverage + current overall status |
-| [`EXPERIMENT_T01_CONF.md`](docs/EXPERIMENT_T01_CONF.md) | The conf-threshold experiment behind the accuracy table above |
-| [`REFACTOR_PLAN.md`](docs/REFACTOR_PLAN.md) | The Python→Go port: what moved, what stayed Python and why, and what it cost |
-| [`NEXT_STEPS.md`](docs/NEXT_STEPS.md) | Active roadmap after the backend refactor and completed OIDC milestone |
+| [`REQUIREMENTS.md`](docs/REQUIREMENTS.md) | Requirement-by-requirement status — the source of truth for "is X done" |
+| [`ROADMAP.md`](docs/ROADMAP.md) | The source of truth for what gets built next, and what is deliberately deferred |
+| [`PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) | The plan for the work in flight: workspaces, multi-user, mandatory login |
 | [`GLOSSARY.md`](docs/GLOSSARY.md) | Terminology (SAVPE, prompt bank, etc.) in the order you'll meet it |
+| [`history/REFACTOR_PLAN.md`](docs/history/REFACTOR_PLAN.md) | The Python→Go port: what moved, what stayed Python and why, and what it cost |
+| [`history/DB_MIGRATION_PLAN.md`](docs/history/DB_MIGRATION_PLAN.md) | Why labels moved to PostgreSQL and why the prompt bank did not |
+| [`history/EXPERIMENT_T01_CONF.md`](docs/history/EXPERIMENT_T01_CONF.md) | The conf-threshold experiment behind the accuracy table above |
 
 ## Troubleshooting
+
+**Nothing happens when you label, and the browser shows no error?** Check the
+ownership of `DATA_DIR` on the host. The containers run as `app` (non-root,
+`APP_UID`), so files left behind from an older root-running container cannot
+be written — `.ctflow/_bank/.lock` fails with `PermissionError`, and
+`/api/session`, `/api/label` and auto-label all break quietly (the 500 is not
+JSON, so the UI just shows nothing). This bit us once with ~4,377 root-owned
+files. One-time fix, and re-run it whenever files arrive from a root-running
+tool such as a bare `docker cp`:
+
+```bash
+docker compose exec -u root api chown -R app:app /opt/mount/project
+```
+
+**Labels disappeared after `docker compose down -v`?** That is expected and
+it leaves the project in a half-wiped state — `-v` drops the PostgreSQL
+volume, but the prompt bank in `<dataset>/.ctflow/` is a bind mount and
+survives, so the model still remembers what it was taught while the database
+no longer remembers which images taught it. For everyday rebuilds use
+`docker compose down` (no `-v`). When you do mean to wipe, wipe both:
+
+```bash
+docker compose down -v
+find "$DATA_DIR" -maxdepth 2 -type d -name .ctflow -exec rm -rf {} +   # images are untouched
+```
 
 `docker compose build` failing with `CERTIFICATE_VERIFY_FAILED`? Something is
 intercepting TLS during the build — a corporate proxy, or antivirus HTTPS

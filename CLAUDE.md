@@ -13,6 +13,8 @@ backend/inference/        the Python sidecar: everything that needs torch
 backend/db/schema.sql     applied at boot, idempotent, no migration framework
 backend/tests/            smoke_test.py, golden vectors, parity harness
 frontend/app/             Next.js 15 App Router, all client components
+frontend/app/modules/     one folder per labeling module; the shell must not
+                          import from here -- CI enforces it (T-30)
 docs/                     active docs -- must be true right now
 docs/history/             records of completed work -- context, not status
 ```
@@ -62,8 +64,14 @@ python -m backend.tests.gen_testdata --check      # cross-language goldens
 `backend/tests/testdata/` holds golden vectors Go must reproduce byte for
 byte. If one fails, the code is wrong, not the vector.
 
-Frontend has no CI. Run `npx tsc --noEmit` before merging anything that
-touches `frontend/`.
+`.github/workflows/frontend.yml` runs on any change under `frontend/`: the
+module boundary, then `tsc --noEmit`, then `next build`. There are no frontend
+tests and inventing some to justify a workflow is the wrong order -- what it
+catches is broken imports, broken types and a broken build.
+
+```bash
+cd frontend && npx tsc --noEmit && npm run build
+```
 
 ## House style
 

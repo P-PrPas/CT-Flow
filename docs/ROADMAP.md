@@ -1,6 +1,6 @@
 # CT-Flow — Roadmap
 
-> **สถานะ ณ 2026-08-28:** backend refactor (Go) และ OIDC login merge เข้า `main` แล้ว · **Phase 2 ก้อนที่ 1 (T-26, T-27, T-28) merge แล้วเช่นกัน** — งานถัดไปคือก้อนที่ 2 แผนเต็มอยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
+> **สถานะ ณ 2026-08-28:** backend refactor (Go) และ OIDC login merge เข้า `main` แล้ว · **Phase 2 ก้อนที่ 1 (T-26–T-28) merge แล้ว · ก้อนที่ 2 (T-29, T-30) implement แล้ว** — งานถัดไปคือก้อนที่ 3 แผนเต็มอยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
 >
 > เอกสารนี้คือ **source of truth ของลำดับงาน** · requirement รายข้ออยู่ที่ [REQUIREMENTS.md](./REQUIREMENTS.md) · บันทึกงานที่จบไปแล้วอยู่ที่ [`history/`](./history/)
 
@@ -9,7 +9,7 @@
 - API เป็น Go, inference + prompt bank เป็น Python sidecar
 - PostgreSQL เก็บ label/box metadata และรองรับหลายคนแก้ project เดียวกันได้ในระดับ storage
 - OIDC login ครบทั้ง backend และ frontend · local username/password ยังเป็น fallback
-- CI มี `go`, `python`, `smoke` · `smoke` รันแบบล็อกอินด้วย local account ตั้งแต่ T-28 บล็อก auth จึงเดินจริงทุก push
+- CI มี `go`, `python`, `smoke` (workflow `backend`) และ `frontend` (boundary → `tsc` → `build`) · `smoke` รันแบบล็อกอินด้วย local account ตั้งแต่ T-28 บล็อก auth จึงเดินจริงทุก push
 - โปรเจกต์มีชื่อ/เจ้าของ/ชนิดงาน และมี `/api/projects` ครบห้า endpoint · write path ทุกตัวต้องมีโปรเจกต์อยู่ก่อน · login เป็นสิ่งบังคับ (T-26/T-27)
 - ยังเป็นระบบสำหรับทีมภายในบน instance เดียว ไม่ใช่ production-scale deployment
 
@@ -45,8 +45,8 @@
 | 1 | T-26 ✅ | `projects` schema (`name`, `owner_oid`, `task_type`) + Projects API + `getOrCreateProject` → `requireProject` |
 | 1 | T-27 ✅ | บังคับ login (ไม่มี auth = แอปไม่ start) + ลบ `LABEL_TOOL_MODE=local` |
 | 1 | T-28 ✅ | เปิด auth ใน CI ให้บล็อก auth ของ smoke test เดินจริงครั้งแรก |
-| 2 | T-29 | Home page + route `/p/{id}` + ทิ้ง `localStorage` |
-| 2 | T-30 | ผ่าไฟล์โมดูล detection ออกจากของกลาง |
+| 2 | T-29 ✅ | Home page + route `/p/{id}` + ทิ้ง `localStorage` |
+| 2 | T-30 ✅ | ผ่าไฟล์โมดูล detection ออกจากของกลาง + workflow `frontend` (boundary → tsc → build) |
 | 3 | T-31 | `GET /api/state` + polling ทุก 15 วินาที |
 | 3 | T-32 | จองภาพ (in-memory, TTL 10 นาที) กันหยิบงานชนกัน |
 | 3 | T-33 | แสดงว่าใคร label กล่องไหน / ใครทำงานในโปรเจกต์นี้ |

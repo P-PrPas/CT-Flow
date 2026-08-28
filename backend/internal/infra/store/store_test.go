@@ -39,6 +39,12 @@ func open(t *testing.T) (*Store, string) {
 	if err := s.DeleteProject(ctx, dir); err != nil {
 		t.Fatal(err)
 	}
+	// Writes require a project that already exists (ErrNoProject) -- creating
+	// one here is what a real request does before it labels anything, through
+	// POST /api/projects or POST /api/session.
+	if _, _, err := s.EnsureProject(ctx, dir, t.Name(), "", TaskDetection); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		_ = s.DeleteProject(context.Background(), dir)
 		s.Close()
@@ -101,7 +107,7 @@ func TestPoolAndTestsetHaveSeparateClassSpaces(t *testing.T) {
 // collision silently mislabels everything written afterwards.
 //
 // Note what this does and does not prove. It passes with the FOR UPDATE in
-// getOrCreateClass removed, because getOrCreateProject's upsert already writes
+// getOrCreateClass removed, because requireProject's UPDATE already touches
 // the projects row and holds that row lock until commit -- every writer to one
 // project is serialised before it ever reaches the class lookup. The explicit
 // lock is kept anyway: it is what the Python does, it is what makes the
@@ -370,7 +376,7 @@ func TestUnknownProjectReadsEmpty(t *testing.T) {
 
 // Reads must not queue behind a writer holding the project row.
 //
-// getOrCreateProject's upsert locks that row for the rest of its transaction,
+// requireProject's UPDATE locks that row for the rest of its transaction,
 // which is fine for the writes that need it and ruinous for the reads that do
 // not: with reads going through it too, one export of a big project blocked
 // every label save for that project until it finished. The Python this was
@@ -388,13 +394,13 @@ func TestReadsDoNotBlockOnAWriter(t *testing.T) {
 	}
 
 	// A writer mid-transaction, holding the project row exactly as a real
-	// /api/label does between its upsert and its commit.
+	// /api/label does between resolving the project and committing.
 	held := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
 		done <- s.tx(ctx, func(q pgx.Tx) error {
-			if _, err := getOrCreateProject(ctx, q, dir); err != nil {
+			if _, err := requireProject(ctx, q, dir); err != nil {
 				return err
 			}
 			close(held)

@@ -86,7 +86,6 @@ const distance = (a: number[], b: number[]) =>
 
 export function useSession() {
   // --- environment ------------------------------------------------------
-  const [mode, setMode] = useState("");
   const [colors, setColors] = useState<string[]>([]);
   const [reachable, setReachable] = useState<boolean | null>(null);
 
@@ -185,7 +184,7 @@ export function useSession() {
   useEffect(() => {
     api.getConfig()
       .then((c) => {
-        setMode(c.mode); setColors(c.colors); setReachable(true);
+        setColors(c.colors); setReachable(true);
         setModels(c.models); setModelId(c.default_model);
       })
       .catch(() => { setReachable(false); setStatus("Backend not reachable — is the API running?"); });
@@ -550,7 +549,7 @@ export function useSession() {
 
   return {
     // env + shell
-    mode, colors, reachable, panel, setPanel, simple, setSimple,
+    colors, reachable, panel, setPanel, simple, setSimple,
     status, setStatus, busy, progress, picking, setPicking,
     showSetup, setShowSetup, showShortcuts, setShowShortcuts,
     // config

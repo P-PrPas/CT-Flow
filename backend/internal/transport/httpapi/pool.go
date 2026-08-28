@@ -3,11 +3,10 @@ package httpapi
 import (
 	"context"
 	"net/http"
-	"os"
 
-	"github.com/P-PrPas/CT-Flow/backend/internal/infra/images"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/vpe"
+	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 )
 
 // bankSummary is BankSummary as docs/API_REFERENCE.md defines it, assembled
@@ -48,6 +47,14 @@ func (s *Server) bankSummary(r *http.Request, inputDir, stateDir string) (bankSu
 // membership live in PostgreSQL keyed by the same input_dir. Nothing else to
 // browse for -- and the test-set state comes back in this same response, so the
 // UI never has to make a second "did you forget the test set" round trip.
+//
+// It is also where a project row comes from for a folder opened directly rather
+// than created on the home page. Every other write path now requires a project
+// that exists (store.ErrNoProject), and this is the honest place to create one:
+// opening a folder is someone saying "this is work I am doing", and it is the
+// call the frontend already makes first. The row gets the folder's name and the
+// opener as owner, so it is never nameless or ownerless the way get-or-create
+// on every write used to leave it.
 func (s *Server) OpenSession(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
 		InputDir string `json:"input_dir"`
@@ -55,16 +62,15 @@ func (s *Server) OpenSession(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	inputDir, stateDir, err := s.stateDirFor(req.InputDir)
+	inputDir, pool, err := s.usableDir(req.InputDir)
 	if err != nil {
 		return err
 	}
-	if info, err := os.Stat(inputDir); err != nil || !info.IsDir() {
-		return errStatus(http.StatusBadRequest, "input dir not found: "+inputDir)
-	}
-	pool := images.List(inputDir)
-	if len(pool) == 0 {
-		return errStatus(http.StatusBadRequest, "no images in "+inputDir)
+	stateDir := config.StateDir(inputDir)
+	project, _, err := s.Store.EnsureProject(r.Context(), inputDir,
+		defaultProjectName(inputDir), s.currentUser(r), store.TaskDetection)
+	if err != nil {
+		return err
 	}
 
 	bank, err := s.bankSummary(r, inputDir, stateDir)
@@ -91,6 +97,9 @@ func (s *Server) OpenSession(w http.ResponseWriter, r *http.Request) error {
 		"testset": map[string]any{
 			"images": testImages, "labeled": labeled, "classes": classes,
 		},
+		// So a client that opened a folder directly can still link to it, and
+		// so the UI has the name and owner without a second call.
+		"project": project,
 	})
 	return nil
 }

@@ -42,7 +42,6 @@ COPY backend/models.json backend/models.json
 COPY backend/inference/ backend/inference/
 
 ENV MODELS_DIR=/models \
-    LABEL_TOOL_MODE=vm \
     LABEL_TOOL_VM_ROOT=/opt/mount/project \
     YOLO_CONFIG_DIR=/tmp \
     MPLCONFIGDIR=/tmp \

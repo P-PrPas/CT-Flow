@@ -103,6 +103,11 @@ jobs:
       MODELS_DIR: ${{ github.workspace }}/models
       MODELS_CATALOG: ${{ github.workspace }}/backend/models.json
       SCHEMA_PATH: ${{ github.workspace }}/backend/db/schema.sql
+      # Path confinement is unconditional since T-27 -- there is no longer a
+      # "local" mode that switched it off. The fixtures the harness sends as
+      # input_dir live under the checkout, so that is the root here; the default
+      # (/opt/mount/project) would 403 every request in this job.
+      LABEL_TOOL_VM_ROOT: ${{ github.workspace }}
       DATABASE_URL: postgresql://labeltool:labeltool@localhost:5432/labeltool
       VPE_URL: http://127.0.0.1:8001
       YOLO_CONFIG_DIR: /tmp
@@ -110,6 +115,22 @@ jobs:
       # Small enough that the harness exercises the upload size cap for real
       # instead of skipping it.
       LABEL_TOOL_MAX_UPLOAD_MB: "1"
+      # T-28. Signing in is mandatory (T-27), so the API will not start without
+      # this -- but the reason to have it is older: the smoke test's whole auth
+      # block was gated on the target server having users configured, and this
+      # workflow never configured any. It has been skipped on every run since it
+      # was written, which is how its assertions drifted out of date unnoticed.
+      #
+      # Local accounts rather than OIDC on purpose: covering the gate needs a
+      # credential, not an identity provider, and standing up a mock OIDC server
+      # in CI to avoid a password hash that is public by design is work spent to
+      # test the harness instead of the app.
+      LABEL_TOOL_SECRET: ci-not-a-secret-the-server-is-thrown-away
+      # alice / hunter2, the smoke test's defaults. Produced by
+      # `api -hash-password alice hunter2`; there is nothing to protect here.
+      LABEL_TOOL_USERS: "alice:pbkdf2$240000$4c398f4699ba3d06b917574a26c0abec$f625c92f5f7e1f01749b4697fb23e8de2eee8ebc1f4421e753df2fd58b1ae86a"
+      SMOKE_USER: alice
+      SMOKE_PASSWORD: hunter2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

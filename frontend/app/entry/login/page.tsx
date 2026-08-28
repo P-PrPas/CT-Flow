@@ -43,9 +43,7 @@ export default function LoginPage() {
           <span className="brand-mark"><BrandMark /></span>
           <div className="col" style={{ gap: 2 }}><h1>Login</h1><span className="muted">Sign in to CT-Flow</span></div>
         </div>
-        {auth?.mode === "none" ? (
-          <a className="btn block" href="/">Authentication is disabled — open CT-Flow</a>
-        ) : auth?.mode === "local" ? (
+        {auth?.mode === "local" ? (
           <form className="col" onSubmit={localLogin}>
             <label className="col">Username<input autoFocus required value={username} onChange={(e) => setUsername(e.target.value)} /></label>
             <label className="col">Password<input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} /></label>

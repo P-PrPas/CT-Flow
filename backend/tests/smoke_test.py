@@ -19,8 +19,12 @@ Two things it needs from its environment:
     to backend/tests/bank_test.py so this can be driven from a machine that has no
     reason to carry a CUDA wheel.
 
-Environment: SMOKE_BASE_URL, SMOKE_POOL, SMOKE_USER/SMOKE_PASSWORD (only when
-the target server has LABEL_TOOL_USERS set), DATABASE_URL.
+Environment: SMOKE_BASE_URL, SMOKE_POOL, SMOKE_USER/SMOKE_PASSWORD,
+DATABASE_URL.
+
+Signing in is mandatory since T-27, so SMOKE_USER/SMOKE_PASSWORD are no longer
+optional and the auth assertions are no longer skippable -- a server that does
+not need them is a server that will not start.
 """
 import json
 import os
@@ -72,19 +76,16 @@ if OUT.exists():
 _dbcheck.init_schema()
 _dbcheck.delete_project(POOL)
 
-# A server with auth turned on rejects every call below until we sign in, so
-# this has to happen before the first request, not in the auth section at the
-# bottom. AUTH_ON also decides which half of that section runs.
-AUTH_ON = c.get("/api/auth/me").json()["enabled"]
-if AUTH_ON:
-    r = c.post("/api/auth/login", json={
-        "username": os.getenv("SMOKE_USER", "alice"),
-        "password": os.getenv("SMOKE_PASSWORD", "hunter2"),
-    })
-    assert r.status_code == 200, (
-        "target server has LABEL_TOOL_USERS set but SMOKE_USER/SMOKE_PASSWORD "
-        f"did not log in: {r.text}"
-    )
+# The server rejects every call below until we sign in, so this has to happen
+# before the first request rather than in the auth section at the bottom.
+SMOKE_USER = os.getenv("SMOKE_USER", "alice")
+SMOKE_PASSWORD = os.getenv("SMOKE_PASSWORD", "hunter2")
+r = c.post("/api/auth/login", json={"username": SMOKE_USER, "password": SMOKE_PASSWORD})
+assert r.status_code == 200, (
+    f"could not sign in as {SMOKE_USER}: {r.text}\n"
+    "Signing in is mandatory (T-27) -- start the target server with "
+    "LABEL_TOOL_USERS and point SMOKE_USER/SMOKE_PASSWORD at an entry in it."
+)
 
 
 def wait_job(job_id: str, timeout: float = 60) -> dict:
@@ -102,19 +103,57 @@ def wait_job(job_id: str, timeout: float = 60) -> dict:
         time.sleep(0.1)
 
 cfg = c.get("/api/config").json()
-assert cfg["mode"] in ("local", "vm")
+# `mode` is gone with LABEL_TOOL_MODE (T-27) -- one behaviour, nothing to report.
+assert "mode" not in cfg, cfg
 assert cfg["default_model"] == "yoloe-11s-seg", cfg
 assert {"id", "family", "size", "available"} <= cfg["models"][0].keys() and len(cfg["models"]) > 1, cfg["models"]
 assert all("file" not in m for m in cfg["models"]), cfg["models"]  # no local paths leak to the browser
 default_entry = next(m for m in cfg["models"] if m["id"] == cfg["default_model"])
 assert default_entry["available"] is True, default_entry  # CI/dev always has the default weight cached
 
+# --- FR-43 / FR-47: writing needs a project, and it has an owner ----------
+# Before Phase 2 any endpoint could conjure a project row out of an input_dir,
+# which left nameless, ownerless rows behind whenever anyone typo'd a path.
+# Asserted through /api/testset/import, which is the shortest path from a
+# request to a write: it reaches store.MarkTest without going through the
+# inference sidecar first. /api/label would answer 400 "cannot read image"
+# before the store is ever consulted, because the sidecar reads the image to
+# extract an embedding -- a real refusal, just not this one.
+NO_PROJECT = str(HERE / "fixtures" / "pool") + "-not-a-project"
+r = c.post("/api/testset/import", json={"input_dir": NO_PROJECT, "images": []})
+assert r.status_code == 404, (r.status_code, r.text)
+assert r.json()["detail"] == "no project for this folder -- create it first", r.json()
+
 r = c.post("/api/session", json={"input_dir": POOL})
 assert r.status_code == 200, r.text
 images = r.json()["images"]
 assert len(images) == 3, images
 assert r.json()["testset"] == {"images": [], "labeled": [], "classes": []}
-print("pool:", len(images), "images")
+# Opening a folder is what registers it, so the frontend needs no extra call and
+# the row is never nameless: the folder names it, the opener owns it.
+project = r.json()["project"]
+PROJECT_ID = project["id"]
+assert project["input_dir"] == POOL, project
+assert project["name"] == Path(POOL).name, project
+assert project["task_type"] == "detection", project
+assert project["owner"]["oid"] == SMOKE_USER, project
+
+# Re-opening adopts, and must not rename it or take it from its owner.
+again = c.post("/api/session", json={"input_dir": POOL}).json()["project"]
+assert again["id"] == PROJECT_ID and again["name"] == project["name"], again
+
+# Creating over an existing folder is refused, and says whose work it is.
+r = c.post("/api/projects", json={"name": "Second claim", "input_dir": POOL})
+assert r.status_code == 409, (r.status_code, r.text)
+assert project["name"] in r.json()["detail"], r.json()
+
+r = c.post("/api/projects", json={"name": "x", "input_dir": POOL, "task_type": "segmentation"})
+assert r.status_code == 400 and r.json()["detail"] == "unknown task type: segmentation", r.text
+
+r = c.get(f"/api/projects/{PROJECT_ID}")
+assert r.status_code == 200 and r.json()["project"]["input_dir"] == POOL, r.text
+assert c.get(f"/api/projects/{PROJECT_ID + 10_000}").status_code == 404
+print("pool:", len(images), "images ·", f"project {PROJECT_ID} {project['name']!r}")
 
 target = images[0]
 r = c.post("/api/label", json={
@@ -400,6 +439,35 @@ meta = json.loads((OUT / "_bank" / "metadata.json").read_text(encoding="utf-8"))
 assert all("labeled_by" in i for insts in meta["instances"].values() for i in insts), meta
 
 
+# --- FR-44 / FR-50: what the home page reads --------------------------------
+# Counts come from images.status, and "who worked here" is derived from
+# annotations.created_by rather than a membership list -- so both have to
+# reflect the labeling this run actually did.
+listed = c.get("/api/projects").json()["projects"]
+mine = next(p for p in listed if p["input_dir"] == POOL)
+assert mine["id"] == PROJECT_ID, mine
+assert mine["owner"]["oid"] == SMOKE_USER, mine
+# Compared against the session's own lists rather than a fixed number: both
+# read images.status, so this checks the card agrees with the workspace --
+# including the kind='pool' filter, which is where a miscount would come from.
+# A fixed ">= 1 auto" would instead be asserting that YOLOE detects something
+# in these fixtures, which it does not and was never meant to.
+state = c.post("/api/session", json={"input_dir": POOL}).json()["bank"]
+assert mine["labeled"] == len(state["labeled"]), (mine, state["labeled"])
+assert mine["auto"] == len(state["auto"]), (mine, state["auto"])
+assert mine["labeled"] >= 1, "the run hand-labeled at least one image"
+# A local login has no users row, so the stored subject is the best name there
+# is -- an unreadable contributor still beats a missing one.
+assert [m["oid"] for m in mine["contributors"]] == [SMOKE_USER], mine["contributors"]
+assert mine["contributors"][0]["boxes"] >= 1, mine["contributors"]
+
+r = c.patch(f"/api/projects/{PROJECT_ID}", json={"name": "Renamed by smoke"})
+assert r.status_code == 200 and r.json()["project"]["name"] == "Renamed by smoke", r.text
+assert r.json()["project"]["owner"]["oid"] == SMOKE_USER, "a rename must not clear the owner"
+assert c.patch(f"/api/projects/{PROJECT_ID}", json={}).status_code == 400
+print("projects:", len(listed), "listed ·", mine["labeled"], "labeled /", mine["auto"],
+      "auto · agrees with the session")
+
 # --- §7: effort metrics outlive the browser tab ---
 for e in [{"kind": "session", "session": "s1"},
           {"kind": "label", "session": "s1", "secs": 12},
@@ -418,78 +486,73 @@ if UP.exists():
     shutil.rmtree(UP)
 jpeg = Path(images[0]).read_bytes()
 
-# T-13's precondition, enforced in code rather than left in a doc: a shared
-# (vm-mode) deployment with no users configured must refuse uploads outright.
-# Which of the two branches applies is a property of how the target server was
-# started, so ask it instead of assuming -- the same run has to work against a
-# local-mode dev server and a locked-down vm-mode container.
-if cfg["mode"] == "vm" and not c.get("/api/auth/me").json()["enabled"]:
+# T-13's precondition -- no upload on a shared server without a login -- used
+# to be a branch here, because the target could have been started either way.
+# It cannot be any more (T-27): the server refuses to start without a login,
+# so the refusing half was unreachable and only the accepting half is left.
+r = c.post("/api/upload", data={"dir": str(UP)},
+           files=[("files", ("fresh.jpg", jpeg, "image/jpeg"))])
+assert r.status_code == 200, r.text
+assert r.json()["saved"] == [str(UP / "fresh.jpg")], r.json()
+
+r = c.post("/api/upload", data={"dir": str(UP)}, files=[
+    ("files", ("notes.txt", b"not an image", "text/plain")),
+    ("files", ("fake.jpg", b"jpg in name only", "image/jpeg")),
+    ("files", ("fresh.jpg", jpeg, "image/jpeg")),
+    ("files", ("../escape.jpg", jpeg, "image/jpeg")),
+])
+why = {s["name"]: s["reason"] for s in r.json()["skipped"]}
+assert why.get("notes.txt") == "not an image file type", why
+assert why.get("fake.jpg") == "not a readable image", why
+assert why.get("fresh.jpg") == "already in this folder", why
+# The traversal is neutralised, not merely refused: the directory part is
+# dropped and the file lands inside the destination like any other.
+assert r.json()["saved"] == [str(UP / "escape.jpg")], r.json()
+assert not (SCRATCH / "escape.jpg").exists()
+
+# The per-file size cap. There is nothing to reach into over HTTP, so the run
+# has to be configured with a small cap and we send something bigger than it.
+# Both sides read LABEL_TOOL_MAX_UPLOAD_MB from the environment, so harness
+# and server agree on the number without a new endpoint to ask over.
+if float(os.getenv("LABEL_TOOL_MAX_UPLOAD_MB", "25")) <= 2:
+    cap_bytes = int(float(os.environ["LABEL_TOOL_MAX_UPLOAD_MB"]) * 1024 * 1024)
+    # A real JPEG header followed by padding: the size check has to reject this
+    # before the decode check gets a chance to, which is the ordering under test.
+    oversize = jpeg + b"\0" * (cap_bytes + 1)
     r = c.post("/api/upload", data={"dir": str(UP)},
-               files=[("files", ("fresh.jpg", jpeg, "image/jpeg"))])
-    assert r.status_code == 403, r.text
-    assert not UP.exists(), "a refused upload must not have created its destination"
-    print("upload: refused on a vm-mode server with no users configured (T-13)")
+               files=[("files", ("big.jpg", oversize, "image/jpeg"))])
+    assert r.json()["saved"] == [] and "larger than" in r.json()["skipped"][0]["reason"], r.json()
 else:
+    print("upload: size-cap check skipped -- set LABEL_TOOL_MAX_UPLOAD_MB=1 on "
+          "both server and harness to exercise it over HTTP")
 
-    r = c.post("/api/upload", data={"dir": str(UP)},
-               files=[("files", ("fresh.jpg", jpeg, "image/jpeg"))])
-    assert r.status_code == 200, r.text
-    assert r.json()["saved"] == [str(UP / "fresh.jpg")], r.json()
+r = c.post("/api/upload", data={"dir": str(UP)},
+           files=[("files", ("   ", jpeg, "image/jpeg")), ("files", (".hidden.jpg", jpeg, "image/jpeg"))])
+assert r.json()["saved"] == [] and len(r.json()["skipped"]) == 2, r.json()
+print("upload: 1 saved, rejects non-images, oversize, duplicates and nameless files")
+shutil.rmtree(UP)
 
-    r = c.post("/api/upload", data={"dir": str(UP)}, files=[
-        ("files", ("notes.txt", b"not an image", "text/plain")),
-        ("files", ("fake.jpg", b"jpg in name only", "image/jpeg")),
-        ("files", ("fresh.jpg", jpeg, "image/jpeg")),
-        ("files", ("../escape.jpg", jpeg, "image/jpeg")),
-    ])
-    why = {s["name"]: s["reason"] for s in r.json()["skipped"]}
-    assert why.get("notes.txt") == "not an image file type", why
-    assert why.get("fake.jpg") == "not a readable image", why
-    assert why.get("fresh.jpg") == "already in this folder", why
-    # The traversal is neutralised, not merely refused: the directory part is
-    # dropped and the file lands inside the destination like any other.
-    assert r.json()["saved"] == [str(UP / "escape.jpg")], r.json()
-    assert not (SCRATCH / "escape.jpg").exists()
-
-    # The per-file size cap. There is nothing to reach into over HTTP, so the run
-    # has to be configured with a small cap and we send something bigger than it.
-    # Both sides read LABEL_TOOL_MAX_UPLOAD_MB from the environment, so harness
-    # and server agree on the number without a new endpoint to ask over.
-    if float(os.getenv("LABEL_TOOL_MAX_UPLOAD_MB", "25")) <= 2:
-        cap_bytes = int(float(os.environ["LABEL_TOOL_MAX_UPLOAD_MB"]) * 1024 * 1024)
-        # A real JPEG header followed by padding: the size check has to reject this
-        # before the decode check gets a chance to, which is the ordering under test.
-        oversize = jpeg + b"\0" * (cap_bytes + 1)
-        r = c.post("/api/upload", data={"dir": str(UP)},
-                   files=[("files", ("big.jpg", oversize, "image/jpeg"))])
-        assert r.json()["saved"] == [] and "larger than" in r.json()["skipped"][0]["reason"], r.json()
-    else:
-        print("upload: size-cap check skipped -- set LABEL_TOOL_MAX_UPLOAD_MB=1 on "
-              "both server and harness to exercise it over HTTP")
-
-    r = c.post("/api/upload", data={"dir": str(UP)},
-               files=[("files", ("   ", jpeg, "image/jpeg")), ("files", (".hidden.jpg", jpeg, "image/jpeg"))])
-    assert r.json()["saved"] == [] and len(r.json()["skipped"]) == 2, r.json()
-    print("upload: 1 saved, rejects non-images, oversize, duplicates and nameless files")
-    shutil.rmtree(UP)
-
-# --- T-12 / FR-30: with users configured, nothing works until you sign in ---
-# In-process the harness configures the users itself. Over HTTP it can't touch
-# the server's environment, so the same assertions run against whatever the
-# target was started with: an auth-on server exercises the gate for real, an
-# auth-off one confirms the tool is wide open exactly as before.
+# --- FR-30 / FR-47: nothing works until you sign in ------------------------
+# This block never ran in CI before T-28: it was gated on the target server
+# having LABEL_TOOL_USERS set, and the workflow did not set it. That is why the
+# exact-match assertions below still expected an /api/auth/me without `mode`
+# months after the field was added. CI now starts the server with local users,
+# so this runs on every push.
 def check_auth(client, user: str, password: str, wrong_user: str = "mallory"):
     assert client.get("/api/config").status_code == 200          # public: UI needs it to boot
     assert client.post("/api/auth/logout").status_code == 200
     assert client.post("/api/session", json={"input_dir": POOL}).status_code == 401
-    assert client.get("/api/auth/me").json() == {"enabled": True, "user": None}
+    # enabled is always True since T-27 -- there is no server without a login.
+    assert client.get("/api/auth/me").json() == {
+        "enabled": True, "user": None, "mode": "local"}
     assert client.post("/api/auth/login",
                        json={"username": user, "password": "wrong"}).status_code == 401
     assert client.post("/api/auth/login",
                        json={"username": wrong_user, "password": password}).status_code == 401
     assert client.post("/api/auth/login",
                        json={"username": user, "password": password}).status_code == 200
-    assert client.get("/api/auth/me").json() == {"enabled": True, "user": user}
+    assert client.get("/api/auth/me").json() == {
+        "enabled": True, "user": user, "mode": "local"}
     assert client.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
     # FR-31: the signed-in name lands on the instance this call creates
@@ -505,16 +568,26 @@ def check_auth(client, user: str, password: str, wrong_user: str = "mallory"):
     print(f"auth: gated, logged in as {user}, labeled_by recorded, logged out")
 
 
-if AUTH_ON:
-    check_auth(c, os.getenv("SMOKE_USER", "alice"), os.getenv("SMOKE_PASSWORD", "hunter2"))
-    c.post("/api/auth/login", json={"username": os.getenv("SMOKE_USER", "alice"),
-                                    "password": os.getenv("SMOKE_PASSWORD", "hunter2")})
-else:
-    assert c.get("/api/auth/me").json() == {"enabled": False, "user": None, "mode": "none"}
-    print("auth: target server has no users configured -- gate not exercised, "
-          "re-run against a server with LABEL_TOOL_USERS set to cover it")
+check_auth(c, SMOKE_USER, SMOKE_PASSWORD)
+c.post("/api/auth/login", json={"username": SMOKE_USER, "password": SMOKE_PASSWORD})
 
 assert c.post("/api/session", json={"input_dir": POOL}).status_code == 200
+
+# --- FR-43: deleting a project takes the rows and leaves the files ----------
+# Last, because everything above needs the project to exist. The promise the UI
+# makes on this button is that the dataset survives, so that is what is checked.
+r = c.delete(f"/api/projects/{PROJECT_ID}")
+assert r.status_code == 200, r.text
+assert r.json()["kept_on_disk"] == POOL, r.json()
+assert Path(POOL).is_dir() and len(list(Path(POOL).glob("*.jpg"))) > 0, "delete removed image files"
+assert (OUT / "_bank" / "metadata.json").exists(), "delete removed the prompt bank"
+assert c.get(f"/api/projects/{PROJECT_ID}").status_code == 404
+assert c.delete(f"/api/projects/{PROJECT_ID}").status_code == 404
+# And with the project gone, writing to the folder is refused again. Same
+# endpoint as the check at the top, and for the same reason.
+assert c.post("/api/testset/import",
+              json={"input_dir": POOL, "images": []}).status_code == 404
+print("projects: deleted, dataset and prompt bank untouched")
 
 # Teardown must not be able to fail the run. The prompt bank is written by the
 # inference sidecar, which runs as its own uid, so whoever drives the harness

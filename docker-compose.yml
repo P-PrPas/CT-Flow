@@ -29,7 +29,6 @@ services:
         APP_UID: ${APP_UID:-1000}      # must match api's -- both write under DATA_DIR
     image: ct-flow-vpe
     environment:
-      LABEL_TOOL_MODE: vm
       LABEL_TOOL_VM_ROOT: /opt/mount/project
     volumes:
       # It reads the images it embeds, and owns <input_dir>/.ctflow/_bank/
@@ -61,7 +60,6 @@ services:
         APP_UID: ${APP_UID:-1000}
     image: ct-flow-api
     environment:
-      LABEL_TOOL_MODE: vm
       LABEL_TOOL_VM_ROOT: /opt/mount/project
       LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
       # Signs the session cookie. Only this service has any auth -- the sidecar

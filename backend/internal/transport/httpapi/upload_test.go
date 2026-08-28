@@ -77,30 +77,12 @@ func savedNames(t *testing.T, w *httptest.ResponseRecorder) []string {
 	return out
 }
 
-// T-13's precondition, in code rather than in a doc: a shared deployment that
-// takes files from anyone who knows the URL is a worse problem than not having
-// upload at all.
-func TestUploadRefusedOnASharedServerWithoutUsers(t *testing.T) {
-	t.Setenv("LABEL_TOOL_USERS", "")
-	root := t.TempDir()
-	s := vmServer(t, root)
-
-	w := do(s, s.Upload, multipartReq(t, dirPart(root), filePart("a.png", pngBytes(t, 2, 2))))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
-	}
-	if got, want := detail(t, w), "configure OIDC or LABEL_TOOL_USERS before enabling upload on a shared server"; got != want {
-		t.Errorf("detail = %q, want %q", got, want)
-	}
-	// And nothing landed.
-	entries, _ := os.ReadDir(root)
-	if len(entries) != 0 {
-		t.Errorf("files were written despite the refusal: %v", entries)
-	}
-}
-
-// local mode is single-user on your own PC, so there is nobody to authenticate
-// against and upload is allowed.
+// T-13's precondition -- no upload on a shared server without a login -- used
+// to be a check in the handler. It is now true by construction: the process
+// refuses to start without OIDC or LABEL_TOOL_USERS (T-27), and RequireLogin
+// rejects an unauthenticated request before any handler runs. The test that
+// asserted the handler's own 403 went with the check; what replaces it is
+// TestRequireLoginFailsClosedWithoutUsers in auth_test.go.
 func TestUploadAllowedInLocalModeWithoutUsers(t *testing.T) {
 	t.Setenv("LABEL_TOOL_USERS", "")
 	root := t.TempDir()

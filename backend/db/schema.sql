@@ -7,10 +7,34 @@
 -- and changes rarely; add one if that stops being true. Idempotent
 -- (IF NOT EXISTS) so services/db.py can run it on every process start.
 
+-- One row per dataset folder. `input_dir` stays the identity every endpoint and
+-- every query below uses; `id` exists only so the UI has something to put in a
+-- URL that is not a server path (docs/PHASE2_WORKSPACE.md #2, decision 6).
+--
+-- No ALTER TABLE for the Phase 2 columns, and no migration framework. Adding
+-- them alongside the CREATE would leave a database created fresh and a database
+-- upgraded in place with two different definitions of `name` (NOT NULL vs
+-- nullable) from one file, which is a worse problem than the reset it avoids.
+-- Wiping is the migration -- see docs/PHASE2_WORKSPACE.md #8 -- and
+-- Store.InitSchema fails loudly at boot if these columns are missing, rather
+-- than letting a stale database break at a user's first request.
 CREATE TABLE IF NOT EXISTS projects (
     id          BIGSERIAL PRIMARY KEY,
     input_dir   TEXT NOT NULL UNIQUE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    name        TEXT NOT NULL,
+    -- users.oid of whoever created it. Nullable: a project can outlive the
+    -- account that made it, and nothing here should refuse to list one.
+    owner_oid   TEXT,
+    -- Which labeling module owns this project. One value today, and anything
+    -- else is rejected at the handler. It is here so a second module is a
+    -- sibling branch rather than a rewrite -- not as the seam of an
+    -- abstraction, which is a thing to discover from module two, not invent
+    -- before module one has users.
+    task_type   TEXT NOT NULL DEFAULT 'detection',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Touched by every write path through requireProject, so "last worked on"
+    -- costs no extra statement.
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Append-only, stable idx -- the DB-native replacement for classes.txt's

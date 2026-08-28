@@ -13,10 +13,6 @@ export default function SetupCard({ s }: { s: Session }) {
       <div className="card-head">
         <span className="card-title"><Icon name="sliders" size={13} /> Session setup</span>
         <div className="row">
-          <span className="chip">
-            <Icon name="gauge" size={12} />
-            {s.mode === "vm" ? "Shared VM" : "This machine"}
-          </span>
           {s.images.length > 0 && (
             <button className="btn ghost sm" onClick={() => s.setShowSetup(false)}>
               <Icon name="x" size={13} /> Hide

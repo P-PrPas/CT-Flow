@@ -215,7 +215,13 @@ r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 assert r.status_code == 200, r.text
 saved = r.json()["boxes"]
 assert saved and saved[0]["cls"] == "test_item", saved
-print("saved boxes:", saved)
+# FR-50: who drew them, alongside the boxes rather than on them -- Box is a
+# shape the client sends back on every save, so it stays exactly what it was.
+# A name, never the raw subject: the two are the same string for a local
+# account, which is why the store tests use subjects that look nothing like a
+# username and this one only checks the endpoint carries the field at all.
+assert [a["username"] for a in r.json()["labeled_by"]] == [SMOKE_USER], r.json()["labeled_by"]
+print("saved boxes:", saved, "by", [a["username"] for a in r.json()["labeled_by"]])
 
 # mode="update": add a box without losing the one already there
 r = c.post("/api/label", json={

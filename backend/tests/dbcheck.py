@@ -88,6 +88,16 @@ def delete_project(input_dir: str) -> None:
     _query("DELETE FROM projects WHERE input_dir=%s", (input_dir,))
 
 
+def delete_images(input_dir: str) -> None:
+    """Simulates the half-wipe FR-51 exists to catch: the prompt bank on disk
+    survives while the database forgets which images taught it -- what
+    `docker compose down -v` leaves behind when the dataset's .ctflow folder is
+    not deleted with it. Annotations cascade; the project row stays."""
+    pid = _project_id(input_dir)
+    if pid is not None:
+        _query("DELETE FROM images WHERE project_id=%s", (pid,))
+
+
 def demo():
     # Create the schema first. Every other entry point that touches this module
     # does (the API applies it at boot, smoke_test calls init_schema), so

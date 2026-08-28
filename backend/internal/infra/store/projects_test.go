@@ -216,3 +216,158 @@ func TestUpdateProjectLeavesOmittedFieldsAlone(t *testing.T) {
 		t.Errorf("updating a missing project: found=%v err=%v, want found=false and no error", found, err)
 	}
 }
+
+// Attribution stores an OIDC `sub`; screens need a name. The two are the same
+// string under a local login, which is how a comparison that confused them
+// shipped once already -- so every fixture below gives a user an oid that looks
+// nothing like their username, and any code that returns one where the other
+// belongs fails here rather than on an OIDC deployment.
+func seedUser(t *testing.T, s *Store, oid, username string) {
+	t.Helper()
+	if err := s.UpsertUser(context.Background(), oid, username, username+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUserNamesResolvesSubjectsAndKeepsUnknownOnes(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	seedUser(t, s, "8f14e45f-known", "peerapas")
+
+	got, err := s.UserNames(ctx, []string{"8f14e45f-known", "c9f0f895-never-logged-in"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["8f14e45f-known"] != "peerapas" {
+		t.Errorf("known subject = %q, want the username", got["8f14e45f-known"])
+	}
+	// Unreadable beats missing: a name that cannot be resolved still identifies
+	// a distinct person on screen.
+	if got["c9f0f895-never-logged-in"] != "c9f0f895-never-logged-in" {
+		t.Errorf("unknown subject = %q, want itself", got["c9f0f895-never-logged-in"])
+	}
+	if empty, err := s.UserNames(ctx, nil); err != nil || len(empty) != 0 {
+		t.Errorf("UserNames(nil) = %v, %v", empty, err)
+	}
+}
+
+// FR-50: who labeled this image, by name, most boxes first.
+func TestImageAuthorsNamesThePeopleWhoWroteTheBoxes(t *testing.T) {
+	s, dir := open(t)
+	ctx := context.Background()
+	alice, bob := "3c59dc04-alice", "b6d767d2-bob"
+	seedUser(t, s, alice, "alice")
+	seedUser(t, s, bob, "bob")
+
+	if _, err := s.WriteBoxes(ctx, dir, KindPool, "/img/a.jpg", []Box{
+		{Cls: "widget", Box: [4]float64{1, 1, 2, 2}},
+		{Cls: "widget", Box: [4]float64{3, 3, 4, 4}},
+	}, &alice, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WriteBoxes(ctx, dir, KindPool, "/img/a.jpg",
+		[]Box{{Cls: "widget", Box: [4]float64{5, 5, 6, 6}}}, &bob, true); err != nil {
+		t.Fatal(err)
+	}
+
+	authors, err := s.ImageAuthors(ctx, dir, KindPool, "/img/a.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(authors) != 2 {
+		t.Fatalf("authors = %+v, want two", authors)
+	}
+	if authors[0].Name != "alice" || authors[0].OID != alice {
+		t.Errorf("first author = %+v, want alice with two boxes", authors[0])
+	}
+	if authors[1].Name != "bob" {
+		t.Errorf("second author = %+v, want bob", authors[1])
+	}
+	// A subject must never reach a caller where a name belongs.
+	for _, a := range authors {
+		if a.Name == a.OID {
+			t.Errorf("author %+v was left as a raw subject", a)
+		}
+	}
+	// Another image in the same project has its own answer, not this one.
+	if other, err := s.ImageAuthors(ctx, dir, KindPool, "/img/b.jpg"); err != nil || len(other) != 0 {
+		t.Errorf("authors for an unlabeled image = %+v, %v", other, err)
+	}
+}
+
+// FR-51: the database half of the divergence check.
+func TestHasImages(t *testing.T) {
+	s, dir := open(t)
+	ctx := context.Background()
+
+	// A project created but never labeled has no image rows -- which, with a
+	// bank that has embeddings, is exactly the state the guard reports.
+	if any, err := s.HasImages(ctx, dir); err != nil || any {
+		t.Errorf("fresh project HasImages = %v, %v; want false", any, err)
+	}
+	if _, err := s.WriteBoxes(ctx, dir, KindPool, "/img/a.jpg",
+		[]Box{{Cls: "widget", Box: [4]float64{1, 1, 2, 2}}}, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if any, err := s.HasImages(ctx, dir); err != nil || !any {
+		t.Errorf("after a label HasImages = %v, %v; want true", any, err)
+	}
+	// A folder with no project at all is not an error, same as every reader.
+	if any, err := s.HasImages(ctx, dir+"-nope"); err != nil || any {
+		t.Errorf("HasImages on a folder with no project = %v, %v", any, err)
+	}
+}
+
+// "Add to existing" must not re-attribute what is already there.
+//
+// The merge path used to read the existing boxes out and write them all back
+// with created_by of whoever merged, so ticking the box and saving quietly made
+// someone else's work yours. Nothing read per-box attribution before FR-50, so
+// it was invisible; the home page's contributor counts and ImageAuthors both
+// read it now.
+func TestMergingDoesNotReattributeExistingBoxes(t *testing.T) {
+	s, dir := open(t)
+	ctx := context.Background()
+	alice, bob := "3c59dc04-alice", "b6d767d2-bob"
+
+	if _, err := s.WriteBoxes(ctx, dir, KindPool, "/img/a.jpg",
+		[]Box{{Cls: "widget", Box: [4]float64{1, 1, 2, 2}}}, &alice, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WriteBoxes(ctx, dir, KindPool, "/img/a.jpg",
+		[]Box{{Cls: "widget", Box: [4]float64{3, 3, 4, 4}}}, &bob, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both boxes are still there...
+	boxes, err := s.ReadBoxes(ctx, dir, KindPool, "/img/a.jpg")
+	if err != nil || len(boxes) != 2 {
+		t.Fatalf("boxes after merge = %v, %v; want two", boxes, err)
+	}
+	// ...and each still belongs to whoever drew it.
+	authors, err := s.ImageAuthors(ctx, dir, KindPool, "/img/a.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, a := range authors {
+		got[a.OID]++
+	}
+	if len(authors) != 2 || got[alice] != 1 || got[bob] != 1 {
+		t.Errorf("authors after merge = %+v, want one box each for alice and bob", authors)
+	}
+
+	// Replace still replaces: it is the other half of the same contract.
+	carol := "d3d94468-carol"
+	if _, err := s.WriteBoxes(ctx, dir, KindPool, "/img/a.jpg",
+		[]Box{{Cls: "widget", Box: [4]float64{5, 5, 6, 6}}}, &carol, false); err != nil {
+		t.Fatal(err)
+	}
+	authors, err = s.ImageAuthors(ctx, dir, KindPool, "/img/a.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(authors) != 1 || authors[0].OID != carol {
+		t.Errorf("authors after replace = %+v, want carol alone", authors)
+	}
+}

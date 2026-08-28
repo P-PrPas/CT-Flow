@@ -91,9 +91,21 @@ func (s *Server) OpenSession(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
+	// FR-51 -- state for this project lives in two places and one command wipes
+	// only half of it. A bank holding embeddings while the database holds no
+	// images at all is what `docker compose down -v` leaves behind when the
+	// dataset's .ctflow folder is not deleted with it: the model still knows
+	// what it was taught, and nothing knows which images taught it. Silent
+	// today, because predictions come back as class names rather than indexes.
+	hasImages, err := s.Store.HasImages(r.Context(), inputDir)
+	if err != nil {
+		return err
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"images": pool,
-		"bank":   bank,
+		"images":        pool,
+		"bank":          bank,
+		"bank_orphaned": len(bank.Classes) > 0 && !hasImages,
 		"testset": map[string]any{
 			"images": testImages, "labeled": labeled, "classes": classes,
 		},
@@ -126,6 +138,13 @@ func (s *Server) GetBoxes(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"boxes": boxes})
+	// FR-50. Per image, not per box: "who labeled this" is the question, and
+	// hanging created_by on Box would change a shape the client sends back on
+	// every save. Names, never subjects -- see store.UserNames.
+	authors, err := s.Store.ImageAuthors(r.Context(), inputDir, kind, image)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"boxes": boxes, "labeled_by": authors})
 	return nil
 }

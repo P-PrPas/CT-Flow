@@ -22,6 +22,7 @@ import (
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/vpe"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/auth"
+	"github.com/P-PrPas/CT-Flow/backend/internal/platform/claims"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/jobs"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/models"
@@ -108,9 +109,10 @@ func main() {
 
 	srv := &httpapi.Server{
 		Cfg: cfg, Catalog: catalog, Auth: auth.New(), OIDC: oidcAuth, Log: log,
-		Store: db,
-		VPE:   vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
-		Jobs:  jobs.NewTracker(),
+		Store:  db,
+		VPE:    vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
+		Jobs:   jobs.NewTracker(),
+		Claims: claims.NewTracker(),
 	}
 
 	addr := ":" + env("PORT", "8000")
@@ -175,6 +177,8 @@ func routes(s *httpapi.Server) http.Handler {
 
 	mux.Handle("POST /api/session", s.Handle(s.OpenSession))
 	mux.Handle("GET /api/boxes", s.Handle(s.GetBoxes))
+	mux.Handle("GET /api/state", s.Handle(s.GetState))
+	mux.Handle("POST /api/claim", s.Handle(s.Claim))
 
 	mux.Handle("POST /api/label", s.Handle(s.SaveLabel))
 	mux.Handle("POST /api/relabel", s.Handle(s.Relabel))

@@ -126,11 +126,15 @@ jobs:
       # in CI to avoid a password hash that is public by design is work spent to
       # test the harness instead of the app.
       LABEL_TOOL_SECRET: ci-not-a-secret-the-server-is-thrown-away
-      # alice / hunter2, the smoke test's defaults. Produced by
-      # `api -hash-password alice hunter2`; there is nothing to protect here.
-      LABEL_TOOL_USERS: "alice:pbkdf2$240000$4c398f4699ba3d06b917574a26c0abec$f625c92f5f7e1f01749b4697fb23e8de2eee8ebc1f4421e753df2fd58b1ae86a"
+      # alice / hunter2, the smoke test's defaults, plus a second account so
+      # FR-49's "someone else holds this image" path is exercised by two
+      # different subjects rather than one account in two sessions. Produced by
+      # `api -hash-password <name> <password>`; nothing to protect here.
+      LABEL_TOOL_USERS: "alice:pbkdf2$240000$4c398f4699ba3d06b917574a26c0abec$f625c92f5f7e1f01749b4697fb23e8de2eee8ebc1f4421e753df2fd58b1ae86a,bob:pbkdf2$240000$471e7215e8f992e564067f8054e86c52$43dc573204ac5576bc7387cf0931dbfcc3e26335ce50950131336d74277b0924"
       SMOKE_USER: alice
       SMOKE_PASSWORD: hunter2
+      SMOKE_USER2: bob
+      SMOKE_PASSWORD2: hunter2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

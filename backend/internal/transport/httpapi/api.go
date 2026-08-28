@@ -18,6 +18,7 @@ import (
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/vpe"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/auth"
+	"github.com/P-PrPas/CT-Flow/backend/internal/platform/claims"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/jobs"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/models"
@@ -31,6 +32,7 @@ type Server struct {
 	Store   *store.Store
 	VPE     *vpe.Client
 	Jobs    *jobs.Tracker
+	Claims  *claims.Tracker
 	Log     *slog.Logger
 }
 

@@ -27,6 +27,16 @@ export default function PoolPanel({ s }: { s: Session }) {
     <div className="workspace">
       {/* ------------------------------------------------ canvas side */}
       <div className="col" style={{ gap: 14 }}>
+        {/* FR-50 -- on a shared project, "who drew this" is the difference
+            between trusting a box and re-checking it. Names come from the
+            server already resolved; the raw subject never reaches the UI. */}
+        {s.labeledBy.length > 0 && (
+          <span className="xs muted row" style={{ gap: 5 }}>
+            <Icon name="user" size={12} />
+            labeled by {s.labeledBy.join(", ")}
+          </span>
+        )}
+
         {s.isReview && (
           /* FR-25 — the single most misunderstood thing in the tool: fixing a
              machine label writes the file but teaches nothing. Say so, and put
@@ -475,10 +485,21 @@ export default function PoolPanel({ s }: { s: Session }) {
                         : s.scores[p] ? `${s.scores[p].conf.toFixed(2)} ${s.scores[p].cls ?? ""}`
                           : "not checked yet"}
                   </div>
+                  {/* FR-49 -- the queue already skips these when picking what
+                      is next; saying so is what stops it looking like a bug. */}
+                  {s.heldByOthers.has(p) && (
+                    <div className="xs warn row" style={{ gap: 4 }}>
+                      <Icon name="user" size={11} /> {s.claims[p]} is on this one
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
-            {!s.images.length && <div className="xs muted" style={{ padding: 10 }}>No session open.</div>}
+            {!s.images.length && (
+              <div className="xs muted" style={{ padding: 10 }}>
+                {s.busy ? "Opening…" : "No images in this folder."}
+              </div>
+            )}
           </div>
         </div>
       </div>

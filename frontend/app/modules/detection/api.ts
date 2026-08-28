@@ -21,7 +21,7 @@ export function getConfig(): Promise<{
 }
 export function getBoxes(
   input_dir: string, image: string, kind: "pool" | "test" = "pool"
-): Promise<{ boxes: Box[] }> {
+): Promise<{ boxes: Box[]; labeled_by: { oid: string; username: string }[] }> {
   return request(
     `/api/boxes?input_dir=${encodeURIComponent(input_dir)}&image=${encodeURIComponent(image)}&kind=${kind}`
   );
@@ -36,6 +36,10 @@ export function getBoxes(
 export function openSession(input_dir: string): Promise<{
   images: string[]; bank: BankSummary;
   testset: { images: string[]; labeled: string[]; classes: string[] };
+  /** FR-51: the bank holds taught classes while the database holds no images
+   *  for this project -- a half-wipe, and the one state where what the model
+   *  knows and what the app knows have come apart. */
+  bank_orphaned: boolean;
 }> {
   return post("/api/session", { input_dir });
 }
@@ -157,4 +161,32 @@ export function reembedBank(
   input_dir: string, model_id: string, onProgress: (p: JobProgress) => void
 ) {
   return runJob("/api/reembed", { input_dir, model_id }, onProgress) as Promise<{ bank: BankSummary }>;
+}
+
+// --- working alongside someone else (FR-48, FR-49) ------------------------
+
+export type LiveState = {
+  labeled: string[];
+  auto: string[];
+  testset_labeled: string[];
+  /** image path -> the name of whoever is on it. Names, never subjects. */
+  claims: Record<string, string>;
+};
+
+/** What changes while you are not the one changing it. Polled while the
+ *  workspace is open, so it is deliberately small: no bank summary, because
+ *  classes and the locked model only change when *you* label and your own save
+ *  already returns them. */
+export function getState(input_dir: string): Promise<LiveState> {
+  return request(`/api/state?input_dir=${encodeURIComponent(input_dir)}`);
+}
+
+/** "I am working on this image", so the other person's queue points elsewhere.
+ *  Advice, not a lock -- a save is never refused because of it. Re-claiming
+ *  your own image renews it, which is what makes calling this on a timer a
+ *  heartbeat rather than a special case. */
+export function claimImage(input_dir: string, image: string, release = false) {
+  return post("/api/claim", { input_dir, image, release }) as Promise<{
+    claims: Record<string, string>;
+  }>;
 }

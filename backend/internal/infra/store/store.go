@@ -351,22 +351,23 @@ func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string
 		if err != nil {
 			return err
 		}
-		final := boxes
-		if merge {
-			existing, err := boxesFor(ctx, q, pid, kind, imagePath)
-			if err != nil {
-				return err
-			}
-			final = append(existing, boxes...)
-		}
 		imageID, err := getOrCreateImage(ctx, q, pid, kind, imagePath)
 		if err != nil {
 			return err
 		}
-		if _, err := q.Exec(ctx, `DELETE FROM annotations WHERE image_id=$1`, imageID); err != nil {
-			return err
+		// Merge keeps the rows that are already there rather than reading them
+		// out and writing them back. It used to do the latter, which re-stamped
+		// every existing box with created_by of whoever merged: tick "add to
+		// existing", save, and the boxes someone else drew became yours. Nothing
+		// read per-box attribution until FR-50, so it never showed.
+		//
+		// Not deleting is also less work, and it keeps created_at honest.
+		if !merge {
+			if _, err := q.Exec(ctx, `DELETE FROM annotations WHERE image_id=$1`, imageID); err != nil {
+				return err
+			}
 		}
-		for _, b := range final {
+		for _, b := range boxes {
 			classID, err := getOrCreateClass(ctx, q, pid, kind, b.Cls)
 			if err != nil {
 				return err

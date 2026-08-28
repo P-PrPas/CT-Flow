@@ -269,6 +269,96 @@ func (s *Store) DeleteProjectByID(ctx context.Context, id int64) (Project, bool,
 	return p, err == nil, err
 }
 
+// ImageAuthors is who wrote the boxes on one image, most boxes first (FR-50).
+//
+// Per image rather than per box: "who labeled this" is the question the
+// workspace asks, and putting created_by on Box would change a shape the client
+// also sends back on every save. Boxes stay what they always were.
+//
+// Same users join as everywhere else, so the caller gets a name rather than a
+// `sub` -- and the same fallback when the provider never wrote a users row.
+func (s *Store) ImageAuthors(ctx context.Context, inputDir, kind, imagePath string) ([]Person, error) {
+	out := []Person{}
+	err := s.tx(ctx, func(q pgx.Tx) error {
+		pid, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
+			return err
+		}
+		rows, err := q.Query(ctx, `
+			SELECT a.created_by, u.username, COUNT(*)
+			FROM annotations a
+			JOIN images i ON i.id = a.image_id
+			LEFT JOIN users u ON u.oid = a.created_by
+			WHERE i.project_id = $1 AND i.kind = $2 AND i.path = $3
+			  AND a.created_by IS NOT NULL
+			GROUP BY a.created_by, u.username
+			ORDER BY COUNT(*) DESC, a.created_by`, pid, kind, imagePath)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var oid string
+			var username *string
+			var n int
+			if err := rows.Scan(&oid, &username, &n); err != nil {
+				return err
+			}
+			out = append(out, *person(&oid, username))
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// UserNames resolves subjects to display names in one query.
+//
+// Attribution stores the provider's `sub` everywhere, because it is the one
+// claim that survives a rename -- and it is unreadable, so nothing may put one
+// on screen. This is the single place that turns a set of them back into
+// people. A subject with no users row maps to itself: unreadable beats missing.
+func (s *Store) UserNames(ctx context.Context, oids []string) (map[string]string, error) {
+	out := make(map[string]string, len(oids))
+	if len(oids) == 0 {
+		return out, nil
+	}
+	for _, oid := range oids {
+		out[oid] = oid
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT oid, username FROM users WHERE oid = ANY($1)`, oids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var oid, username string
+		if err := rows.Scan(&oid, &username); err != nil {
+			return nil, err
+		}
+		out[oid] = username
+	}
+	return out, rows.Err()
+}
+
+// HasImages reports whether this project has any image rows at all -- the
+// database half of FR-51's divergence check.
+//
+// "Any row", not "any labeled row": a test-set import creates rows too, and a
+// project that has been touched in any way is not the state the guard is for.
+func (s *Store) HasImages(ctx context.Context, inputDir string) (bool, error) {
+	any := false
+	err := s.tx(ctx, func(q pgx.Tx) error {
+		pid, found, err := projectID(ctx, q, inputDir)
+		if err != nil || !found {
+			return err
+		}
+		return q.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM images WHERE project_id = $1)`, pid).Scan(&any)
+	})
+	return any, err
+}
+
 // eachContributor walks annotations grouped by (project, author). pid 0 means
 // every project, which is what lets ListProjects stay at two queries.
 //

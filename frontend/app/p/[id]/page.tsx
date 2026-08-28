@@ -51,14 +51,16 @@ export default function ProjectPage() {
       </main>
     );
   }
-  if (!auth || !auth.user || !project) {
+  if (!auth || !auth.user || !auth.oid || !project) {
     return <main className="row" style={{ minHeight: "100dvh", justifyContent: "center" }}>Loading…</main>;
   }
-  return <Workspace auth={auth} project={project} />;
+  return <Workspace auth={auth} me={auth.oid} project={project} />;
 }
 
-function Workspace({ auth, project }: { auth: api.AuthState; project: api.Project }) {
-  const s = useSession(project.input_dir);
+function Workspace({
+  auth, me, project,
+}: { auth: api.AuthState; me: string; project: api.Project }) {
+  const s = useSession(project.input_dir, me);
 
   /** FR-20 — the whole repetitive part of the loop, on keys. Deliberately inert
    *  while a field or a dialog has focus: nothing is worse than a shortcut that
@@ -206,6 +208,22 @@ function Workspace({ auth, project }: { auth: api.AuthState; project: api.Projec
         className="col"
         style={{ gap: 14, padding: "14px var(--s5) var(--s6)", maxWidth: 1600, margin: "0 auto" }}
       >
+        {/* FR-51 -- the two halves of a project's state are wiped by different
+            commands, and this is what half-wiped looks like from inside. */}
+        {s.bankOrphaned && (
+          <div className="note warn">
+            <Icon name="alert" size={15} />
+            <span>
+              <strong>The taught examples and the labels disagree.</strong> This
+              folder&rsquo;s <code>.ctflow</code> still holds what the model was
+              taught, but the database has no labels for it — so the model
+              remembers, and nothing knows which images taught it. Usually a{" "}
+              <code>docker compose down -v</code> without deleting{" "}
+              <code>.ctflow</code>. Labeling from here mixes the two.
+            </span>
+          </div>
+        )}
+
         {s.reachable === false && (
           <div className="note bad">
             <Icon name="alert" size={15} />
@@ -221,6 +239,11 @@ function Workspace({ auth, project }: { auth: api.AuthState; project: api.Projec
               <span className={`dot${s.busy ? " pulse" : ""}`} style={{ color: s.busy ? "var(--brand)" : "var(--faint)" }} />
               {s.status}
             </span>
+            {s.claimNote && (
+              <span className="chip warn" title="Two people were pointed at the same image">
+                <Icon name="user" size={12} /> {s.claimNote}
+              </span>
+            )}
             <div className="row wrap xs faint" style={{ gap: 10 }}>
               <span className="mono truncate" title={project.input_dir} style={{ maxWidth: 240 }}>in: {fileOf(project.input_dir)}</span>
             </div>

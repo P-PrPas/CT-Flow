@@ -80,6 +80,11 @@ _dbcheck.delete_project(POOL)
 # before the first request rather than in the auth section at the bottom.
 SMOKE_USER = os.getenv("SMOKE_USER", "alice")
 SMOKE_PASSWORD = os.getenv("SMOKE_PASSWORD", "hunter2")
+# A second account, so FR-49's "someone else is on this image" is two different
+# people rather than one account in two tabs. Optional: a target server with
+# only one user skips that one assertion instead of failing.
+SMOKE_USER2 = os.getenv("SMOKE_USER2", "")
+SMOKE_PASSWORD2 = os.getenv("SMOKE_PASSWORD2", "")
 r = c.post("/api/auth/login", json={"username": SMOKE_USER, "password": SMOKE_PASSWORD})
 assert r.status_code == 200, (
     f"could not sign in as {SMOKE_USER}: {r.text}\n"
@@ -439,6 +444,89 @@ meta = json.loads((OUT / "_bank" / "metadata.json").read_text(encoding="utf-8"))
 assert all("labeled_by" in i for insts in meta["instances"].values() for i in insts), meta
 
 
+# --- FR-48 / FR-49 / FR-50 / FR-51: working alongside someone else ----------
+# GET /api/state is what an open workspace polls. Deliberately no BankSummary in
+# it: classes and model only change when *you* label, and your own save already
+# returns them -- putting them here would mean a sidecar round trip per poll per
+# open tab to re-send something that cannot have changed.
+st = c.get("/api/state", params={"input_dir": POOL}).json()
+assert set(st) == {"labeled", "auto", "testset_labeled", "claims"}, st
+session_bank = c.post("/api/session", json={"input_dir": POOL}).json()["bank"]
+assert st["labeled"] == session_bank["labeled"], (st, session_bank)
+assert st["auto"] == session_bank["auto"], (st, session_bank)
+
+def drop_claims(client, user: str) -> None:
+    """Release everything `user` is holding in this project.
+
+    Claims live in the API process, not the database, so they outlive a run:
+    against a long-lived server a previous run -- especially one that failed
+    part-way -- can still be holding these images, and a stale holder blocking
+    the next run is the feature working, not a bug. So establish the starting
+    state rather than assume it."""
+    held = client.get("/api/state", params={"input_dir": POOL}).json()["claims"]
+    for path, who in held.items():
+        if who == user:
+            client.post("/api/claim", json={"input_dir": POOL, "image": path, "release": True})
+
+
+# A claim is advice, so it is the queue that changes, never the ability to save.
+# Picked from what is still in the pool at this point: the test-set block above
+# flags some of these images, and /api/label rightly refuses a flagged one --
+# which would fail this block for a reason that has nothing to do with claims.
+flagged = set(c.post("/api/session", json={"input_dir": POOL}).json()["testset"]["images"])
+free = [p for p in images if p not in flagged]
+assert len(free) >= 2, (images, flagged)
+first, second = free[0], free[1]
+drop_claims(c, SMOKE_USER)
+if SMOKE_USER2:
+    with httpx.Client(base_url=BASE_URL, timeout=30) as stale:
+        stale.post("/api/auth/login", json={"username": SMOKE_USER2, "password": SMOKE_PASSWORD2})
+        drop_claims(stale, SMOKE_USER2)
+assert c.post("/api/claim", json={"input_dir": POOL, "image": first}).status_code == 200
+assert c.get("/api/state", params={"input_dir": POOL}).json()["claims"][first] == SMOKE_USER
+
+# Re-claiming your own image renews it rather than conflicting -- that is what
+# lets the frontend call this on a timer as a heartbeat.
+assert c.post("/api/claim", json={"input_dir": POOL, "image": first}).status_code == 200
+
+# One image per person per project: moving on releases the last one, which is
+# why there is no separate release call for navigation.
+assert c.post("/api/claim", json={"input_dir": POOL, "image": second}).status_code == 200
+held = c.get("/api/state", params={"input_dir": POOL}).json()["claims"]
+assert held == {second: SMOKE_USER}, held
+
+# Somebody else's claim is a 409 naming them -- and the name has to be a name.
+# Attribution stores an OIDC subject everywhere, and no endpoint may put one on
+# screen, so this asserts the message contains the username and not the subject.
+if SMOKE_USER2:
+    with httpx.Client(base_url=BASE_URL, timeout=30) as other:
+        r = other.post("/api/auth/login",
+                       json={"username": SMOKE_USER2, "password": SMOKE_PASSWORD2})
+        assert r.status_code == 200, f"SMOKE_USER2 could not sign in: {r.text}"
+        r = other.post("/api/claim", json={"input_dir": POOL, "image": second})
+        assert r.status_code == 409, (r.status_code, r.text)
+        assert r.json()["detail"] == f"{SMOKE_USER} is working on this image", r.json()
+        # ...and the other person is not blocked from the rest of the project.
+        assert other.post("/api/claim", json={"input_dir": POOL, "image": first}).status_code == 200
+        held = c.get("/api/state", params={"input_dir": POOL}).json()["claims"]
+        assert held == {second: SMOKE_USER, first: SMOKE_USER2}, held
+        # Hand it back. Claims live in the API process, not the database, so
+        # they outlive a run against a long-lived server -- and the next run
+        # would find this image held by somebody who is no longer here.
+        other.post("/api/claim", json={"input_dir": POOL, "image": first, "release": True})
+    print(f"claims: {SMOKE_USER2} was refused {SMOKE_USER}'s image by name, and took another")
+else:
+    print("claims: conflict path skipped -- set SMOKE_USER2/SMOKE_PASSWORD2 to cover it")
+
+# Saving ends the work on an image, so it stops being held -- otherwise a
+# finished image sits out the rest of the TTL in the other person's queue.
+assert c.post("/api/label", json={
+    "input_dir": POOL, "image": second,
+    "boxes": [{"cls": "test_item", "box": [12, 12, 40, 40]}],
+}).status_code == 200
+assert c.get("/api/state", params={"input_dir": POOL}).json()["claims"] == {}
+print("state: polled, claimed, renewed, moved on, released by saving")
+
 # --- FR-44 / FR-50: what the home page reads --------------------------------
 # Counts come from images.status, and "who worked here" is derived from
 # annotations.created_by rather than a membership list -- so both have to
@@ -581,6 +669,17 @@ check_auth(c, SMOKE_USER, SMOKE_PASSWORD)
 c.post("/api/auth/login", json={"username": SMOKE_USER, "password": SMOKE_PASSWORD})
 
 assert c.post("/api/session", json={"input_dir": POOL}).status_code == 200
+
+# --- FR-51: the bank and the database can come apart ------------------------
+# Last, and deliberately so: proving it means deleting every image row, which is
+# the state the assertions above are made of. The bank still holds what it was
+# taught -- exactly what `docker compose down -v` leaves behind when the
+# dataset's .ctflow folder is not deleted with it.
+assert c.post("/api/session", json={"input_dir": POOL}).json()["bank_orphaned"] is False
+_dbcheck.delete_images(POOL)
+orphaned = c.post("/api/session", json={"input_dir": POOL})
+assert orphaned.json()["bank_orphaned"] is True, orphaned.json()
+print("bank_orphaned: reported when the bank has classes and the DB has no images")
 
 # --- FR-43: deleting a project takes the rows and leaves the files ----------
 # Last, because everything above needs the project to exist. The promise the UI

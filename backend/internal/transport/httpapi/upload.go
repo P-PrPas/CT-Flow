@@ -23,13 +23,10 @@ import (
 //  3. the bytes have to decode as an image. The extension is a fast reject; the
 //     decode is the one that actually decides.
 func (s *Server) Upload(w http.ResponseWriter, r *http.Request) error {
-	if s.Cfg.Mode == "vm" && !s.authEnabled() {
-		// T-13's precondition, enforced in code rather than left in a doc: a
-		// shared deployment that accepts files from anyone who knows the URL is
-		// a worse problem than not having upload at all.
-		return errStatus(http.StatusForbidden,
-			"configure OIDC or LABEL_TOOL_USERS before enabling upload on a shared server")
-	}
+	// T-13's precondition -- "no upload on a shared server without auth" -- used
+	// to be a check here. It is now true by construction: the process refuses to
+	// start without OIDC or LABEL_TOOL_USERS (T-27), so the condition it guarded
+	// can no longer occur.
 
 	mr, err := r.MultipartReader()
 	if err != nil {

@@ -1,6 +1,6 @@
 # CT-Flow — Phase 2: Workspace & Multi-user
 
-> **สถานะ:** แผน ยังไม่เริ่ม implement · ตกลงกับเจ้าของโปรเจกต์แล้ว 2026-08-28
+> **สถานะ:** ก้อนที่ 1 (T-26, T-27, T-28) implement แล้ว · ก้อนที่ 2–4 ยังเป็นแผน · ตกลง scope กับเจ้าของโปรเจกต์ 2026-08-28
 > **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [REQUIREMENTS.md](./REQUIREMENTS.md) · [ROADMAP.md](./ROADMAP.md)
 
 เอกสารนี้คือแผนงานฉบับเดียวของ Phase 2 — อ่านจบแล้วต้องลงมือเขียนโค้ดได้โดยไม่ต้องถามอะไรเพิ่ม
@@ -148,6 +148,7 @@ endpoint สำหรับ poll — เบา ไม่แตะ sidecar ไม
 
 ### 4.3 สิ่งที่เปลี่ยนใน endpoint เดิม
 
+- `POST /api/session` เพิ่ม `"project": {…}` ในคำตอบ **(ทำแล้วใน T-26)** — เป็นจุดสร้างโปรเจกต์อีกจุดผ่าน `EnsureProject` ด้วย ดูหมายเหตุท้าย T-26
 - `POST /api/session` เพิ่ม `"bank_orphaned": bool` ในคำตอบ — `true` เมื่อ bank มี embedding แต่ project นี้ไม่มีแถว `images` เลยใน DB (ดูข้อ 8)
 - `GET /api/config` **ตัดฟิลด์ `mode` ทิ้ง** พร้อมกับการลบ `LABEL_TOOL_MODE=local` — `roots` ยังอยู่
 - `POST /api/upload` ตัดเงื่อนไข `403` เรื่อง "vm mode + ไม่มี auth" ทิ้ง เพราะ auth เป็นสิ่งบังคับแล้ว เงื่อนไขนั้นเป็นจริงเสมอ (endpoint ยังไม่มี UI เรียกในรอบนี้)
@@ -215,24 +216,32 @@ app/
 
 ### ก้อนที่ 1 — Backend (UI ไม่เปลี่ยน)
 
-#### T-26 · `projects` schema + Projects API
-- `backend/db/schema.sql` — เพิ่ม `name`, `owner_oid`, `task_type`, `updated_at` ใน `CREATE TABLE projects`
-- boot check ใน `Store.InitSchema()` — query `information_schema.columns` ยืนยันว่าคอลัมน์ที่ต้องใช้มีครบ ถ้าไม่ครบ return error ที่บอกทางแก้ตรง ๆ (ล้าง DB ตามหัวข้อ "Reset" ใน README)
-- `internal/infra/store` — `CreateProject`, `ListProjects`, `GetProject`, `UpdateProject`, `DeleteProject` (`DeleteProject` มีอยู่แล้ว รับ `input_dir` — เพิ่มตัวที่รับ `id`)
+#### T-26 · `projects` schema + Projects API ✅
+- `backend/db/schema.sql` — เพิ่ม `name`, `owner_oid`, `task_type`, `updated_at` ใน `CREATE TABLE projects` **ตารางอื่นไม่แตะ**
+- boot check ใน `Store.InitSchema()` — query `information_schema.columns` ยืนยันว่าคอลัมน์ที่ต้องใช้มีครบ ถ้าไม่ครบ return error ที่บอกทางแก้ตรง ๆ (ล้าง DB ตามหัวข้อ 8)
+- `internal/infra/store/projects.go` — `EnsureProject`, `ListProjects`, `GetProject`, `GetProjectByDir`, `UpdateProject`, `DeleteProjectByID`
 - `internal/transport/httpapi/projects.go` — 5 endpoint ตามข้อ 4.1
-- **เปลี่ยน `getOrCreateProject()` → `getProject()`** ที่ error ถ้าไม่มีแถว · ทุก write path (`WriteBoxes`, `MarkLabeled`, `MarkAuto`, `MarkTest`, `UnmarkTest`) ปฏิเสธ `input_dir` ที่ยังไม่ถูกสร้างเป็นโปรเจกต์ ด้วย `404 {"detail": "no project for this folder -- create it first"}`
+- **เปลี่ยน `getOrCreateProject()` → `requireProject()`** ที่คืน `store.ErrNoProject` ถ้าไม่มีแถว · ทุก write path (`WriteBoxes`, `MarkLabeled`, `MarkAuto`, `MarkTest`, `UnmarkTest`) ปฏิเสธ `input_dir` ที่ยังไม่ถูกสร้างเป็นโปรเจกต์ ด้วย `404 {"detail": "no project for this folder -- create it first"}` แปลงที่ `Handle` ที่เดียว ไม่ใช่ทั้งห้าที่
   - **นี่เป็นการเปลี่ยนพฤติกรรมโดยตั้งใจ** ทำให้ "โปรเจกต์ถูกสร้างอย่างเป็นทางการเท่านั้น" เป็นกติกาจริง ไม่ใช่ธรรมเนียม — ไม่งั้นแถวไร้ชื่อไร้เจ้าของจะงอกขึ้นมาเงียบ ๆ ได้ตลอดเวลา
-- **เกณฑ์รับ:** `smoke_test.py` สร้างโปรเจกต์ก่อนแล้วค่อยเดิน flow เดิมทั้งหมด · ยืนยัน `409` เมื่อสร้างซ้ำ path เดิม · ยืนยัน `404` เมื่อ label ลงโฟลเดอร์ที่ไม่มีโปรเจกต์ · `GET /api/projects` คืน `labeled`/`auto`/`contributors` ตรงกับที่ label ไปจริง
+- **เกณฑ์รับ:** `smoke_test.py` ยืนยัน `409` เมื่อสร้างซ้ำ path เดิม · `404` เมื่อ label ลงโฟลเดอร์ที่ไม่มีโปรเจกต์ · `GET /api/projects` คืน `labeled`/`auto`/`contributors` ตรงกับที่ label ไปจริง · ลบโปรเจกต์แล้วไฟล์ภาพและ prompt bank ยังอยู่ครบ
 
-#### T-27 · บังคับ login + ลบ `local` mode
+> **ต่างจากแผนเดิมตอนลงมือทำ (2026-08-28):** แผนบอกว่าก้อนที่ 1 ไม่แตะ UI แต่ถ้า write path ทุกตัวต้องมีโปรเจกต์อยู่ก่อน frontend ปัจจุบันที่เปิด `POST /api/session` แล้ว label เลยจะพังทันทีที่ merge — `main` จะไม่เขียวอย่างที่ตั้งใจ
+>
+> ทางแก้: **`POST /api/session` เป็นจุดสร้างโปรเจกต์อีกจุดหนึ่ง** ผ่าน `EnsureProject` (ชื่อ = ชื่อโฟลเดอร์, เจ้าของ = คนที่เปิด) ซึ่งซื่อตรงกับความหมายของมันอยู่แล้ว — "เปิดโฟลเดอร์นี้" คือการบอกว่านี่คืองานที่กำลังทำ และมันเป็น call แรกที่ frontend ยิงอยู่แล้ว · กติกา "ทุกแถวมีชื่อและมีเจ้าของ" ยังอยู่ครบ ต่างจาก get-or-create เดิมที่สร้างแถวเปล่าจาก write path ไหนก็ได้ · `POST /api/projects` ยังปฏิเสธ `409` เมื่อสร้างซ้ำ (สร้าง = ตั้งใจ, เปิด = รับช่วง)
+>
+> ผลข้างเคียงที่ตามมา: response ของ `POST /api/session` มีฟิลด์ `project` เพิ่ม เพื่อให้ client ที่เปิดโฟลเดอร์ตรง ๆ ได้ `id` ไปทำลิงก์ และได้ชื่อ/เจ้าของโดยไม่ต้องยิงซ้ำ
+
+#### T-27 · บังคับ login + ลบ `local` mode ✅
 - `cmd/api/main.go` — ตอน boot ถ้าไม่มีทั้ง OIDC config และ `LABEL_TOOL_USERS` → log ข้อความบอกว่าต้องตั้งอะไร แล้ว exit non-zero (แบบเดียวกับที่ compose ทำกับ `POSTGRES_PASSWORD`)
 - `internal/platform/config` — ลบ `LABEL_TOOL_MODE` และสาขา `local` ใน `PathAllowed` · `LABEL_TOOL_VM_ROOT` อยู่ต่อและกลายเป็น root เดียวเสมอ
+  - **ผลที่ต้องรู้:** การรันนอก Docker ต้องตั้ง `LABEL_TOOL_VM_ROOT` เอง ไม่งั้นทุก path ได้ `403` เพราะ default คือ `/opt/mount/project` (แก้ใน README และใน CI แล้ว)
 - `internal/transport/httpapi` — `GET /api/config` ตัดฟิลด์ `mode` · `auth.go` ตัด `authMode() == "none"` และ `state()` ไม่ต้องคืน `enabled: false` อีก · `upload.go` ตัดเงื่อนไข 403 ที่เป็นจริงเสมอแล้ว
-- frontend — `page.tsx` ตัดสาขา `auth.enabled === false` · `SetupCard` ตัด chip "Shared VM / This machine"
+- `RequireLogin` ตัด bypass `!authEnabled()` ทิ้ง — **fail closed** ไม่ใช่พึ่ง boot check อย่างเดียว · `authMode()` ไม่มีค่า `"none"` อีกต่อไป
+- frontend — `page.tsx` ตัดสาขา `auth.enabled === false` · หน้า login ตัดสาขา `mode === "none"` · `SetupCard` ตัด chip "Shared VM / This machine" · `GET /api/config` ตัดฟิลด์ `mode` ทั้งฝั่ง Go และ TypeScript
 - `.env.example`, `docker-compose*.yml` — ตัด `LABEL_TOOL_MODE`
 - **เกณฑ์รับ:** start แอปโดยไม่ตั้ง auth แล้วต้องตายพร้อมข้อความที่อ่านรู้เรื่อง (ไม่ใช่ panic) · `go test ./...` ผ่าน โดย test ของ `config` ที่ครอบ `local` mode ถูกลบ ไม่ใช่ถูก skip
 
-#### T-28 · เปิด auth ใน CI
+#### T-28 · เปิด auth ใน CI ✅
 - `.github/workflows/backend.yml` — ตั้ง `LABEL_TOOL_USERS` (hash จาก `-hash-password`) + `LABEL_TOOL_SECRET` + `SMOKE_USER`/`SMOKE_PASSWORD` ในงาน `smoke`
 - **เกณฑ์รับ:** บล็อก auth ใน `smoke_test.py` (ที่ `smoke_test.py:515` เคยข้ามมาตลอด) **เดินจริงบน CI เป็นครั้งแรก** · ยืนยันด้วยการดู log ว่าไม่มีข้อความ "re-run against a server with LABEL_TOOL_USERS set"
 

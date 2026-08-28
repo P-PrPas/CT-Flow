@@ -31,14 +31,20 @@ const oidcStateCookie = "labeltool_oidc_state"
 // that cannot half-arrive beats two that can.
 const oidcStateSep = "."
 
-// RequireLogin is inert until OIDC or legacy local users are configured.
+// RequireLogin gates every request that is not in Public.
 //
 // It wraps the whole mux rather than sitting on each route, so the gate is on
 // by default and Public above is the only way out of it -- a route added later
 // is protected by having been forgotten, not exposed by it.
+//
+// It used to be inert when no login was configured, for the "one person, own
+// PC" deployment the tool started as. That deployment is gone (T-27) and the
+// process now refuses to start without OIDC or LABEL_TOOL_USERS, so the bypass
+// went with it: an unconfigured server fails closed here rather than serving
+// everything to anyone who can reach it.
 func (s *Server) RequireLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions || Public[r.URL.Path] || !s.authEnabled() {
+		if r.Method == http.MethodOptions || Public[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -50,8 +56,9 @@ func (s *Server) RequireLogin(next http.Handler) http.Handler {
 	})
 }
 
-// currentUser is FR-31: who to record as having taught a prompt. "" means auth
-// is off, not "unauthenticated" -- RequireLogin already rejected that case.
+// currentUser is FR-31: who to record as having taught a prompt, and who owns a
+// project they create. Empty only on a request RequireLogin would have rejected
+// -- every gated handler is reached with a signed-in caller.
 func (s *Server) currentUser(r *http.Request) string {
 	user, _ := s.currentIdentity(r)
 	return user
@@ -68,8 +75,9 @@ func (s *Server) currentIdentity(r *http.Request) (string, string) {
 		return "", ""
 	}
 	attribution, display, oidcSession := auth.SessionIdentity(s.Auth.Identify(c.Value))
-	mode := s.authMode()
-	if mode == "none" || (mode == "oidc") != oidcSession {
+	// A session issued under the other login mode is not a session here: an
+	// OIDC cookie must not survive a switch to local accounts, or the reverse.
+	if (s.authMode() == "oidc") != oidcSession {
 		return "", ""
 	}
 	return attribution, display
@@ -85,29 +93,30 @@ type authState struct {
 	LogoutURL string `json:"logoutUrl,omitempty"`
 }
 
+// Enabled is always true now that signing in is mandatory. The field stays on
+// the wire because the frontend and the smoke test both read it, and because
+// "is there a login on this server" is still the question the UI is asking --
+// the answer just cannot be no any more.
 func state(mode, user string) authState {
-	enabled := mode != "none"
 	if user == "" {
-		return authState{Enabled: enabled, User: nil, Mode: mode}
+		return authState{Enabled: true, User: nil, Mode: mode}
 	}
-	return authState{Enabled: enabled, User: &user, Mode: mode}
+	return authState{Enabled: true, User: &user, Mode: mode}
 }
 
+// authMode picks which credential the session cookie is expected to carry. OIDC
+// wins where both are configured; local accounts are the CI and development
+// path (docs/PHASE2_WORKSPACE.md #2, decision 8). There is no third value: a
+// server with neither does not get past main().
 func (s *Server) authMode() string {
 	if s.OIDC != nil {
 		return "oidc"
 	}
-	if auth.Enabled() {
-		return "local"
-	}
-	return "none"
+	return "local"
 }
 
-func (s *Server) authEnabled() bool { return s.authMode() != "none" }
-
-// AuthMe is what the UI calls on load to decide whether to draw a login screen.
-// enabled:false means the server has no users configured, i.e. every other
-// endpoint is open to anyone who can reach it -- not that you are signed out.
+// AuthMe is what the UI calls on load to decide whether to draw a login screen
+// or the app. user:null means signed out.
 func (s *Server) AuthMe(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, state(s.authMode(), s.currentDisplayUser(r)))
 	return nil

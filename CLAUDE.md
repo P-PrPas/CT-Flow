@@ -1,4 +1,4 @@
-ต้# CT-Flow — working notes for coding agents
+# CT-Flow — working notes for coding agents
 
 Human-in-the-loop visual-prompt labeling tool for YOLOE. Read this, then
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), then the plan for whatever you

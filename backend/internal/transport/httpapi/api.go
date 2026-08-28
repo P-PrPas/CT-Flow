@@ -87,6 +87,14 @@ func (s *Server) Handle(h Handler) http.HandlerFunc {
 				writeJSON(w, ve.Status, map[string]string{"detail": ve.Detail})
 				return
 			}
+			// Writing to a folder that is not a project. Answered here rather
+			// than in each of the five write paths that can raise it, so the
+			// status and the wording cannot drift between them.
+			if errors.Is(err, store.ErrNoProject) {
+				writeJSON(w, http.StatusNotFound,
+					map[string]string{"detail": "no project for this folder -- create it first"})
+				return
+			}
 			// An unexpected error is logged in full and reported as one line:
 			// the browser gets something lib/api.ts can display, and the detail
 			// stays server-side rather than leaking a path or a query.

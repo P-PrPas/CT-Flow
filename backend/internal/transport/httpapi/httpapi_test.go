@@ -50,15 +50,18 @@ func testServer(t *testing.T, cfg config.Config) *Server {
 	}
 }
 
+// localServer confines to "/", which is as permissive as a deployment can be
+// now that confinement is unconditional (T-27) -- for the tests whose subject is
+// not the path gate.
 func localServer(t *testing.T) *Server {
-	return testServer(t, config.Config{Mode: "local", ModelsDir: "models", MaxUploadMB: 25})
+	return testServer(t, config.Config{VMDataRoot: "/", ModelsDir: "models", MaxUploadMB: 25})
 }
 
 // vmServer confines the deployment to root, which is what makes every path in a
 // request a trust boundary rather than a convenience.
 func vmServer(t *testing.T, root string) *Server {
 	return testServer(t, config.Config{
-		Mode: "vm", VMDataRoot: root, ModelsDir: "models", MaxUploadMB: 25,
+		VMDataRoot: root, ModelsDir: "models", MaxUploadMB: 25,
 	})
 }
 
@@ -292,8 +295,10 @@ func TestGetConfigTouchesNothingAndLeaksNoPaths(t *testing.T) {
 	}
 	body := decode(t, w)
 
-	if body["mode"] != "vm" {
-		t.Errorf("mode = %v, want vm", body["mode"])
+	// No `mode` field since T-27: it reported "local" vs "vm", and there is
+	// only one behaviour left for it to report.
+	if _, present := body["mode"]; present {
+		t.Errorf("mode is still in the response: %v", body["mode"])
 	}
 	if roots, ok := body["roots"].([]any); !ok || len(roots) != 1 || roots[0] != "/opt/mount/project" {
 		t.Errorf("roots = %v, want only the vm root", body["roots"])

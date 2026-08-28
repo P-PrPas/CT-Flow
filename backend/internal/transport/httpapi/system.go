@@ -12,22 +12,24 @@ import (
 )
 
 type configResponse struct {
-	Mode         string               `json:"mode"`
 	Roots        []string             `json:"roots"`
 	Colors       []string             `json:"colors"`
 	Models       []models.PublicEntry `json:"models"`
 	DefaultModel string               `json:"default_model"`
 }
 
-// GetConfig reports the deployment's mode, what the folder picker can reach,
-// the per-class box colours, and which checkpoints are selectable.
+// GetConfig reports what the folder picker can reach, the per-class box
+// colours, and which checkpoints are selectable.
+//
+// No `mode` field any more: it reported "local" vs "vm", and there is only one
+// behaviour now (T-27). The frontend used it for a chip saying which kind of
+// deployment this was, which no longer distinguishes anything.
 //
 // Always reachable, even signed out -- the UI needs it before it can draw a
 // login box -- and it is also the container healthcheck, which is why it
 // touches neither the database nor the inference sidecar.
 func (s *Server) GetConfig(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, configResponse{
-		Mode:         s.Cfg.Mode,
 		Roots:        s.Cfg.BrowseRoots(),
 		Colors:       config.LabelColors,
 		Models:       s.Catalog.Public(),

@@ -78,6 +78,19 @@ func main() {
 		log.Error("cannot configure OIDC", "err", err)
 		os.Exit(1)
 	}
+	// Sign-in is mandatory (T-27). It used to be optional, which meant a
+	// deployment that simply forgot to set these variables served every endpoint
+	// to anyone who could reach it and reported nothing -- and now that projects
+	// carry an owner and every box carries an author, an unauthenticated server
+	// would also record every one of them as nobody. Refusing to start is the
+	// same contract docker-compose.yml already applies to POSTGRES_PASSWORD.
+	if oidcAuth == nil && !auth.Enabled() {
+		log.Error("refusing to start without a way to sign in: " +
+			"set OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_ENDPOINT and FRONTEND_URL " +
+			"for company OIDC, or LABEL_TOOL_USERS (see -hash-password) for local " +
+			"accounts. See docs/PHASE2_WORKSPACE.md T-27")
+		os.Exit(1)
+	}
 	db, err := store.Open(ctx, env("DATABASE_URL",
 		"postgresql://labeltool:labeltool@localhost:5432/labeltool"))
 	if err != nil {
@@ -101,7 +114,7 @@ func main() {
 	}
 
 	addr := ":" + env("PORT", "8000")
-	log.Info("starting", "addr", addr, "mode", cfg.Mode, "models", cfg.ModelsDir)
+	log.Info("starting", "addr", addr, "root", cfg.VMDataRoot, "models", cfg.ModelsDir)
 
 	server := &http.Server{
 		Addr:              addr,
@@ -153,6 +166,12 @@ func routes(s *httpapi.Server) http.Handler {
 	mux.Handle("GET /api/config", s.Handle(s.GetConfig))
 	mux.Handle("GET /api/browse", s.Handle(s.Browse))
 	mux.Handle("GET /api/image", s.Handle(s.GetImage))
+
+	mux.Handle("GET /api/projects", s.Handle(s.ListProjects))
+	mux.Handle("POST /api/projects", s.Handle(s.CreateProject))
+	mux.Handle("GET /api/projects/{id}", s.Handle(s.GetProject))
+	mux.Handle("PATCH /api/projects/{id}", s.Handle(s.UpdateProject))
+	mux.Handle("DELETE /api/projects/{id}", s.Handle(s.DeleteProject))
 
 	mux.Handle("POST /api/session", s.Handle(s.OpenSession))
 	mux.Handle("GET /api/boxes", s.Handle(s.GetBoxes))

@@ -19,14 +19,17 @@ export default function Page() {
   const [auth, setAuth] = useState<api.AuthState | null>(null);
 
   useEffect(() => {
-    api.getAuth().then(setAuth).catch(() => setAuth({ enabled: false, user: null, mode: "none" }));
+    // A failed call means the API is unreachable, not that nobody is signed in.
+    // Treating it as signed out is right either way: the login screen is where
+    // both states are recoverable from.
+    api.getAuth().then(setAuth).catch(() => setAuth({ enabled: true, user: null, mode: "oidc" }));
   }, []);
 
   useEffect(() => {
-    if (auth?.enabled && !auth.user) router.replace("/entry/login");
+    if (auth && !auth.user) router.replace("/entry/login");
   }, [auth, router]);
 
-  if (!auth || (auth.enabled && !auth.user)) {
+  if (!auth || !auth.user) {
     return <main className="row" style={{ minHeight: "100dvh", justifyContent: "center" }}>Loading…</main>;
   }
   return <Workspace auth={auth} />;
@@ -169,21 +172,17 @@ function Workspace({ auth }: { auth: api.AuthState }) {
               <Icon name="keyboard" size={15} />
             </button>
 
-            {auth.user ? (
-              <button
-                className="chip btn-like"
-                title="Sign out"
-                onClick={() => api.logout()
-                  .then((out) => window.location.assign(out.logoutUrl || "/entry/login"))
-                  .catch(() => window.location.assign("/entry/login"))}
-              >
-                <Icon name="user" size={12} /> {auth.user}
-              </button>
-            ) : (
-              <Tip text="Authentication is disabled on this server.">
-                <span className="chip"><Icon name="lock" size={12} /> Auth off</span>
-              </Tip>
-            )}
+            {/* Signing in is mandatory (T-27), so there is no signed-out
+                state to render here -- Page redirects before Workspace mounts. */}
+            <button
+              className="chip btn-like"
+              title="Sign out"
+              onClick={() => api.logout()
+                .then((out) => window.location.assign(out.logoutUrl || "/entry/login"))
+                .catch(() => window.location.assign("/entry/login"))}
+            >
+              <Icon name="user" size={12} /> {auth.user}
+            </button>
           </div>
         </div>
       </header>

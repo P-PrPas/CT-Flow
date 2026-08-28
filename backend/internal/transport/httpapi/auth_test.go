@@ -40,10 +40,13 @@ func gated() (http.Handler, *bool) {
 	}), &reached
 }
 
-// With no users configured there is no login at all and every endpoint is open,
-// which is the "one person, own PC" case the tool started as. Adding a login
-// screen to that would be pure friction.
-func TestRequireLoginIsInertWithoutUsers(t *testing.T) {
+// A server with no login configured must refuse requests, not serve them.
+//
+// This inverts what it used to assert. Signing in is mandatory (T-27) and
+// main() will not start such a server at all -- but the gate is the last thing
+// standing between a misconfiguration and an open API, so it fails closed on
+// its own rather than trusting the startup check to have run.
+func TestRequireLoginFailsClosedWithoutUsers(t *testing.T) {
 	t.Setenv("LABEL_TOOL_USERS", "")
 	s := localServer(t)
 	next, reached := gated()
@@ -51,8 +54,8 @@ func TestRequireLoginIsInertWithoutUsers(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.RequireLogin(next).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/label", nil))
 
-	if !*reached || w.Code != http.StatusOK {
-		t.Errorf("auth off: status %d, reached=%v -- want the request through", w.Code, *reached)
+	if *reached || w.Code != http.StatusUnauthorized {
+		t.Errorf("no login configured: status %d, reached=%v -- want 401 and no handler", w.Code, *reached)
 	}
 }
 
@@ -155,16 +158,17 @@ func TestRequireLoginLetsPreflightThrough(t *testing.T) {
 
 // ---------------------------------------------------------------- /api/auth/*
 
-func TestAuthMeReportsWhetherThereIsALoginAtAll(t *testing.T) {
+func TestAuthMeReportsWhoIsSignedIn(t *testing.T) {
 	t.Setenv("LABEL_TOOL_USERS", "")
 	s := localServer(t)
 
-	// enabled:false means every other endpoint is open to anyone who can reach
-	// it -- not that you are signed out. The UI branches on exactly this.
+	// user:null is "signed out". enabled stays true: since T-27 there is always
+	// a login on this server, so the UI's only question is whether to draw the
+	// login screen or the app.
 	w := do(s, s.AuthMe, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
 	body := decode(t, w)
-	if body["enabled"] != false || body["user"] != nil {
-		t.Errorf("auth off: %v, want {enabled:false, user:null}", body)
+	if body["enabled"] != true || body["user"] != nil {
+		t.Errorf("signed out: %v, want {enabled:true, user:null}", body)
 	}
 
 	withUser(t, "alice", "pw")

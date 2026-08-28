@@ -1,15 +1,15 @@
 // Package config holds the app-wide settings and the one security control
 // every request path depends on.
 //
-// Mode decides which filesystem the directory picker walks:
+// Ported from backend/config.py and backend/deps.py -- see
+// docs/history/REFACTOR_PLAN.md.
 //
-//	local -> the server runs on your own PC, so browsing the server IS browsing
-//	         your PC. Roots = all drives.
-//	vm    -> the server runs on a shared VM. Only VMDataRoot is browsable, and
-//	         your datasets have to live there (a mounted share, usually).
-//
-// Set with the LABEL_TOOL_MODE env var. Ported from backend/config.py and
-// backend/deps.py -- see docs/history/REFACTOR_PLAN.md.
+// LABEL_TOOL_MODE is gone (T-27). It had two values: "vm", which confines every
+// path to VMDataRoot, and "local", which allowed the whole filesystem because
+// the server was assumed to be the user's own PC. Nobody runs it that way any
+// more, and a setting whose only job was to switch off the path gate is a
+// setting that eventually gets switched off on a shared server. Confinement is
+// now unconditional.
 package config
 
 import (
@@ -22,7 +22,8 @@ import (
 // Config is read once at startup. Nothing here changes while the process runs,
 // which is why it is passed by value and never guarded by a lock.
 type Config struct {
-	Mode        string // "local" | "vm"
+	// VMDataRoot is the only browsable root, and the boundary PathAllowed
+	// enforces. Datasets have to live under it -- a mounted share, usually.
 	VMDataRoot  string
 	ModelsDir   string
 	MaxUploadMB float64
@@ -54,7 +55,6 @@ var ImageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".bmp
 
 func Load() Config {
 	return Config{
-		Mode:        strings.ToLower(env("LABEL_TOOL_MODE", "local")),
 		VMDataRoot:  env("LABEL_TOOL_VM_ROOT", "/opt/mount/project"),
 		ModelsDir:   env("MODELS_DIR", "models"),
 		MaxUploadMB: envFloat("LABEL_TOOL_MAX_UPLOAD_MB", 25),
@@ -63,15 +63,11 @@ func Load() Config {
 
 // BrowseRoots is what the folder picker starts from.
 func (c Config) BrowseRoots() []string {
-	if c.Mode == "vm" {
-		return []string{c.VMDataRoot}
-	}
-	return []string{"/"}
+	return []string{c.VMDataRoot}
 }
 
 // PathAllowed is a trust boundary, not a convenience: the browser can send any
-// path string, so vm mode confines it to VMDataRoot. local mode is single-user
-// on your own PC and allows everything.
+// path string, so every one of them is confined to VMDataRoot.
 //
 // Three ways to get this wrong, all of them tried by someone at some point:
 //
@@ -84,9 +80,6 @@ func (c Config) BrowseRoots() []string {
 //
 // resolvePath below handles all three.
 func (c Config) PathAllowed(p string) bool {
-	if c.Mode != "vm" {
-		return true
-	}
 	target, err := resolvePath(p)
 	if err != nil {
 		return false

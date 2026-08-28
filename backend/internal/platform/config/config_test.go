@@ -28,7 +28,7 @@ func TestPathAllowedVMMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c := Config{Mode: "vm", VMDataRoot: root}
+	c := Config{VMDataRoot: root}
 	for _, tc := range []struct {
 		name string
 		path string
@@ -58,25 +58,23 @@ func TestPathAllowedVMMode(t *testing.T) {
 	}
 }
 
-// local mode is the "server runs on your own PC" case: browsing the server is
-// browsing your own machine, so there is nothing to confine it to.
-func TestPathAllowedLocalMode(t *testing.T) {
-	c := Config{Mode: "local", VMDataRoot: "/opt/mount/project"}
-	for _, p := range []string{"/etc/passwd", "", "../..", "C:\\Users"} {
-		if !c.PathAllowed(p) {
-			t.Errorf("local mode should allow %q", p)
+// There is no longer a mode that switches confinement off (T-27). The old
+// "local" escape hatch allowed the whole filesystem on the theory that the
+// server was the user's own PC; these are the paths it used to wave through.
+func TestPathAllowedHasNoEscapeHatch(t *testing.T) {
+	c := Config{VMDataRoot: "/opt/mount/project"}
+	for _, p := range []string{"/etc/passwd", "", "../..", `C:\Users`} {
+		if c.PathAllowed(p) {
+			t.Errorf("PathAllowed(%q) = true -- confinement is unconditional now", p)
 		}
 	}
 }
 
 func TestLoadDefaults(t *testing.T) {
-	for _, k := range []string{"LABEL_TOOL_MODE", "LABEL_TOOL_VM_ROOT", "MODELS_DIR", "LABEL_TOOL_MAX_UPLOAD_MB"} {
+	for _, k := range []string{"LABEL_TOOL_VM_ROOT", "MODELS_DIR", "LABEL_TOOL_MAX_UPLOAD_MB"} {
 		t.Setenv(k, "")
 	}
 	c := Load()
-	if c.Mode != "local" {
-		t.Errorf("default mode = %q, want local (backend/config.py's default)", c.Mode)
-	}
 	if c.VMDataRoot != "/opt/mount/project" || c.MaxUploadMB != 25 {
 		t.Errorf("unexpected defaults: %+v", c)
 	}
@@ -87,18 +85,11 @@ func TestLoadDefaults(t *testing.T) {
 	if got := Load().MaxUploadMB; got != 25 {
 		t.Errorf("unparseable cap = %v, want the 25 MB fallback", got)
 	}
-	t.Setenv("LABEL_TOOL_MODE", "VM")
-	if Load().Mode != "vm" {
-		t.Error("mode should be lowercased, as config.py does")
-	}
 }
 
 func TestBrowseRoots(t *testing.T) {
-	if got := (Config{Mode: "vm", VMDataRoot: "/data"}).BrowseRoots(); len(got) != 1 || got[0] != "/data" {
-		t.Errorf("vm roots = %v, want [/data]", got)
-	}
-	if got := (Config{Mode: "local"}).BrowseRoots(); len(got) != 1 || got[0] != "/" {
-		t.Errorf("local roots = %v, want [/]", got)
+	if got := (Config{VMDataRoot: "/data"}).BrowseRoots(); len(got) != 1 || got[0] != "/data" {
+		t.Errorf("roots = %v, want [/data] -- the confinement root is the only one", got)
 	}
 }
 

@@ -29,7 +29,7 @@ inside it, and the labels live in PostgreSQL keyed by that same folder.
 - [Using CT-Flow](#using-ct-flow)
 - [Model selection](#model-selection)
 - [Keyboard shortcuts](#keyboard-shortcuts)
-- [Multi-user & security](#multi-user--security-optional)
+- [Multi-user & security](#multi-user--security)
 - [Configuration reference](#configuration-reference)
 - [API overview](#api-overview)
 - [Local development](#local-development-without-docker)
@@ -76,8 +76,8 @@ pool.
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
 | OIDC login | Ready | company OIDC authorization-code flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
-| Image upload | Backend only | `POST /api/upload`, refuses to run without auth in `vm` mode; no dropzone in the UI yet |
-| Per-label attribution (`labeled_by`) | Ready | recorded once auth is on |
+| Image upload | Backend only | `POST /api/upload` is built and gated by the login; no dropzone in the UI yet |
+| Per-label attribution (`labeled_by`) | Ready | every box and every taught prompt records who wrote it |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
 | Embedding-distance duplicate detection | Approximated | an 8×8 thumbnail hash stands in for true embedding distance — good enough today, see [limitations](#known-limitations--roadmap) |
 | Project workspaces + multi-user queue | Planned | home page, per-project ownership and attribution, image claiming, mandatory login — [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) |
@@ -318,19 +318,17 @@ Opens with **`?`** in the app; inert while a text field or dialog has focus.
 | `C` | Paste the clipboard's boxes (copied from another image) |
 | `A` | Accept all predicted boxes in review mode |
 
-## Multi-user & security (optional)
+## Multi-user & security
 
-> Login becomes **mandatory** in Phase 2 (T-27) — with neither OIDC nor
-> `LABEL_TOOL_USERS` set the API will refuse to start, and
-> `LABEL_TOOL_MODE=local` goes away entirely. See
-> [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md). What follows
-> describes the current behaviour.
+**Signing in is required.** With neither the OIDC variables nor
+`LABEL_TOOL_USERS` set, the API refuses to start — projects carry an owner and
+every box carries an author, and a server nobody signs in to would record all
+of them as nobody. Path confinement to `LABEL_TOOL_VM_ROOT` is unconditional
+for the same reason: there is no "this is my own PC" deployment left to opt out
+for.
 
-Off by default: with no OIDC variables or `LABEL_TOOL_USERS` set, there is no login, and
-`POST /api/upload` refuses to run in `vm` mode — a shared server that takes
-files from anyone who knows the URL is worse than no upload at all. To use the
-same company OIDC flow as `corpus-core`, register `<FRONTEND_URL>/entry/callback`
-with the provider and set:
+To use the same company OIDC flow as `corpus-core`, register
+`<FRONTEND_URL>/entry/callback` with the provider and set:
 
 ```bash
 OAUTH_CLIENT_ID=...
@@ -355,7 +353,8 @@ unaffected. When it does advertise `end_session_endpoint`, signing out ends the
 session at the provider too -- without that, "sign out" on a shared labelling
 machine leaves the next sign-in silent and signed in as whoever left.
 
-Legacy local username/password login remains available when OIDC is not set:
+Local username/password accounts are the fallback when OIDC is not set, and the
+credential CI and local development use:
 
 ```bash
 docker compose run --rm --entrypoint /app/api api -hash-password alice 'their password'
@@ -363,11 +362,11 @@ docker compose run --rm --entrypoint /app/api api -hash-password alice 'their pa
 python -c "import secrets; print(secrets.token_hex(32))"   # LABEL_TOOL_SECRET
 ```
 
-When either login mode is enabled, every endpoint except the login/config routes needs a signed
-session cookie, and every prompt-bank instance records the `labeled_by` who
-taught it. Legacy passwords are PBKDF2-HMAC-SHA256 (240k iterations) compared in
-constant time — no user database, and the hash format is unchanged from before
-the Go port, so an existing `LABEL_TOOL_USERS` value keeps working.
+Every endpoint except the login/config routes needs a signed session cookie, and
+every prompt-bank instance records the `labeled_by` who taught it. Local
+passwords are PBKDF2-HMAC-SHA256 (240k iterations) compared in constant time —
+no user database, and the hash format is unchanged from before the Go port, so
+an existing `LABEL_TOOL_USERS` value keeps working.
 
 ## Configuration reference
 
@@ -375,12 +374,11 @@ the Go port, so an existing `LABEL_TOOL_USERS` value keeps working.
 |---|---|---|
 | `DATA_DIR` | `../data` | host folder mounted at `/opt/mount/project` — datasets and outputs must live under it (default is the sibling `data/` folder shared with the original POC) |
 | `WEB_PORT` | `3000` | port the UI is served on |
-| `LABEL_TOOL_MODE` | `vm` in Docker | `vm` = confined to `LABEL_TOOL_VM_ROOT`; `local` = browse every drive |
-| `LABEL_TOOL_VM_ROOT` | `/opt/mount/project` | the confinement root in `vm` mode |
+| `LABEL_TOOL_VM_ROOT` | `/opt/mount/project` | the only browsable root — every path from the browser is confined to it, unconditionally |
 | `MODELS_DIR` | `/models` in Docker | where YOLOE checkpoints are cached after auto-download — a named volume in Docker, a plain repo-local folder otherwise |
 | `POSTGRES_PASSWORD` | *(none — required)* | password for the `db` service; `docker compose up` refuses to start without it |
 | `DATABASE_URL` | set automatically in compose | where label/box storage lives (PostgreSQL, see [docs/history/DB_MIGRATION_PLAN.md](docs/history/DB_MIGRATION_PLAN.md)) — override to point at a different Postgres when running outside Docker |
-| `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — empty means no login and no upload |
+| `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — the local-account login. **Either this or the OIDC variables is required**; with neither, the API refuses to start |
 | `LABEL_TOOL_SECRET` | *(random per restart)* | signs the session cookie; unset = everyone signed out on every restart |
 | `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | *(empty)* | company OIDC client credentials; both required when OIDC is enabled |
 | `OAUTH_ENDPOINT` | *(empty)* | OIDC issuer/discovery URL |
@@ -388,9 +386,6 @@ the Go port, so an existing `LABEL_TOOL_USERS` value keeps working.
 | `LABEL_TOOL_MAX_UPLOAD_MB` | `25` | per-file upload cap |
 | `APP_UID` | `1000` | build arg — must own `DATA_DIR` on a Linux host, since the container doesn't run as root |
 | `TORCH_INDEX_URL` | `.../whl/cu126` | build arg — the pip index PyTorch installs from; override to `.../whl/cpu` for a GPU-less build |
-
-`local` mode only makes sense outside Docker, where the server runs on your
-own PC and browsing the server means browsing your machine.
 
 ## API overview
 
@@ -433,8 +428,12 @@ docker compose up -d db
 pip install -r backend/inference/requirements.txt
 uvicorn backend.inference.service:app --port 8001 --reload
 
-# 3. API
+# 3. API -- signing in is mandatory, and there is no "browse the whole disk"
+#    mode any more, so a dev run needs a credential and a root it can reach.
 export DATABASE_URL=postgresql://labeltool:<password>@localhost:5433/labeltool
+export LABEL_TOOL_VM_ROOT=$PWD/../data   # wherever your datasets are
+export LABEL_TOOL_SECRET=dev
+export LABEL_TOOL_USERS="$(cd backend && go run ./cmd/api -hash-password dev 'dev')"
 cd backend && go run ./cmd/api      # :8000, VPE_URL defaults to 127.0.0.1:8001
 
 cd frontend && npm run dev          # needs API_URL if not 127.0.0.1:8000

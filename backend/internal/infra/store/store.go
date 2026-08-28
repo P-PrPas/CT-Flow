@@ -9,13 +9,16 @@
 // an improvement on the Python; that is deliberate.
 //
 // One divergence, and it is not a rewrite so much as restoring what the Python
-// had for free: reads resolve the project with projectID, not
-// getOrCreateProject. Python called get_or_create_project on its own
-// connection, which committed and dropped the row lock before the read ran.
-// Wrapping the same statements in one Go transaction quietly turned every read
-// into a writer queueing on the projects row -- same SQL, different isolation,
-// and only the second one serialises a whole project behind one export. See
-// getOrCreateProject.
+// had for free: reads resolve the project with projectID, not requireProject.
+// Python called get_or_create_project on its own connection, which committed
+// and dropped the row lock before the read ran. Wrapping the same statements in
+// one Go transaction quietly turned every read into a writer queueing on the
+// projects row -- same SQL, different isolation, and only the second one
+// serialises a whole project behind one export. See requireProject.
+//
+// The second divergence is Phase 2's: writes require a project that already
+// exists rather than creating one on the way past, so every project has a name
+// and an owner. Creating one is EnsureProject, in projects.go.
 //
 // Prompt-bank embeddings are a separate concern and still live in a file, owned
 // by the inference sidecar -- see backend/inference/bank.py.
@@ -32,6 +35,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,13 +83,58 @@ func (s *Store) Close() { s.pool.Close() }
 
 // InitSchema applies schemaPath. Idempotent, so it runs on every boot rather
 // than requiring a migration step -- same as the FastAPI startup hook did.
+//
+// Then it checks that the tables it just ran CREATE TABLE IF NOT EXISTS over
+// actually have the columns this build needs. IF NOT EXISTS is a no-op against a
+// table that predates a column, so without this a database from before Phase 2
+// starts cleanly and then fails on whichever request touches projects.name
+// first, with a Postgres error nobody can act on. See docs/PHASE2_WORKSPACE.md
+// #8 for why wiping is the migration here.
 func (s *Store) InitSchema(ctx context.Context, schemaPath string) error {
 	schema, err := os.ReadFile(schemaPath)
 	if err != nil {
 		return fmt.Errorf("reading schema %s: %w", schemaPath, err)
 	}
-	_, err = s.pool.Exec(ctx, string(schema))
-	return err
+	if _, err := s.pool.Exec(ctx, string(schema)); err != nil {
+		return err
+	}
+	return s.checkColumns(ctx, "projects", "name", "owner_oid", "task_type", "updated_at")
+}
+
+func (s *Store) checkColumns(ctx context.Context, table string, want ...string) error {
+	rows, err := s.pool.Query(ctx,
+		`SELECT column_name FROM information_schema.columns
+		 WHERE table_schema = current_schema() AND table_name = $1`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return err
+		}
+		have[c] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	var missing []string
+	for _, c := range want {
+		if !have[c] {
+			missing = append(missing, c)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf(
+			"this database predates Phase 2: table %s is missing %s. "+
+				"There is no migration for it -- reset the database and the tool state "+
+				"together (docker compose down -v, then delete each dataset's .ctflow "+
+				"folder; image files are not touched). See docs/PHASE2_WORKSPACE.md #8",
+			table, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // tx runs fn inside one transaction: committed on a clean return, rolled back
@@ -96,9 +145,18 @@ func (s *Store) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, s.pool, fn)
 }
 
-// getOrCreateProject is for write paths only. The upsert takes an exclusive lock
-// on the projects row and, unlike the Python it was copied from, holds it for
-// the rest of the transaction -- there, get_or_create_project ran on its own
+// ErrNoProject is a write against a folder no project was ever created for.
+//
+// Before Phase 2 this could not happen: every write get-or-created the row on
+// the way past, which meant nameless, ownerless projects appeared whenever any
+// endpoint was called with any folder. Creating a project is now something
+// someone does on purpose -- EnsureProject, from POST /api/session or
+// POST /api/projects -- so that "who owns this work" always has an answer.
+var ErrNoProject = errors.New("no project for this folder")
+
+// requireProject is for write paths only. The UPDATE takes an exclusive lock on
+// the projects row and, unlike the Python this was ported from, holds it for the
+// rest of the transaction -- there, get_or_create_project ran on its own
 // connection and committed before the caller did anything else.
 //
 // Read paths must therefore use projectID instead. Using this one would make
@@ -106,13 +164,22 @@ func (s *Store) tx(ctx context.Context, fn func(pgx.Tx) error) error {
 // whole project would block every label save for it, and two people working in
 // one folder would queue behind each other for no reason. That is the opposite
 // of what moving this storage into a database was for.
-func getOrCreateProject(ctx context.Context, q pgx.Tx, inputDir string) (int64, error) {
+//
+// Bumping updated_at is the reason it is an UPDATE rather than a SELECT ... FOR
+// UPDATE: the row has to be locked either way, and "last worked on" is then free
+// instead of a second statement every write path would have to remember.
+func requireProject(ctx context.Context, q pgx.Tx, inputDir string) (int64, error) {
 	var id int64
-	err := q.QueryRow(ctx,
-		`INSERT INTO projects (input_dir) VALUES ($1)
-		 ON CONFLICT (input_dir) DO UPDATE SET input_dir = EXCLUDED.input_dir
-		 RETURNING id`, inputDir).Scan(&id)
-	return id, err
+	switch err := q.QueryRow(ctx,
+		`UPDATE projects SET updated_at = now() WHERE input_dir = $1 RETURNING id`,
+		inputDir).Scan(&id); err {
+	case nil:
+		return id, nil
+	case pgx.ErrNoRows:
+		return 0, ErrNoProject
+	default:
+		return 0, err
+	}
 }
 
 // projectID resolves a project without creating or locking one.
@@ -280,7 +347,7 @@ func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string
 	boxes []Box, createdBy *string, merge bool) ([]string, error) {
 	var names []string
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		pid, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := requireProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
@@ -319,7 +386,7 @@ func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string
 
 func (s *Store) MarkLabeled(ctx context.Context, inputDir, kind, imagePath string) error {
 	return s.tx(ctx, func(q pgx.Tx) error {
-		pid, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := requireProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
@@ -340,7 +407,7 @@ func (s *Store) MarkAuto(ctx context.Context, inputDir string, imagePaths []stri
 		return nil
 	}
 	return s.tx(ctx, func(q pgx.Tx) error {
-		pid, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := requireProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
@@ -457,7 +524,7 @@ func (s *Store) IsTest(ctx context.Context, inputDir, imagePath string) (bool, e
 func (s *Store) MarkTest(ctx context.Context, inputDir string, imagePaths []string) ([]string, error) {
 	added := []string{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		pid, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := requireProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}
@@ -490,7 +557,7 @@ func (s *Store) MarkTest(ctx context.Context, inputDir string, imagePaths []stri
 func (s *Store) UnmarkTest(ctx context.Context, inputDir string, imagePaths []string) ([]string, error) {
 	removed := []string{}
 	err := s.tx(ctx, func(q pgx.Tx) error {
-		pid, err := getOrCreateProject(ctx, q, inputDir)
+		pid, err := requireProject(ctx, q, inputDir)
 		if err != nil {
 			return err
 		}

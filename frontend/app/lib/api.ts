@@ -27,7 +27,12 @@ const post = (url: string, body: unknown) =>
 export const imgUrl = (path: string) => `/api/image?path=${encodeURIComponent(path)}`;
 
 export type AuthState = {
-  enabled: boolean; user: string | null; mode: "none" | "local" | "oidc";
+  /** Always true since T-27 -- signing in is mandatory, and the server will not
+   *  start without a way to do it. Kept because it is what the endpoint sends. */
+  enabled: boolean;
+  user: string | null;
+  /** "local" is the CI and development credential path; people use "oidc". */
+  mode: "local" | "oidc";
   /** Only on the logout response, and only under OIDC: where to send the
    *  browser so the provider session ends too. Clearing our own cookie alone
    *  leaves the next "sign in" silent. */
@@ -55,7 +60,7 @@ export function logout(): Promise<AuthState> {
 }
 
 export function getConfig(): Promise<{
-  mode: string; roots: string[]; colors: string[]; models: ModelInfo[]; default_model: string;
+  roots: string[]; colors: string[]; models: ModelInfo[]; default_model: string;
 }> {
   return request("/api/config");
 }

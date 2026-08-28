@@ -80,7 +80,8 @@ pool.
 | Per-label attribution (`labeled_by`) | Ready | every box and every taught prompt records who wrote it |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
 | Embedding-distance duplicate detection | Approximated | an 8×8 thumbnail hash stands in for true embedding distance — good enough today, see [limitations](#known-limitations--roadmap) |
-| Project workspaces + multi-user queue | In progress | projects with an owner, the `/api/projects` API and mandatory login are in; home page, `/p/{id}`, image claiming and attribution in the UI are next — [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) |
+| Project workspaces | Ready | `/` lists every project with its owner, progress and contributors; `/p/{id}` is the workspace, and the folder path is in the URL rather than one browser's `localStorage` |
+| Multi-user queue | Planned | image claiming, live progress from other people and per-box attribution in the UI — [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) |
 
 ## Repository layout
 
@@ -528,13 +529,12 @@ Full gap analysis: [`docs/ROADMAP.md`](docs/ROADMAP.md) and
 [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
 The headline items:
 
-- **No project workspaces yet.** The folder path lives in the browser's
-  `localStorage`, so nothing can answer "what work exists here, who owns it,
-  how far along is it" — and two people on the same folder are handed the
-  same image, because the queue is ordered identically for everyone and
-  never refreshes. Both are what
-  [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) is for; that is the
-  work in flight.
+- **Two people on one project are still handed the same image**, because the
+  queue is ordered identically for everyone and never refreshes. Project
+  workspaces themselves are done — `/` lists what work exists, who owns it and
+  how far along it is, and each project has its own shareable URL — but sharing
+  one *between* people is the next slice of
+  [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md).
 - **No upload UI.** `POST /api/upload` is built and protected by auth, but the
   frontend still has no dropzone — and there is no answer yet for where an
   uploaded file should land.

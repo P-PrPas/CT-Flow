@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import EvalOverlay, { EVAL_LEGEND } from "../components/EvalOverlay";
-import { imgUrl } from "../lib/api";
-import type { Session } from "../lib/session";
-import { Empty, fileOf, gradeColor, Icon, pct, Term } from "../lib/ui";
+import { imgUrl } from "../api";
+import type { Session } from "../session";
+import { Empty, fileOf, gradeColor, Icon, pct, Term } from "../../../lib/ui";
 
 type Filter = "all" | "errors" | "clean";
 

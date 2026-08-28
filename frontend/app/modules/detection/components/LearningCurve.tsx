@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import type { EvalPoint } from "../lib/history";
-import { Empty, Icon, pct } from "../lib/ui";
+import type { EvalPoint } from "../history";
+import { Empty, Icon, pct } from "../../../lib/ui";
 
 /** FR-13 — F1 against the number of examples taught, one line per class.
  *

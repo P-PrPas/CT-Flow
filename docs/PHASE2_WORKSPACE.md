@@ -1,6 +1,6 @@
 # CT-Flow — Phase 2: Workspace & Multi-user
 
-> **สถานะ:** ก้อนที่ 1 (T-26, T-27, T-28) implement แล้ว · ก้อนที่ 2–4 ยังเป็นแผน · ตกลง scope กับเจ้าของโปรเจกต์ 2026-08-28
+> **สถานะ:** ก้อนที่ 1 (T-26–T-28) merge เข้า `main` แล้ว · ก้อนที่ 2 (T-29, T-30) implement แล้ว · ก้อนที่ 3–4 ยังเป็นแผน · ตกลง scope กับเจ้าของโปรเจกต์ 2026-08-28
 > **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [REQUIREMENTS.md](./REQUIREMENTS.md) · [ROADMAP.md](./ROADMAP.md)
 
 เอกสารนี้คือแผนงานฉบับเดียวของ Phase 2 — อ่านจบแล้วต้องลงมือเขียนโค้ดได้โดยไม่ต้องถามอะไรเพิ่ม
@@ -196,7 +196,9 @@ app/
 
 การ์ดหนึ่งใบต่อโปรเจกต์: ชื่อ · ชนิดงาน · เจ้าของ · `labeled`/`auto` · คนที่ลงมือทำ (จาก `contributors`) · แก้ล่าสุดเมื่อไหร่ · ปุ่มเปิด
 
-แบ่งสองส่วน: **ของฉัน** (`owner.oid == me`) และ **ทั้งหมด** · ไม่มีการซ่อนโปรเจกต์ของใครจากใคร
+แบ่งสองส่วน: **ของฉัน** และ **ทั้งหมด** · ไม่มีการซ่อนโปรเจกต์ของใครจากใคร
+
+> ⚠️ **เทียบด้วย `oid` เท่านั้น ห้ามเทียบด้วยชื่อ** — ตอนเขียนแผนข้อนี้เขียนไว้ว่า `owner.oid == me` โดยที่ `me` ไม่เคยมีอยู่จริง: `GET /api/auth/me` คืนแต่ display name (`currentDisplayUser`) ส่วน `owner.oid` คือ `sub` ที่ `currentUser` เขียนลง `owner_oid` — บน OIDC สองค่านี้เป็นคนละสตริงเสมอ ผลคือ "ของฉัน" จะว่างเปล่าทุกกรณีบน deployment จริง และมองไม่เห็นตอน dev เพราะ local account มี attribution เท่ากับ display พอดี · **แก้ใน T-29 โดยเพิ่มฟิลด์ `oid` ใน `GET /api/auth/me`** (และใน response ของ login/logout ให้เหมือนกัน)
 
 ปุ่มสร้าง → dialog: ชื่อ + เลือกโฟลเดอร์ (`DirPicker` เดิม) + ชนิดงาน (วันนี้มีตัวเลือกเดียว แสดงเป็น chip ไม่ใช่ dropdown ที่มีตัวเลือกเดียว)
 
@@ -248,15 +250,17 @@ app/
 
 ### ก้อนที่ 2 — Frontend routing + home
 
-#### T-29 · Home page + route `/p/{id}`
+#### T-29 · Home page + route `/p/{id}` ✅
 - `app/page.tsx` เขียนใหม่เป็น home · `app/p/[id]/page.tsx` รับช่วง workspace เดิม
 - dialog สร้างโปรเจกต์ (ชื่อ + `DirPicker` + chip ชนิดงาน)
-- ลบ `DIRS_KEY`/`localStorage` · `SetupCard` เหลือเฉพาะ `ModelPicker` + สถานะ session (พิจารณายุบรวมเข้า workspace ไปเลย)
-- **เกณฑ์รับ:** สร้างโปรเจกต์จาก home → เปิด → label → refresh หน้า → ยังอยู่ที่โปรเจกต์เดิม (route จำให้) · เปิดลิงก์ `/p/{id}` จากอีก browser ที่ login คนละคน แล้วเข้าถึงงานเดียวกันได้
+- ลบ `DIRS_KEY`/`localStorage` · **ลบ `SetupCard.tsx` ทิ้งทั้งไฟล์** — ช่องเลือกโฟลเดอร์ย้ายไป home, `ModelPicker` มีอยู่ใน `PoolPanel` อยู่แล้ว, และปุ่ม "Open session" ไม่จำเป็นเมื่อ route รู้โฟลเดอร์อยู่แล้ว (`useSession` เปิดเองตอน mount)
+- `GET /api/auth/me` (และ login/logout) เพิ่มฟิลด์ `oid` — **แตะ backend ต่างจากที่แผนบอกว่าก้อนนี้เป็น frontend ล้วน** แต่จำเป็น: home page ตอบไม่ได้ว่าโปรเจกต์ไหนเป็นของคนที่ login อยู่ถ้า client ไม่เคยรู้ `oid` ของตัวเอง (ดูกล่องเตือนในข้อ 5.3) · smoke test ยืนยัน shape ใหม่ทั้ง signed-in และ signed-out
+- **เกณฑ์รับ:** สร้างโปรเจกต์จาก home → เปิด → label → refresh หน้า → ยังอยู่ที่โปรเจกต์เดิม (route จำให้) · เปิดลิงก์ `/p/{id}` จากอีก browser ที่ login คนละคน แล้วเข้าถึงงานเดียวกันได้ · โปรเจกต์ที่ตัวเองเป็นเจ้าของขึ้นใต้ "Yours" **บน OIDC ไม่ใช่แค่ local account**
 
-#### T-30 · ผ่าโมดูล detection ออกจากของกลาง
+#### T-30 · ผ่าโมดูล detection ออกจากของกลาง ✅
 - ย้ายไฟล์ตามข้อ 5.2 · แยก `app/lib/api.ts` เป็นของกลาง + `modules/detection/api.ts`
-- **เกณฑ์รับ:** `npx tsc --noEmit` ผ่าน · `grep -r "modules/detection" app/page.tsx` ต้องไม่เจออะไรเลย
+- **เกณฑ์รับ:** `npx tsc --noEmit` + `npm run build` ผ่าน · ไม่มี import จาก `modules/` ในโค้ดส่วนกลาง — **บังคับด้วย CI ไม่ใช่คอมเมนต์** (`.github/workflows/frontend.yml`, ทดสอบแล้วว่า fail จริงเมื่อจงใจละเมิด)
+- เพิ่ม workflow `frontend` (boundary check → `tsc --noEmit` → `next build`) — ปิดช่องว่าง "ไม่มี CI ฝั่ง frontend" ที่ความเสี่ยง R4 ระบุไว้ว่าเป็นตาข่ายที่ขาดสำหรับการย้ายไฟล์ทั้งชุดพอดี
 
 ### ก้อนที่ 3 — รู้ว่ามีคนอื่นอยู่
 

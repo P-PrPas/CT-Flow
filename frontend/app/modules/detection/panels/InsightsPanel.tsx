@@ -1,9 +1,9 @@
 "use client";
 
 import LearningCurve from "../components/LearningCurve";
-import { VERDICT_STYLE } from "../lib/history";
-import type { Session } from "../lib/session";
-import { Empty, gradeColor, Icon, pct, READY_F1 } from "../lib/ui";
+import { VERDICT_STYLE } from "../history";
+import type { Session } from "../session";
+import { Empty, gradeColor, Icon, pct, READY_F1 } from "../../../lib/ui";
 
 const median = (xs: number[]) =>
   xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : null;

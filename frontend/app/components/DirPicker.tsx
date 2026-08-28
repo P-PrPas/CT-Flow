@@ -11,8 +11,9 @@ type Listing = {
   roots: string[];
 };
 
-/** Browses the *server's* filesystem. In local mode that's your own PC; in vm
- *  mode it's the VM, confined to the configured data root. */
+/** Browses the *server's* filesystem, confined to LABEL_TOOL_VM_ROOT. There is
+ *  no unconfined mode any more (T-27), so what this shows is the whole of what
+ *  any path in a request is allowed to reach. */
 export default function DirPicker({
   title, hint, onPick, onClose,
 }: {

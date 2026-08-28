@@ -543,16 +543,25 @@ def check_auth(client, user: str, password: str, wrong_user: str = "mallory"):
     assert client.post("/api/auth/logout").status_code == 200
     assert client.post("/api/session", json={"input_dir": POOL}).status_code == 401
     # enabled is always True since T-27 -- there is no server without a login.
+    # oid travels with user: signed out means both are null.
     assert client.get("/api/auth/me").json() == {
-        "enabled": True, "user": None, "mode": "local"}
+        "enabled": True, "user": None, "oid": None, "mode": "local"}
     assert client.post("/api/auth/login",
                        json={"username": user, "password": "wrong"}).status_code == 401
     assert client.post("/api/auth/login",
                        json={"username": wrong_user, "password": password}).status_code == 401
     assert client.post("/api/auth/login",
                        json={"username": user, "password": password}).status_code == 200
-    assert client.get("/api/auth/me").json() == {
-        "enabled": True, "user": user, "mode": "local"}
+    # `oid` is the caller's own attribution key -- the value that lands in
+    # projects.owner_oid and annotations.created_by, and what the home page
+    # compares to split "yours" from everyone else's. A local account has no
+    # separate subject, so it equals the username here; under OIDC it is the
+    # provider's `sub` and the display name is a different string entirely.
+    # That difference is why the UI cannot answer "is this mine" from `user`.
+    me = client.get("/api/auth/me").json()
+    assert me == {"enabled": True, "user": user, "oid": user, "mode": "local"}
+    assert client.post("/api/auth/login",
+                       json={"username": user, "password": password}).json() == me
     assert client.post("/api/session", json={"input_dir": POOL}).status_code == 200
 
     # FR-31: the signed-in name lands on the instance this call creates

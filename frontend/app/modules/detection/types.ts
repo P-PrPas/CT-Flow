@@ -1,4 +1,4 @@
-import type { EvalBox } from "../components/EvalOverlay";
+import type { EvalBox } from "./components/EvalOverlay";
 
 export type BankSummary = {
   classes: { name: string; count: number }[];

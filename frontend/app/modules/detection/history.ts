@@ -12,7 +12,7 @@
 
 import * as api from "./api";
 import type { EvalResult, PRF } from "./types";
-import { READY_F1 } from "./ui";
+import { READY_F1 } from "../../lib/ui";
 
 export type EvalPoint = {
   ts: number;

@@ -1,6 +1,6 @@
 # CT-Flow — API Reference
 
-> **Phase 2 ก้อนที่ 1 merge แล้ว** — `/api/projects*` อยู่ในเอกสารนี้แล้ว · `GET /api/state` กับ `POST /api/claim` ยังเป็นแผน สัญญาของสองตัวนั้นอยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 4 และจะย้ายมาที่นี่เมื่อ merge เอกสารนี้อธิบายสิ่งที่มีอยู่จริงตอนนี้เท่านั้น
+> **Phase 2 ก้อนที่ 1–3 merge แล้ว** — `/api/projects*` อยู่ในเอกสารนี้แล้ว · `GET /api/state`, `POST /api/claim`, ฟิลด์ `labeled_by` ใน `GET /api/boxes` และ `bank_orphaned` ใน `POST /api/session` **มีอยู่จริงแล้วแต่ยังไม่ได้เขียนลงเอกสารนี้** — สัญญาของทั้งสี่อยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 4 และจะย้ายมาที่นี่ใน T-35
 
 เอกสารนี้อ้างอิงจากโค้ดจริงใน `internal/transport/httpapi/*.go` ณ commit ปัจจุบัน ทุก endpoint อยู่ภายใต้ base path `/api` (ยกเว้น testset ที่อยู่ใต้ `/api/testset`) และถูกเรียกผ่าน Next.js proxy (`app/api/[...path]/route.ts`) เสมอ ไม่ใช่ตรงจาก browser
 

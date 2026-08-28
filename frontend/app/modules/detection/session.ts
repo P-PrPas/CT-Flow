@@ -63,6 +63,24 @@ function useBoxStack(limit = 40) {
   };
 }
 
+/** Polling hands back a fresh object every time, whether or not anything
+ *  changed -- and to React a new reference *is* a change. Every useMemo and
+ *  useEffect keyed off that state then re-runs, which is how a 15-second poll
+ *  becomes a request per render: claims -> heldByOthers -> nextTodo -> the
+ *  claim effect -> POST /api/claim -> claims again, as fast as the round trip
+ *  allows. Keeping the old reference when the content matches is what breaks
+ *  the cycle, so these two compare before they set.
+ *
+ *  Order-sensitive on purpose, because both lists arrive ordered: images by
+ *  `ORDER BY path`, test-set stems sorted by the handler. */
+const sameList = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
+const sameClaims = (a: Record<string, string>, b: Record<string, string>) => {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
+};
+
 /** Sum of absolute differences between two 8x8 thumbnails (FR-18). */
 const distance = (a: number[], b: number[]) =>
   a.length && a.length === b.length
@@ -75,8 +93,12 @@ const distance = (a: number[], b: number[]) =>
  *  thing identifying your work lived in one browser: a different machine, or a
  *  cleared cache, and you were typing a server path again. /p/{id} resolves the
  *  project and hands the folder down, so the URL is what remembers -- and it is
- *  shareable, which localStorage never was. */
-export function useSession(inputDir: string) {
+ *  shareable, which localStorage never was.
+ *
+ *  `me` is the signed-in subject, not the display name: claims come back named
+ *  for reading, but "is this mine" is a comparison, and comparing display names
+ *  breaks the day two people share one or someone gets renamed. */
+export function useSession(inputDir: string, me: string) {
   // --- environment ------------------------------------------------------
   const [colors, setColors] = useState<string[]>([]);
   const [reachable, setReachable] = useState<boolean | null>(null);
@@ -128,6 +150,18 @@ export function useSession(inputDir: string) {
 
   /** Labels saved since the last Re-check, so the queue can admit it is stale. */
   const [staleScores, setStaleScores] = useState(0);
+
+  /** FR-48/FR-49: what the other person is doing. `claims` is image path ->
+   *  their name; `heldByOthers` is the same thing as a set, which is what the
+   *  queue actually consults. */
+  const [claims, setClaims] = useState<Record<string, string>>({});
+  const [claimNote, setClaimNote] = useState("");
+
+  /** FR-51: the bank was taught things this database has no record of. */
+  const [bankOrphaned, setBankOrphaned] = useState(false);
+
+  /** FR-50: who drew the boxes on the image currently open. */
+  const [labeledBy, setLabeledBy] = useState<string[]>([]);
 
   /** §7 success metrics, this session only. ponytail: in memory, so a reload
    *  starts the stopwatch over -- enough to answer "is this faster than doing
@@ -232,6 +266,14 @@ export function useSession(inputDir: string) {
 
   /** Least-confident-first: the pool order is the tool's opinion about which
    *  image is worth a human minute next. Done images sink to the bottom. */
+  /** Images another person is on right now. Yours is not in here -- holding an
+   *  image must not hide it from you. */
+  const heldByOthers = useMemo(() => {
+    const out = new Set<string>();
+    for (const [path, who] of Object.entries(claims)) if (who !== me) out.add(path);
+    return out;
+  }, [claims, me]);
+
   const sortedPool = useMemo(() => {
     const isDone = (p: string) => labeled.has(p) || auto.has(p);
     const todo = images
@@ -264,10 +306,17 @@ export function useSession(inputDir: string) {
   /** The next image worth opening, in the order the queue is showing. `done`
    *  is passed in rather than read from state so callers can use the bank they
    *  just got back instead of the one React has not re-rendered with yet. */
+  /** FR-49 -- the whole point of claims: "the next image to label" must differ
+   *  between two people in the same project. Falls back to a held image only if
+   *  every remaining one is held, because handing back nothing would be worse
+   *  than handing back an image someone is already on. */
   const nextTodo = useCallback(
-    (done: Set<string>, exclude?: string | null) =>
-      sortedPool.find((p) => p !== exclude && !done.has(p)) ?? null,
-    [sortedPool]
+    (done: Set<string>, exclude?: string | null) => {
+      const free = sortedPool.find(
+        (p) => p !== exclude && !done.has(p) && !heldByOthers.has(p));
+      return free ?? sortedPool.find((p) => p !== exclude && !done.has(p)) ?? null;
+    },
+    [sortedPool, heldByOthers]
   );
 
   const doneSet = useMemo(() => new Set([...labeled, ...auto]), [labeled, auto]);
@@ -276,6 +325,7 @@ export function useSession(inputDir: string) {
   useEffect(() => {
     if (!current || !inputDir || !(labeled.has(current) || auto.has(current))) {
       setSavedBoxes(EMPTY.boxes);
+      setLabeledBy([]);
       return;
     }
     const reviewing = auto.has(current);
@@ -287,8 +337,9 @@ export function useSession(inputDir: string) {
         // the editable set so the job is correcting, not redrawing.
         if (reviewing) { poolReset(d.boxes ?? []); setSavedBoxes([]); }
         else setSavedBoxes(d.boxes ?? []);
+        setLabeledBy((d.labeled_by ?? []).map((u) => u.username));
       })
-      .catch(() => { if (!cancelled) setSavedBoxes([]); });
+      .catch(() => { if (!cancelled) { setSavedBoxes([]); setLabeledBy([]); } });
     return () => { cancelled = true; };
   }, [current, inputDir, labeled, auto, poolReset]);
 
@@ -344,6 +395,7 @@ export function useSession(inputDir: string) {
       const d = await api.openSession(inputDir);
       setImages(d.images);
       setBank(d.bank);
+      setBankOrphaned(d.bank_orphaned);
       // A project that already has embeddings is already locked to a model --
       // reflect that instead of whatever the picker last happened to show.
       if (d.bank.model) setModelId(d.bank.model);
@@ -373,6 +425,68 @@ export function useSession(inputDir: string) {
    *  this is, so asking the user to confirm the folder they just clicked would
    *  be a step that answers nothing. */
   useEffect(() => { if (inputDir) openSession(); }, [inputDir, openSession]);
+
+  /** FR-48 -- someone else's progress, without a page refresh.
+   *
+   *  Every 15 seconds, and only while the tab is actually being looked at: a
+   *  workspace left open overnight should cost nothing. Polling rather than a
+   *  socket because the thing being watched changes every few minutes at most,
+   *  and a socket is a connection to keep alive, reconnect and scale.
+   *
+   *  Failures are silent on purpose -- a missed poll means slightly stale
+   *  numbers, which is the state the tool was in permanently until now. */
+  useEffect(() => {
+    if (!inputDir) return;
+    let cancelled = false;
+    const pull = () => {
+      if (document.visibilityState !== "visible") return;
+      api.getState(inputDir)
+        .then((st) => {
+          if (cancelled) return;
+          setClaims((cur) => (sameClaims(cur, st.claims) ? cur : st.claims));
+          setBank((cur) =>
+            !cur || (sameList(cur.labeled, st.labeled) && sameList(cur.auto, st.auto))
+              ? cur
+              : { ...cur, labeled: st.labeled, auto: st.auto });
+          setTsLabeled((cur) => (sameList(cur, st.testset_labeled) ? cur : st.testset_labeled));
+        })
+        .catch(() => { /* stale numbers, not an error */ });
+    };
+    const timer = setInterval(pull, 15_000);
+    document.addEventListener("visibilitychange", pull);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", pull);
+    };
+  }, [inputDir]);
+
+  /** FR-49 -- say which image is being worked on, so the other queue moves off
+   *  it. Re-sent every 5 minutes because a claim expires in ten: this is the
+   *  heartbeat, and re-claiming your own image renews rather than conflicts.
+   *
+   *  A 409 means someone got there first, so move on rather than sit on an
+   *  image two people are drawing. Only for images nobody has labeled -- there
+   *  is nothing to collide over on a finished one. */
+  useEffect(() => {
+    if (!inputDir || !current || doneSet.has(current)) return;
+    let cancelled = false;
+    const take = () =>
+      api.claimImage(inputDir, current)
+        .then((d) => {
+          if (cancelled) return;
+          setClaims((cur) => (sameClaims(cur, d.claims) ? cur : d.claims));
+          setClaimNote("");
+        })
+        .catch((e: Error) => {
+          if (cancelled) return;
+          setClaimNote(e.message);
+          setCurrent(nextTodo(doneSet, current));
+        });
+    take();
+    const timer = setInterval(take, 5 * 60_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [inputDir, current, doneSet, nextTodo]);
 
   /** FR-19 — take the model's guesses into the editable set. Nothing reaches a
    *  label file until this happens, so a suggestion is never silently saved. */
@@ -538,6 +652,7 @@ export function useSession(inputDir: string) {
     // env + shell
     colors, reachable, panel, setPanel, simple, setSimple,
     status, setStatus, busy, progress, showShortcuts, setShowShortcuts,
+    claims, heldByOthers, claimNote, bankOrphaned, labeledBy,
     // config
     inputDir, conf, setConf,
     models, modelId, setModelId, reembedModel,

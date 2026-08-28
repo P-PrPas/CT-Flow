@@ -75,7 +75,19 @@ func (s *Server) SaveLabel(w http.ResponseWriter, r *http.Request) error {
 	if err := s.Store.MarkLabeled(r.Context(), inputDir, store.KindPool, req.Image); err != nil {
 		return err
 	}
+	// Saving is finishing, so stop holding the image (FR-49). Without this the
+	// claim would sit out the rest of its TTL keeping a done image out of the
+	// other person's queue. Never a reason to fail the save -- the label is
+	// already written, and the worst case is a claim that expires on its own.
+	s.Claims.Release(inputDir, image, deref(user))
 	return s.writeBankSummary(w, r, inputDir, stateDir)
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // Relabel rewrites this image's label directly -- no embedding extraction, no

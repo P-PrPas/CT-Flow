@@ -267,6 +267,10 @@ label.check:hover { color: var(--text); }
 
 .muted { color: var(--muted); }
 .faint { color: var(--faint); }
+/* Bare text colour, beside .chip.warn and .note.warn which also paint a
+   background. Used where a line has to read as a caution without becoming a
+   box -- "someone else is on this one" under a queue entry. */
+.warn { color: var(--warn); }
 .mono { font-family: var(--mono); font-size: 12px; }
 .xs { font-size: 11.5px; }
 .sm { font-size: 12.5px; }

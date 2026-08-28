@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
+	"github.com/P-PrPas/CT-Flow/backend/internal/platform/claims"
 )
 
 // The decisions the projects handlers make before any database is involved:
@@ -144,3 +145,29 @@ func TestDefaultProjectName(t *testing.T) {
 		}
 	}
 }
+
+// --- claims (FR-49) ---------------------------------------------------------
+// The tracker's own behaviour is covered in internal/platform/claims; what is
+// checked here is the HTTP shape and the one thing only this layer can get
+// wrong -- putting a subject on screen where a name belongs.
+
+func TestClaimChecksThePathLikeEveryOtherEndpoint(t *testing.T) {
+	root := t.TempDir()
+	s := vmServer(t, root)
+	s.Claims = claims.NewTracker()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/claim",
+		strings.NewReader(`{"input_dir":"/etc","image":"/etc/passwd"}`))
+	w := do(s, s.Claim, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (%s)", w.Code, w.Body.String())
+	}
+	if got := detail(t, w); got != "path outside "+root+" (vm mode)" {
+		t.Errorf("detail = %q", got)
+	}
+}
+
+// The 409 conflict is asserted in backend/tests/smoke_test.py, not here: it has
+// to resolve the holder's subject into a name through the users table, and a
+// handler that could answer that without a database would be one that prints
+// subjects at people.

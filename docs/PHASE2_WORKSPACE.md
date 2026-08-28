@@ -1,6 +1,6 @@
 # CT-Flow — Phase 2: Workspace & Multi-user
 
-> **สถานะ:** ก้อนที่ 1 (T-26–T-28) merge เข้า `main` แล้ว · ก้อนที่ 2 (T-29, T-30) implement แล้ว · ก้อนที่ 3–4 ยังเป็นแผน · ตกลง scope กับเจ้าของโปรเจกต์ 2026-08-28
+> **สถานะ:** ก้อนที่ 1 (T-26–T-28) และก้อนที่ 2 (T-29, T-30) merge เข้า `main` แล้ว · ก้อนที่ 3 (T-31–T-34) implement แล้ว · ก้อนที่ 4 (T-35) เหลืออยู่ · ตกลง scope กับเจ้าของโปรเจกต์ 2026-08-28
 > **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [REQUIREMENTS.md](./REQUIREMENTS.md) · [ROADMAP.md](./ROADMAP.md)
 
 เอกสารนี้คือแผนงานฉบับเดียวของ Phase 2 — อ่านจบแล้วต้องลงมือเขียนโค้ดได้โดยไม่ต้องถามอะไรเพิ่ม
@@ -264,20 +264,22 @@ app/
 
 ### ก้อนที่ 3 — รู้ว่ามีคนอื่นอยู่
 
-#### T-31 · `GET /api/state` + polling
+#### T-31 · `GET /api/state` + polling ✅
 - endpoint ตามข้อ 4.2 · frontend poll ทุก 15 วินาที หยุดเมื่อ tab ไม่ active
 - **เกณฑ์รับ:** เปิดสอง browser คนละ user บนโปรเจกต์เดียวกัน · A label ภาพหนึ่ง · ภายใน ~15 วินาที คิวของ B แสดงว่าภาพนั้นเสร็จแล้วโดยที่ B ไม่ต้อง refresh
 
-#### T-32 · การจองภาพ
+#### T-32 · การจองภาพ ✅
 - `internal/platform/claims` (map + mutex + TTL 10 นาที, โครงเดียวกับ `internal/platform/jobs`) · `POST /api/claim` · `nextTodo` ข้ามภาพที่คนอื่นถือ
 - **เกณฑ์รับ:** สอง browser เปิดโปรเจกต์เดียวกันพร้อมกัน แล้ว "ภาพถัดไปที่ควร label" ของสองคนต้องไม่ใช่ภาพเดียวกัน · การจองที่หมดอายุแล้วต้องถูกคนอื่นจองต่อได้ (test ด้วยการหด TTL ผ่านตัวแปรใน test ไม่ใช่รอ 10 นาที)
 
-#### T-33 · แสดงตัวตนของงาน
-- `GET /api/boxes` คืน `created_by` ต่อกล่อง · workspace แสดงชื่อคน label บนภาพที่มีป้ายแล้ว · home แสดง `contributors`
+#### T-33 · แสดงตัวตนของงาน ✅
+- `GET /api/boxes` คืน **`labeled_by` ต่อภาพ** (ไม่ใช่ต่อกล่อง — ดูหมายเหตุ) · workspace แสดงชื่อคน label บนภาพที่มีป้ายแล้ว · home แสดง `contributors`
+
+> **ต่างจากแผน:** แผนเขียนว่า "คืน `created_by` ต่อกล่อง" แต่ `Box` เป็น shape ที่ client **ส่งกลับมาด้วย**ทุกครั้งที่ save การแขวน `created_by` ไว้บนนั้นจะเปลี่ยนสัญญาสองทาง ทั้งที่คำถามที่ UI ถามจริงคือ "ใคร label ภาพนี้" → `GET /api/boxes` เพิ่มฟิลด์พี่น้อง `labeled_by: [{oid, username}]` แทน · `Box` ไม่เปลี่ยนเลย
 - แปลง `oid` เป็นชื่อผ่าน `users` ที่ฝั่ง Go เสมอ **ไม่ส่ง `oid` ดิบไปให้ UI แสดง**
 - **เกณฑ์รับ:** label ด้วยสอง user แล้วเปิดภาพของอีกคน ต้องเห็นชื่อคนที่ label จริง ไม่ใช่ UUID
 
-#### T-34 · ยามตรวจ bank/DB ไม่ตรงกัน
+#### T-34 · ยามตรวจ bank/DB ไม่ตรงกัน ✅
 - `POST /api/session` คืน `bank_orphaned: true` เมื่อ bank มี embedding แต่ project ไม่มีแถว `images` เลย · UI ขึ้นแถบเตือนที่อธิบายว่าเกิดอะไรและควรทำอะไร
 - **เกณฑ์รับ:** `smoke_test.py` ลบแถว `images` ของ project ทิ้งตรง ๆ แล้วเปิด session ใหม่ ต้องได้ `bank_orphaned: true` (แบบเดียวกับที่มันจำลอง bank เก่าที่ไม่มี key `"model"` อยู่แล้ว)
 

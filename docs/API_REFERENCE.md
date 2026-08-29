@@ -1,7 +1,5 @@
 # CT-Flow — API Reference
 
-> **Phase 2 ก้อนที่ 1–3 merge แล้ว** — `/api/projects*` อยู่ในเอกสารนี้แล้ว · `GET /api/state`, `POST /api/claim`, ฟิลด์ `labeled_by` ใน `GET /api/boxes` และ `bank_orphaned` ใน `POST /api/session` **มีอยู่จริงแล้วแต่ยังไม่ได้เขียนลงเอกสารนี้** — สัญญาของทั้งสี่อยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 4 และจะย้ายมาที่นี่ใน T-35
-
 เอกสารนี้อ้างอิงจากโค้ดจริงใน `internal/transport/httpapi/*.go` ณ commit ปัจจุบัน ทุก endpoint อยู่ภายใต้ base path `/api` (ยกเว้น testset ที่อยู่ใต้ `/api/testset`) และถูกเรียกผ่าน Next.js proxy (`app/api/[...path]/route.ts`) เสมอ ไม่ใช่ตรงจาก browser
 
 > **หมายเหตุหลัง port เป็น Go:** เอกสารนี้คือ reference ฉบับเดียว — ไม่มี Swagger UI / `/openapi.json` อีกแล้ว (FastAPI แถมมาให้ ส่วน Go ไม่มี และ spec ที่ generate จาก `req: dict` ได้แค่ `body: object` ซึ่งด้อยกว่าเอกสารนี้อยู่แล้ว) · **request/response ทุกตัวในเอกสารนี้ไม่เปลี่ยนเลยจากตอนเป็น FastAPI** — ยืนยันด้วย `backend/tests/parity.py` ที่ diff response ทีละฟิลด์ระหว่างสอง backend ได้ 43/43 เหมือนกันหมด
@@ -130,7 +128,7 @@
 
 ---
 
-## Pool labeling (`internal/transport/httpapi/pool.go`, `label.go`, `project.go`)
+## Pool labeling (`internal/transport/httpapi/pool.go`, `label.go`, `state.go`, `project.go`)
 
 วงจร label หลักของพูลภาพ
 
@@ -138,10 +136,31 @@
 เปิด session label: ตรวจสอบ input dir, list ภาพ, โหลดหรือสร้าง bank ใต้ `<input_dir>/.ctflow/` — คืน state ของ test set มาในคำตอบเดียวกันเลย ไม่ต้องเรียกแยก
 
 - **Body:** `{"input_dir": str}`
-- **Response:** `{"images": [str...], "bank": BankSummary, "testset": {"images": [str...], "labeled": [stem...], "classes": [str...]}, "project": Project}`
+- **Response:** `{"images": [str...], "bank": BankSummary, "bank_orphaned": bool, "testset": {"images": [str...], "labeled": [stem...], "classes": [str...]}, "project": Project}`
 - **400** ถ้า input dir ไม่มีอยู่จริงหรือไม่มีภาพเลย
 - **สร้างโปรเจกต์ให้ถ้าโฟลเดอร์นี้ยังไม่มี** (`EnsureProject` — ชื่อ = ชื่อโฟลเดอร์, เจ้าของ = คนที่เปิด) · ถ้ามีอยู่แล้วคือ**รับช่วง** ไม่เปลี่ยนชื่อและไม่เปลี่ยนเจ้าของ · นี่คือจุดสร้างโปรเจกต์จุดที่สองนอกจาก `POST /api/projects` และเป็นเหตุผลที่ frontend เดิมยังทำงานได้โดยไม่ต้องแก้ (ดู [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) T-26)
 - `project` มาด้วยเพื่อให้ client ที่เปิดโฟลเดอร์ตรง ๆ ได้ `id` ไปทำลิงก์ และได้ชื่อ/เจ้าของโดยไม่ต้องยิงซ้ำ
+- **`bank_orphaned` (FR-51)** — `true` เมื่อ bank มีคลาสที่ถูกสอนแล้วแต่ project นี้ไม่มีแถว `images` เลยสักแถว · สถานะของโปรเจกต์ถูกแบ่งอยู่สองที่ตั้งแต่ T-21 และ `docker compose down -v` ล้างแค่ครึ่งเดียว: `pgdata` หายไป ส่วน `<input_dir>/.ctflow/` เป็น bind mount จึงรอด **ผลคือโมเดลจำได้ว่าถูกสอนอะไร แต่ไม่มีอะไรจำได้ว่าสอนจากภาพไหน** · เงียบมาตลอดเพราะ prediction คืนเป็นชื่อคลาสไม่ใช่ index — ธงนี้ทำให้มันมองเห็นได้ ไม่ใช่แก้ให้ (ทางแก้คือล้างทั้งสองที่ ดู [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md) ข้อ 8)
+
+### `GET /api/state`
+สถานะที่เปลี่ยนได้โดยที่ไม่ใช่คุณเป็นคนเปลี่ยน (FR-48) — endpoint ที่ workspace poll ทุก 15 วินาที
+
+- **Query:** `input_dir`
+- **Response:** `{"labeled": [path...], "auto": [path...], "testset_labeled": [stem...], "claims": {path: username}}`
+- **ตอบจาก PostgreSQL + map ใน memory เท่านั้น** ไม่แตะ sidecar ไม่แตะดิสก์
+- **จงใจไม่มี `BankSummary`** — `classes` กับ `model` เปลี่ยนเฉพาะตอน *ตัวเอง* label ซึ่ง response ของ `POST /api/label` คืนให้อยู่แล้ว ใส่มาที่นี่ = ยิงไป sidecar ทุกครั้งที่ poll ต่อ tab ที่เปิดอยู่ เพื่อส่งของที่เปลี่ยนไม่ได้กลับไปซ้ำ
+- `claims` เป็น **ชื่อคน** ไม่ใช่ `sub` (ดู `POST /api/claim`)
+
+### `POST /api/claim`
+"ฉันกำลังทำภาพนี้อยู่" เพื่อให้คิวของอีกคนชี้ไปที่อื่น (FR-49)
+
+- **Body:** `{"input_dir": str, "image": str, "release": bool}` (`release` default `false`)
+- **Response:** `{"claims": {path: username}}` — คืนทั้งโปรเจกต์ ไม่ใช่แค่ภาพเดียว เพราะ client กำลังจะ re-render คิวอยู่แล้ว ประหยัด `GET /api/state` ตามหลังไปหนึ่งครั้ง
+- **409** `<ชื่อ> is working on this image` เมื่อคนอื่นถืออยู่และยังไม่หมดอายุ
+- **การจองเป็นคำแนะนำ ไม่ใช่ล็อก** — `POST /api/label` ไม่เคยอ่านมันเลย เพราะการปฏิเสธ save จะทิ้งกล่องที่วาดไปแล้ว สิ่งเดียวที่ conflict ทำคือบอก client ให้ไปภาพถัดไป
+- **หนึ่งคนถือได้หนึ่งภาพต่อหนึ่งโปรเจกต์** — จองภาพใหม่ = ปล่อยภาพเดิมอัตโนมัติ จึงไม่ต้องมี endpoint `release` แยกสำหรับการเดินคิว · `release: true` มีไว้สำหรับ "ทำเสร็จแล้ว" — client ไม่ต้องเรียกเองหลัง save เพราะ `POST /api/label` ปล่อยการจองให้ในตัว (เรียก `claims.Release` ตรง ๆ ไม่ได้ยิง endpoint นี้ซ้ำ)
+- **จองซ้ำภาพของตัวเองได้เสมอ** และเป็นการต่ออายุ — นี่คือสิ่งที่ทำให้ frontend เรียกมันเป็น heartbeat ทุก 5 นาทีได้โดยไม่ต้องจำว่าถืออยู่แล้วหรือยัง
+- **TTL 10 นาที** นับจากการจองครั้งล่าสุด · เก็บใน memory (`internal/platform/claims`) ไม่ใช่ใน DB โดยตั้งใจ: มันควรหายไปตอน restart อยู่แล้ว, แถว `images` ถูกสร้างแบบ lazy เฉพาะตอน label จริง (เก็บใน DB จะบวมด้วยภาพที่แค่เปิดดู) และจะต้องมีงานเก็บกวาดแถวหมดอายุ · **ข้อจำกัดเดียวกับ job tracker: รองรับ API process เดียว** — สอง replica จะมองไม่เห็นการจองของกัน ซึ่งเสื่อมกลับไปเป็นพฤติกรรมเดิมก่อน FR-49 ไม่ใช่พังใหม่
 
 ### `GET /api/image`
 เสิร์ฟไฟล์ภาพดิบ
@@ -154,7 +173,8 @@
 คืนกล่องที่บันทึกไว้แล้วของภาพหนึ่งภาพ
 
 - **Query:** `input_dir`, `image`, `kind` (`"pool"` default หรือ `"test"`)
-- **Response:** `{"boxes": [Box...]}`
+- **Response:** `{"boxes": [Box...], "labeled_by": [{"oid": str, "username": str}...]}`
+- **`labeled_by` (FR-50)** — คนที่เขียนกล่องบนภาพนี้ เรียงตามจำนวนกล่องมากไปน้อย · **ต่อภาพ ไม่ใช่ต่อกล่อง** เพราะ `Box` เป็น shape ที่ client ส่งกลับมาด้วยทุกครั้งที่ save การแขวน `created_by` ไว้บนนั้นจะเปลี่ยนสัญญาสองทางเพื่อตอบคำถามที่ UI ถามเป็นรายภาพอยู่แล้ว · `username` มาจาก join ตาราง `users` — **ไม่มี endpoint ไหนส่ง `sub` ดิบออกไปในที่ที่ควรเป็นชื่อคน** และ subject ที่ไม่มีแถวใน `users` จะได้ตัวมันเองเป็นชื่อ (อ่านไม่ออกยังดีกว่าหายไป)
 
 ### `POST /api/label`
 บันทึกป้าย: สกัด SAVPE embedding เข้า bank ต่อคลาส, mark ภาพว่า labeled, เขียนกล่องลง PostgreSQL (T-21)

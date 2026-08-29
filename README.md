@@ -14,9 +14,10 @@ rescored instantly, and a held-out test set tells you — with an actual
 precision/recall/F1 number, not a guess — when the model is ready to
 auto-label the rest.
 
-No training run, no label taxonomy to pre-declare. **One image folder is the
-whole config** — the prompt bank lives in a hidden `.ctflow/` subfolder
-inside it, and the labels live in PostgreSQL keyed by that same folder.
+No training run, no label taxonomy to pre-declare. **One image folder is one
+project** — the prompt bank lives in a hidden `.ctflow/` subfolder inside it,
+and the labels live in PostgreSQL keyed by that same folder. Two people can
+work a project at once without being handed the same image.
 
 ---
 
@@ -81,7 +82,7 @@ pool.
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
 | Embedding-distance duplicate detection | Approximated | an 8×8 thumbnail hash stands in for true embedding distance — good enough today, see [limitations](#known-limitations--roadmap) |
 | Project workspaces | Ready | `/` lists every project with its owner, progress and contributors; `/p/{id}` is the workspace, and the folder path is in the URL rather than one browser's `localStorage` |
-| Multi-user queue | Planned | image claiming, live progress from other people and per-box attribution in the UI — [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) |
+| Multi-user queue | Ready | two people in one project are never handed the same image: claims with a 10-minute expiry, other people's progress polled every 15s, and who labeled what shown on the image and on the project card |
 
 ## Repository layout
 
@@ -94,6 +95,8 @@ label_tool/                     repo root
 │   │   ├── transport/httpapi/      HTTP only: handlers, middleware, request/response shapes
 │   │   │     system.go               GET /api/config, /api/browse, /api/image
 │   │   │     pool.go · label.go      session, boxes, label, relabel, predict
+│   │   │     projects.go             /api/projects/* -- the home page's API
+│   │   │     state.go                GET /api/state, POST /api/claim
 │   │   │     testset.go              /api/testset/*
 │   │   │     jobs.go                 /api/jobs/{id}, score, evaluate, autolabel, reembed
 │   │   │     auth.go                 /api/auth/*  + the login middleware
@@ -112,6 +115,7 @@ label_tool/                     repo root
 │   │   │   ├── config/               env + PathAllowed, the path-safety gate
 │   │   │   ├── auth/                 pbkdf2 hashing + signed session cookies
 │   │   │   ├── jobs/                 in-memory progress tracking
+│   │   │   ├── claims/               who is on which image, in memory, 10-minute TTL
 │   │   │   └── models/               the selectable-checkpoint catalog
 │   │   └── testsupport/            locating shared fixtures from any package depth
 │   ├── inference/                the Python sidecar -- everything that needs torch
@@ -529,12 +533,15 @@ Full gap analysis: [`docs/ROADMAP.md`](docs/ROADMAP.md) and
 [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
 The headline items:
 
-- **Two people on one project are still handed the same image**, because the
-  queue is ordered identically for everyone and never refreshes. Project
-  workspaces themselves are done — `/` lists what work exists, who owns it and
-  how far along it is, and each project has its own shareable URL — but sharing
-  one *between* people is the next slice of
-  [`docs/PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md).
+- **Nothing runs the frontend in CI.** The checks are a module-boundary grep,
+  `tsc --noEmit` and `next build` — none of which *execute* the code, and the
+  smoke test drives HTTP with no React in the picture. A render loop in the
+  claim heartbeat got through that gap once already; it was only visible in a
+  browser's network panel.
+- **Image claims and the job tracker live in one process's memory.** Two API
+  replicas would not see each other's claims, which degrades to the old
+  behaviour (two people, one image) rather than breaking anything — but it is
+  why this still runs as a single instance.
 - **No upload UI.** `POST /api/upload` is built and protected by auth, but the
   frontend still has no dropzone — and there is no answer yet for where an
   uploaded file should land.
@@ -571,7 +578,7 @@ Coming in cold? [`CLAUDE.md`](CLAUDE.md) → [`ARCHITECTURE.md`](docs/ARCHITECTU
 | [`API_REFERENCE.md`](docs/API_REFERENCE.md) | Every endpoint, request/response shapes, conventions |
 | [`REQUIREMENTS.md`](docs/REQUIREMENTS.md) | Requirement-by-requirement status — the source of truth for "is X done" |
 | [`ROADMAP.md`](docs/ROADMAP.md) | The source of truth for what gets built next, and what is deliberately deferred |
-| [`PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) | The plan for the work in flight: workspaces, multi-user, mandatory login |
+| [`PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) | Why workspaces, multi-user and mandatory login were built the way they were — a record of the reasoning, not a status page |
 | [`GLOSSARY.md`](docs/GLOSSARY.md) | Terminology (SAVPE, prompt bank, etc.) in the order you'll meet it |
 | [`history/REFACTOR_PLAN.md`](docs/history/REFACTOR_PLAN.md) | The Python→Go port: what moved, what stayed Python and why, and what it cost |
 | [`history/DB_MIGRATION_PLAN.md`](docs/history/DB_MIGRATION_PLAN.md) | Why labels moved to PostgreSQL and why the prompt bank did not |

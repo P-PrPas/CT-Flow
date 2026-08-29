@@ -13,7 +13,6 @@ backend/inference/        the Python sidecar: everything that needs torch
 backend/db/schema.sql     applied at boot, idempotent, no migration framework
 backend/tests/            smoke_test.py, golden vectors, parity harness
 frontend/app/             Next.js 15 App Router, all client components
-frontend/app/modules/     one folder per labeling module; shared code never imports from here
 frontend/app/modules/     one folder per labeling module; the shell must not
                           import from here -- CI enforces it (T-30)
 docs/                     active docs -- must be true right now

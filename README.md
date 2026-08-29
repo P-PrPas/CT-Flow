@@ -95,6 +95,8 @@ label_tool/                     repo root
 │   │   ├── transport/httpapi/      HTTP only: handlers, middleware, request/response shapes
 │   │   │     system.go               GET /api/config, /api/browse, /api/image
 │   │   │     pool.go · label.go      session, boxes, label, relabel, predict
+│   │   │     projects.go             /api/projects/* -- the home page's API
+│   │   │     state.go                GET /api/state, POST /api/claim
 │   │   │     testset.go              /api/testset/*
 │   │   │     jobs.go                 /api/jobs/{id}, score, evaluate, autolabel, reembed
 │   │   │     auth.go                 /api/auth/*  + the login middleware
@@ -113,6 +115,7 @@ label_tool/                     repo root
 │   │   │   ├── config/               env + PathAllowed, the path-safety gate
 │   │   │   ├── auth/                 pbkdf2 hashing + signed session cookies
 │   │   │   ├── jobs/                 in-memory progress tracking
+│   │   │   ├── claims/               who is on which image, in memory, 10-minute TTL
 │   │   │   └── models/               the selectable-checkpoint catalog
 │   │   └── testsupport/            locating shared fixtures from any package depth
 │   ├── inference/                the Python sidecar -- everything that needs torch
@@ -575,7 +578,7 @@ Coming in cold? [`CLAUDE.md`](CLAUDE.md) → [`ARCHITECTURE.md`](docs/ARCHITECTU
 | [`API_REFERENCE.md`](docs/API_REFERENCE.md) | Every endpoint, request/response shapes, conventions |
 | [`REQUIREMENTS.md`](docs/REQUIREMENTS.md) | Requirement-by-requirement status — the source of truth for "is X done" |
 | [`ROADMAP.md`](docs/ROADMAP.md) | The source of truth for what gets built next, and what is deliberately deferred |
-| [`PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) | The plan for the work in flight: workspaces, multi-user, mandatory login |
+| [`PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) | Why workspaces, multi-user and mandatory login were built the way they were — a record of the reasoning, not a status page |
 | [`GLOSSARY.md`](docs/GLOSSARY.md) | Terminology (SAVPE, prompt bank, etc.) in the order you'll meet it |
 | [`history/REFACTOR_PLAN.md`](docs/history/REFACTOR_PLAN.md) | The Python→Go port: what moved, what stayed Python and why, and what it cost |
 | [`history/DB_MIGRATION_PLAN.md`](docs/history/DB_MIGRATION_PLAN.md) | Why labels moved to PostgreSQL and why the prompt bank did not |

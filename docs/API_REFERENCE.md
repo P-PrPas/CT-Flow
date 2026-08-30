@@ -165,12 +165,13 @@
 ### `GET /api/pool`
 รายชื่อภาพในพูล กรองตามสถานะและแบ่งหน้า — หลังบ้านของแท็บ Gallery (FR-52)
 
-- **Query:** `input_dir` · `status` (`all` default \| `labeled` \| `auto` \| `unlabeled`) · `offset` (default 0) · `limit` (default 200, เพดาน 500)
-- **Response:** `{"total": int, "counts": {"labeled": int, "auto": int, "unlabeled": int}, "items": [{"path": str, "status": str, "held_by": str|null}]}`
+- **Query:** `input_dir` · `status` (`all` default \| `labeled` \| `auto` \| `test` \| `unlabeled`) · `offset` (default 0) · `limit` (default 200, เพดาน 500)
+- **Response:** `{"total": int, "counts": {"labeled": int, "auto": int, "test": int, "unlabeled": int}, "items": [{"path": str, "status": str, "held_by": str|null}]}`
 - `total` คือจำนวนของ filter ที่เลือก · `counts` คือของทุก filter สำหรับ badge บนปุ่ม · **ทั้งคู่มาจากการเดินรายชื่อภาพรอบเดียวกับที่สร้าง `items`** จึงขัดกันเองไม่ได้ (นับจาก `images.status` ตรง ๆ จะเพี้ยนทันทีที่มีแถวในตารางแต่ไฟล์ถูกลบไปแล้ว)
-- **400** `status must be one of all, labeled, auto, unlabeled` · `no images in <dir>`
+- **400** `status must be one of all, labeled, auto, test, unlabeled` · `no images in <dir>`
 - **403** ถ้า `input_dir` อยู่นอก `LABEL_TOOL_VM_ROOT`
 - รายชื่อภาพมาจาก readdir ที่ cache ไว้ (key = mtime ของโฟลเดอร์) ส่วนสถานะมาจาก PostgreSQL · `unlabeled` คือส่วนต่าง ไม่เสีย query เพิ่ม · `held_by` เป็น **ชื่อคน** ไม่ใช่ `sub` เหมือน `GET /api/state`
+- **`test` ชนะ `labeled`/`auto`** — ภาพ test set คือไฟล์เดียวกับแถวใน pool แต่ ground truth ที่กันไว้คือป้ายที่เชื่อถือได้ของมัน ไม่ใช่ annotation ฝั่ง pool ที่มันอาจจะมีติดอยู่ · แปลว่า `counts["labeled"]` ที่นี่**ไม่เท่ากับ** `len(labeled)` ของ `GET /api/state` ซึ่งรายงาน `images.status` ดิบ ๆ โดยไม่หัก test set ออก
 
 ### `GET /api/thumb`
 ภาพย่อสำหรับตาราง Gallery (FR-53) — `GET /api/image` ส่งไฟล์เต็ม ซึ่งใช้ทีละหลายสิบรูปไม่ได้
@@ -213,7 +214,8 @@
 - **Response:** `{"bank": BankSummary}`
 - **400** ถ้ามี `cls` ใดที่ยังไม่เคยเป็นคลาสใน bank เลย, หรือ `image` ถูกตั้งเป็น test set ไว้ (เหตุผลเดียวกับ `/api/label`)
 - `boxes` เป็น list ว่างได้ (กรณี "โมเดลทำนายผิดทุกกล่อง" ก็ถือว่าถูกต้อง)
-- **mark ภาพเป็น `labeled`** (เหมือน `/api/label`) — คนตัดสินใจกล่องแล้ว ไม่ใช่คำเดาของโมเดลอีกต่อไป · ทำให้ review pass หลัง auto-label เดินหน้าได้จริง (auto set หดลงทีละภาพ) และ gallery ไม่เรียกภาพที่ตรวจแล้วว่า "by model"
+- **mark ภาพเป็น `labeled`** (เหมือน `/api/label`) — คนตัดสินใจกล่องแล้ว ไม่ใช่คำเดาของโมเดลอีกต่อไป · ทำให้ review pass หลัง auto-label เดินหน้าได้จริง (auto set หดลงทีละภาพ) และ gallery ไม่เรียกภาพที่ตรวจแล้วว่า "by model" · **ไม่เคยลดสถานะ** — `MarkLabeled` ไม่มีเงื่อนไข และภาพที่ `labeled` อยู่แล้วก็ยัง `labeled`
+- **UI ยิง endpoint นี้สำหรับ "Save" บนภาพที่มีป้ายอยู่แล้วทุกภาพ ไม่ใช่เฉพาะภาพที่โมเดล label** — ปุ่มคู่คือ `Save` (มาที่นี่ ไม่สอน bank) กับ `Save & teach` (ไป `/api/label` สอน bank) · **shortcut `Enter`/`Ctrl+S` = `Save`** ดังนั้นการกดบันทึกซ้ำบนภาพที่เคยสอนไปแล้วจะ**ไม่**เพิ่ม prompt เข้า bank อีก ซึ่งเป็นสิ่งที่ตั้งใจ (กันการสะสม prompt ซ้ำจากการกด save ซ้ำ)
 
 ### `POST /api/predict`
 กล่องที่โมเดลทำนายไว้สำหรับ **ภาพเดียว** ใช้เป็นกล่องร่างให้ผู้ใช้แก้แทนการวาดใหม่ (FR-19)
@@ -298,6 +300,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 - **Body:** `{"input_dir": str, "images": [path...], "conf": float, "conf_by_class": {cls: float}}` (`conf` default `0.25`)
 - **Response:** `{"job_id": str, "total": int}`
 - **400** ถ้า bank ว่างเปล่า
+- **ภาพที่อยู่ใน test set ถูกตัดออกจาก batch ก่อนเริ่ม** — เขียนคำเดาทับ ground truth ที่กันไว้คือความผิดพลาดเดียวกับที่ `/api/label` และ `/api/relabel` ปฏิเสธด้วย 400 · ตัดเงียบ ๆ ไม่ใช่ 400 เพราะภาพที่เหลือใน batch ยังถูกต้องและควรได้รัน · **ผลข้างเคียงที่ client ต้องรู้: `total` ใน response คือจำนวนหลังตัดแล้ว** ส่ง 70 path มาอาจได้ `total: 60` กลับไป — progress bar ต้องอ่านจากค่านี้ ไม่ใช่จากความยาว list ที่ส่งไป
 - **พฤติกรรม:** arm โมเดลครั้งเดียว → predict ทีละภาพ → เขียนไฟล์ label เฉพาะภาพที่มี detection (ไม่งั้นนับเป็น `no_detection`) → `bank.mark_auto()` เฉพาะภาพที่เขียนป้ายจริง
 - **ผลลัพธ์ (`result`):** `{"written": int, "no_detection": int, "no_detection_images": [path...], "bank": BankSummary}` — คืนรายชื่อภาพที่ไม่เจออะไรเลย ไม่ใช่แค่จำนวน (FR-28)
 

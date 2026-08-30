@@ -181,7 +181,13 @@ assert [it["path"] for it in tail["items"]] == images[2:] and tail["total"] == 3
 # Filtering by a status nothing has yet is an empty page with an honest total.
 assert c.get("/api/pool", params={"input_dir": POOL, "status": "labeled"}).json() == {
     "total": 0, "counts": {"labeled": 0, "auto": 0, "test": 0, "unlabeled": 3}, "items": []}
-assert c.get("/api/pool", params={"input_dir": POOL, "status": "sideways"}).status_code == 400
+bad_status = c.get("/api/pool", params={"input_dir": POOL, "status": "sideways"})
+# The text, not just the code: error messages are asserted here and shown in the
+# UI, so a reword has to be deliberate. Without this the only record of the
+# wording is docs/API_REFERENCE.md, which is where it went stale last time.
+assert bad_status.status_code == 400, bad_status.text
+assert bad_status.json()["detail"] == \
+    "status must be one of all, labeled, auto, test, unlabeled", bad_status.json()
 print("pool listing: paged and filtered server-side")
 
 # --- GET /api/thumb: a downscaled JPEG for the gallery grid (FR-53) ---------

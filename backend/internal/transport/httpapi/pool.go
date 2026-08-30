@@ -245,6 +245,13 @@ func sliceSet(xs []string) map[string]bool {
 // dropTestImages removes any path that is in this project's test set. A test
 // image is held-out ground truth: /api/autolabel must not write a guess over
 // it, the same way /api/label and /api/relabel refuse one outright.
+//
+// Returns a new slice rather than filtering in place. The one caller today
+// hands it a fresh slice from checkedPaths, so paths[:0] was safe -- but the
+// obvious next argument to pass is images.ListCached's result, which is shared
+// with the cache and with every other caller, and reusing its array would
+// rewrite the listing under them. A batch is small; the copy is not worth the
+// trap.
 func (s *Server) dropTestImages(ctx context.Context, inputDir string, paths []string) ([]string, error) {
 	testImgs, err := s.Store.ListTestImages(ctx, inputDir)
 	if err != nil {
@@ -254,7 +261,7 @@ func (s *Server) dropTestImages(ctx context.Context, inputDir string, paths []st
 		return paths, nil
 	}
 	held := sliceSet(testImgs)
-	kept := paths[:0]
+	kept := make([]string, 0, len(paths))
 	for _, p := range paths {
 		if !held[p] {
 			kept = append(kept, p)

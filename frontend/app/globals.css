@@ -460,6 +460,65 @@ kbd {
   border: 1px solid var(--line-soft);
 }
 
+/* ================================================================ gallery (FR-52) */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.gallery-cell {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--bg-deep);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Native windowing: the browser skips layout + paint for cells outside the
+     viewport, so a 50,000-image folder renders like a small one -- no
+     virtualization library. contain-intrinsic-size keeps the scrollbar honest
+     for the cells it has not drawn yet. */
+  content-visibility: auto;
+  contain-intrinsic-size: 150px 150px;
+  transition: border-color var(--fast);
+}
+.gallery-cell:hover { border-color: var(--brand); }
+.gallery-cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.gallery-cell img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--bg-deep);
+}
+.gallery-dot {
+  position: absolute; top: 6px; left: 6px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .45);
+}
+.gallery-held {
+  position: absolute; top: 4px; right: 4px;
+  display: flex; align-items: center; gap: 3px;
+  padding: 1px 5px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  background: rgba(0, 0, 0, .6);
+  color: #fff;
+}
+.gallery-name {
+  display: block;
+  padding: 4px 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--muted);
+  border-top: 1px solid var(--line-soft);
+}
+
 /* ================================================================ tooltip */
 .tip { position: relative; display: inline-flex; align-items: center; }
 .tip > .tip-body {

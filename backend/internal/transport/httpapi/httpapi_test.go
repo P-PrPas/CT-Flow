@@ -229,6 +229,12 @@ func TestPathHandlersRefuseOutsideTheRoot(t *testing.T) {
 		{"GET /api/image", func() *httptest.ResponseRecorder {
 			return do(s, s.GetImage, httptest.NewRequest(http.MethodGet, "/api/image?path="+outside+"/passwd", nil))
 		}},
+		{"GET /api/thumb", func() *httptest.ResponseRecorder {
+			return do(s, s.GetThumb, httptest.NewRequest(http.MethodGet, "/api/thumb?path="+outside+"/passwd", nil))
+		}},
+		{"GET /api/pool", func() *httptest.ResponseRecorder {
+			return do(s, s.GetPool, httptest.NewRequest(http.MethodGet, "/api/pool?input_dir="+outside, nil))
+		}},
 		{"GET /api/history", func() *httptest.ResponseRecorder {
 			return do(s, s.GetHistory, httptest.NewRequest(http.MethodGet, "/api/history?input_dir="+outside, nil))
 		}},
@@ -424,6 +430,75 @@ func TestGetImageRefusesADirectory(t *testing.T) {
 	w := do(s, s.GetImage, httptest.NewRequest(http.MethodGet, "/api/image?path="+root, nil))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a directory", w.Code)
+	}
+}
+
+// ---------------------------------------------------------------------- /thumb
+
+// GetThumb decodes, scales to the requested width (never up), and re-encodes
+// JPEG -- and answers a matching If-None-Match with a bodiless 304 so a
+// re-scroll of the gallery costs nothing.
+func TestGetThumbScalesAndRevalidates(t *testing.T) {
+	root := t.TempDir()
+	file := writeFile(t, filepath.Join(root, "big.png"), pngBytes(t, 600, 400))
+	s := vmServer(t, root)
+
+	w := do(s, s.GetThumb, httptest.NewRequest(http.MethodGet, "/api/thumb?path="+file+"&w=120", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("content-type = %q, want image/jpeg", ct)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("thumb does not decode: %v", err)
+	}
+	if format != "jpeg" || cfg.Width != 120 || cfg.Height != 80 {
+		t.Errorf("thumb = %s %dx%d, want jpeg 120x80", format, cfg.Width, cfg.Height)
+	}
+
+	etag := w.Header().Get("ETag")
+	if etag == "" || w.Header().Get("Cache-Control") == "" {
+		t.Fatalf("missing ETag (%q) or Cache-Control (%q)", etag, w.Header().Get("Cache-Control"))
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/thumb?path="+file+"&w=120", nil)
+	r.Header.Set("If-None-Match", etag)
+	w = do(s, s.GetThumb, r)
+	if w.Code != http.StatusNotModified || w.Body.Len() != 0 {
+		t.Errorf("revalidate = %d with %d body bytes, want 304 and none", w.Code, w.Body.Len())
+	}
+}
+
+// A source narrower than the thumbnail is served at its own size, not blown up.
+func TestGetThumbNeverUpscales(t *testing.T) {
+	root := t.TempDir()
+	file := writeFile(t, filepath.Join(root, "tiny.png"), pngBytes(t, 40, 30))
+	s := vmServer(t, root)
+
+	w := do(s, s.GetThumb, httptest.NewRequest(http.MethodGet, "/api/thumb?path="+file+"&w=200", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body)
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Width != 40 || cfg.Height != 30 {
+		t.Errorf("thumb = %dx%d, want the source's own 40x30", cfg.Width, cfg.Height)
+	}
+}
+
+// A file that is not an image is a 400, not a 500 -- the gallery skips a broken
+// cell rather than the request failing.
+func TestGetThumbOnGarbageIs400(t *testing.T) {
+	root := t.TempDir()
+	file := writeFile(t, filepath.Join(root, "notreally.jpg"), []byte("this is not a jpeg"))
+	s := vmServer(t, root)
+
+	w := do(s, s.GetThumb, httptest.NewRequest(http.MethodGet, "/api/thumb?path="+file, nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 -- %s", w.Code, w.Body)
 	}
 }
 

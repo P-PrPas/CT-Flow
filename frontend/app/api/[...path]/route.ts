@@ -3,10 +3,12 @@
 const API = process.env.API_URL ?? "http://127.0.0.1:8000";
 
 /** Forwarded upstream: the content type (multipart uploads carry their
- *  boundary in it, so it cannot be rewritten) and the session cookie. */
-const TO_API = ["content-type", "cookie"];
-/** Forwarded back: what the browser needs to render or store the response. */
-const FROM_API = ["content-type", "content-disposition"];
+ *  boundary in it, so it cannot be rewritten), the session cookie, and the
+ *  revalidation token so a cached thumbnail can come back as a 304. */
+const TO_API = ["content-type", "cookie", "if-none-match"];
+/** Forwarded back: what the browser needs to render, store, or cache the
+ *  response -- the last two let /api/thumb be cached by the browser. */
+const FROM_API = ["content-type", "content-disposition", "cache-control", "etag"];
 
 async function proxy(req: Request, path: string[]) {
   const url = new URL(req.url);

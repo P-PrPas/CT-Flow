@@ -14,6 +14,7 @@ import ShortcutsDialog from "../../modules/detection/components/ShortcutsDialog"
 import { useSession, type Panel } from "../../modules/detection/session";
 import * as api from "../../lib/api";
 import { BrandMark, fileOf, Icon, pct, Tip, type IconName } from "../../lib/ui";
+import GalleryPanel from "../../modules/detection/panels/GalleryPanel";
 import InsightsPanel from "../../modules/detection/panels/InsightsPanel";
 import PoolPanel from "../../modules/detection/panels/PoolPanel";
 import ReportPanel from "../../modules/detection/panels/ReportPanel";
@@ -132,6 +133,7 @@ function Workspace({
 
   const steps: { key: Panel; label: string; icon: IconName; badge?: string; disabled?: boolean; hint?: string }[] = [
     { key: "pool", label: "Label", icon: "image", badge: s.images.length ? `${s.labeled.size + s.auto.size}/${s.images.length}` : undefined },
+    { key: "gallery", label: "Gallery", icon: "layers", badge: s.images.length ? `${s.images.length}` : undefined },
     { key: "testset", label: "Test set", icon: "target", badge: s.tsImages.length ? `${s.tsLabeled.length}/${s.tsImages.length}` : undefined },
     { key: "report", label: "Report", icon: "chart", badge: s.evalResult ? pct(s.evalResult.overall.f1) : undefined, disabled: !s.evalResult, hint: "Run Evaluate first" },
     { key: "insights", label: "Progress", icon: "spark", badge: s.history.length ? `${s.history.length}` : undefined },
@@ -251,6 +253,7 @@ function Workspace({
         )}
 
         {s.panel === "pool" && <PoolPanel s={s} />}
+        {s.panel === "gallery" && <GalleryPanel s={s} />}
         {s.panel === "testset" && <TestsetPanel s={s} />}
         {s.panel === "report" && <ReportPanel s={s} />}
         {s.panel === "insights" && <InsightsPanel s={s} />}

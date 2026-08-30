@@ -3,7 +3,9 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strconv"
 
+	"github.com/P-PrPas/CT-Flow/backend/internal/infra/images"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/vpe"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
@@ -114,6 +116,124 @@ func (s *Server) OpenSession(w http.ResponseWriter, r *http.Request) error {
 		"project": project,
 	})
 	return nil
+}
+
+// poolItem is one row of the gallery: a path, how it was labeled, and whoever
+// is on it right now.
+type poolItem struct {
+	Path   string  `json:"path"`
+	Status string  `json:"status"` // "labeled" | "auto" | "unlabeled"
+	HeldBy *string `json:"held_by"`
+}
+
+// GetPool is the gallery's backing query: the pool's images, filtered by status
+// and paged, so a folder of 50,000 never ships as one array (the shape
+// POST /api/session still sends, kept until the labeling loop stops depending
+// on the full list -- see docs/GALLERY_PLAN.md T-36).
+//
+// The image set comes from a cached readdir; which of them are labeled/auto
+// comes from PostgreSQL. "unlabeled" is the difference -- an image with no row
+// yet -- so it costs no query of its own.
+func (s *Server) GetPool(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	inputDir, _, err := s.stateDirFor(q.Get("input_dir"))
+	if err != nil {
+		return err
+	}
+
+	want := q.Get("status")
+	if want == "" {
+		want = "all"
+	}
+	switch want {
+	case "all", "labeled", "auto", "unlabeled":
+	default:
+		return errStatus(http.StatusBadRequest,
+			"status must be one of all, labeled, auto, unlabeled")
+	}
+	offset := max(queryInt(q.Get("offset"), 0), 0)
+	limit := queryInt(q.Get("limit"), 200)
+	if limit < 1 || limit > 500 {
+		limit = 500
+	}
+
+	all := images.ListCached(inputDir)
+	if len(all) == 0 {
+		return errStatus(http.StatusBadRequest, "no images in "+inputDir)
+	}
+	st, err := s.Store.ListByStatus(r.Context(), inputDir, store.KindPool)
+	if err != nil {
+		return err
+	}
+	held, err := s.namedClaims(r, inputDir)
+	if err != nil {
+		return err
+	}
+	labeled := sliceSet(st.Labeled)
+	auto := sliceSet(st.Auto)
+
+	counts := map[string]int{
+		"labeled":   len(st.Labeled),
+		"auto":      len(st.Auto),
+		"unlabeled": max(len(all)-len(st.Labeled)-len(st.Auto), 0),
+	}
+	total := len(all)
+	if want != "all" {
+		total = counts[want]
+	}
+
+	items := make([]poolItem, 0, min(limit, total))
+	skipped := 0
+	for _, p := range all {
+		status := "unlabeled"
+		switch {
+		case labeled[p]:
+			status = "labeled"
+		case auto[p]:
+			status = "auto"
+		}
+		if want != "all" && want != status {
+			continue
+		}
+		if skipped < offset {
+			skipped++
+			continue
+		}
+		if len(items) >= limit {
+			break
+		}
+		var by *string
+		if n, ok := held[p]; ok {
+			by = &n
+		}
+		items = append(items, poolItem{Path: p, Status: status, HeldBy: by})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total":  total,
+		"counts": counts,
+		"items":  items,
+	})
+	return nil
+}
+
+func queryInt(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func sliceSet(xs []string) map[string]bool {
+	m := make(map[string]bool, len(xs))
+	for _, x := range xs {
+		m[x] = true
+	}
+	return m
 }
 
 // GetBoxes returns the boxes already saved for one image, so revisiting it

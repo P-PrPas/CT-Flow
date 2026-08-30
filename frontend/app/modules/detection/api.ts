@@ -1,16 +1,16 @@
 /** The labeling loop, module-scoped: every endpoint here is meaningful only for
  *  object detection against a YOLOE prompt bank. The shared plumbing --
  *  `request`, `post`, auth, browsing, projects -- comes from app/lib/api. */
-import { imgUrl, post, request } from "../../lib/api";
+import { imgUrl, post, request, thumbUrl } from "../../lib/api";
 import type { Box } from "./components/BoxCanvas";
 import type { JobProgress } from "../../components/ProgressBar";
 import type { BankSummary, EvalResult, ModelInfo, Score } from "./types";
 
 export type { JobProgress };
 
-/** Re-exported, not redefined: GET /api/image is shared, but every caller of it
- *  is in this module, so one import per panel beats two. */
-export { imgUrl };
+/** Re-exported, not redefined: GET /api/image and /api/thumb are shared, but
+ *  every caller of them is in this module, so one import per panel beats two. */
+export { imgUrl, thumbUrl };
 
 /** Carries the box colours and the checkpoint catalog, so it belongs to the
  *  module that renders both rather than to the shared client. */
@@ -48,6 +48,28 @@ export function saveLabel(
   input_dir: string, image: string, boxes: Box[], mode: "replace" | "update", model_id: string
 ): Promise<{ bank: BankSummary }> {
   return post("/api/label", { input_dir, image, boxes, mode, model_id });
+}
+
+/** One image in the gallery: its path, how it was labeled, and whoever is on
+ *  it right now (FR-49). */
+export type PoolItem = {
+  path: string;
+  status: "labeled" | "auto" | "unlabeled";
+  held_by: string | null;
+};
+
+/** FR-52 — the pool, filtered by status and paged, so a 50,000-image folder is
+ *  a scroll rather than a 6MB array. `total` is the count for the active
+ *  filter; `counts` is every filter's, for the chip badges. */
+export function getPool(
+  input_dir: string,
+  opts: { status?: "all" | "labeled" | "auto" | "unlabeled"; offset?: number; limit?: number } = {}
+): Promise<{ total: number; counts: Record<string, number>; items: PoolItem[] }> {
+  const p = new URLSearchParams({ input_dir });
+  if (opts.status) p.set("status", opts.status);
+  if (opts.offset != null) p.set("offset", String(opts.offset));
+  if (opts.limit != null) p.set("limit", String(opts.limit));
+  return request(`/api/pool?${p.toString()}`);
 }
 
 /** Rewrites the image's label file directly -- no embedding extraction, for

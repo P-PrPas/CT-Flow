@@ -1,8 +1,11 @@
 # CT-Flow — Gallery & pool scaling
 
-> **สถานะ: แผน ยังไม่เริ่ม** — 2026-08-30
+> **สถานะ: implement แล้วบน `feature/gallery` (T-36–T-39)** — 2026-08-30
 >
-> เอกสารนี้คือแผนงานฉบับเดียวของงาน gallery — อ่านจบแล้วต้องลงมือเขียนโค้ดได้โดยไม่ต้องถามอะไรเพิ่ม
+> T-36 ลงเป็น `GET /api/pool` อย่างเดียว · การตัด `images[]` ออกจาก `POST /api/session`
+> **ถูกเลื่อน** เป็น T-36b: มันแตะ ~30 assertion ใน `smoke_test.py` และ ~10 จุดใน
+> `session.ts` (ซึ่งไม่มี test รัน) โดยที่ปัญหา render/scroll ที่เป็นตัวเจ็บจริงถูกแก้หมดแล้วด้วย
+> T-37–T-39 — ค่าที่เหลือคือ payload ~6MB ครั้งเดียวตอนเปิด session ซึ่งเป็น ceiling ที่บันทึกไว้
 > **เอกสารที่เกี่ยวข้อง:** [ARCHITECTURE.md](./ARCHITECTURE.md) · [API_REFERENCE.md](./API_REFERENCE.md) · [REQUIREMENTS.md](./REQUIREMENTS.md) · [ROADMAP.md](./ROADMAP.md) · [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
 
 ---
@@ -32,7 +35,7 @@
 
 | # | ตัดสินใจ | เหตุผลสั้น ๆ |
 |---|---|---|
-| 1 | **Pool listing ย้ายไป server-side** (`GET /api/pool`, paginate + filter) · `POST /api/session` เลิกส่ง `images[]` | ส่ง 50k path ทุกครั้งที่เปิด session คือ 6MB ที่ client เอาไปทำ filter เองไม่ไหวในระดับ DOM · server มี `images.status` ใน Postgres อยู่แล้ว, filter/slice ที่นั่นถูกที่ |
+| 1 | **Pool listing ย้ายไป server-side** (`GET /api/pool`, paginate + filter) · `POST /api/session` เลิกส่ง `images[]` **(เลื่อนเป็น T-36b)** | ส่ง 50k path ทุกครั้งที่เปิด session คือ 6MB ที่ client เอาไปทำ filter เองไม่ไหวในระดับ DOM · server มี `images.status` ใน Postgres อยู่แล้ว, filter/slice ที่นั่นถูกที่ · endpoint ลงก่อน, การถอด `images[]` ออกจาก session ตามทีหลัง (แตะ contract กว้าง, `session.ts` ไม่มี test) |
 | 2 | **Thumbnail endpoint** (`GET /api/thumb?path=&w=`) ย่อภาพ + cache | gallery grid บน full-res image เป็นไปไม่ได้ (กำแพง #2) · `golang.org/x/image` เป็น direct dep อยู่แล้ว → `x/image/draw` ฟรี ไม่เพิ่ม dependency |
 | 3 | **Gallery เป็น panel แยก** (`"gallery"` ใน `Panel` union) ไม่ใช่การขยาย Queue card | Queue card คือ "label อะไรต่อ" · gallery คือ "ตรวจงานที่ทำไปแล้ว" · สอง mental model, สอง viewport, สอง data query |
 | 4 | **Virtualization ทำด้วย CSS `content-visibility: auto`** ไม่เพิ่ม lib (`react-window` ฯลฯ) | house style: ไม่มี UI/virtualization library · cell ขนาดคงที่ + `contain-intrinsic-size` → browser ข้าม layout/paint ของ card นอกจอเอง native · 50k card ไหว |
@@ -79,34 +82,47 @@ listing ของ pool แบบ paginate + filter สำหรับ gallery �
 // out when they move (T-15).
 ```
 
-### 3.2 `POST /api/session` — สิ่งที่เปลี่ยน
+### 3.2 `POST /api/session` — **ยังไม่เปลี่ยน (T-36b)**
 
-- **เลิกส่ง `images[]`** — แทนด้วย `"pool": { "total": 50000, "counts": {...} }`
-- `current` (ภาพแรกที่ยังไม่ label) ที่ frontend เคยหาจาก `d.images.find(...)` ตอนนี้มาจาก `GET /api/pool?status=unlabeled&limit=1` ที่ frontend ยิงตามหลัง session
-- `bank.labeled` / `bank.auto` (arrays ใน `BankSummary`) — คงไว้: Queue card ที่หดแล้ว (§5.2) ยังใช้เช็คสถานะภาพ ~30 อันบนสุด และ progress bar ใช้ `.length` · ถ้าภายหลังพบว่าสองอันนี้ก็โตเกิน ค่อยเปลี่ยนเป็น count
-- `testset.images` — ไม่แตะในงานนี้ (test set มักเล็กกว่ามาก)
+ตั้งใจปล่อยให้ `POST /api/session` ยังส่ง `images[]` เต็มไปก่อน:
 
-### 3.3 `GET /api/thumb` — `internal/transport/httpapi/system.go`
+- `session.ts` ใช้ `images[]` ใน ~10 จุด — `remaining` (ส่งให้ autolabel/score), `sortedPool` (FR-18 spread), `nextTodo`, `poolCandidates` (test-set sampling), `saveReview`/`teachFromReview` (หาภาพ auto ถัดไป), keyboard nav — และ frontend ไม่มี test รัน
+- `smoke_test.py` อ่าน `images = r.json()["images"]` แล้ว index (`images[0]`, `images[1:]`) ในราว 30 assertion
+- ปัญหาที่เจ็บจริง (DOM 50k row, full-res image, scroll ยาว) ถูกแก้หมดแล้วโดย T-37–T-39 · ที่เหลือคือ payload ~6MB ครั้งเดียวตอนเปิด session
+
+T-36b: เปลี่ยน `/api/autolabel` + `/api/score` ให้ enumerate ภาพที่ยังไม่ label ที่ server, แทน `images[]` ด้วย `pool: {total, counts}`, ย้าย `sortedPool`/`nextTodo` ไปดึงจาก `/api/pool` — งานของ PR แยก
+
+### 3.3 `GET /api/thumb` — `internal/transport/httpapi/thumb.go`
 
 ```
 GET /api/thumb?path=<abs path>&w=200
-→ 200 image/jpeg (ย่อแล้ว) · Cache-Control: public, max-age=31536000, immutable · ETag: "<mtime>-<size>"
+→ 200 image/jpeg (ย่อแล้ว) · Cache-Control: private, max-age=31536000, immutable · ETag: "<mtime>-<size>-<w>"
 ```
 
-- `path` ผ่าน `checkedPath()` (invariant #8) · **404** ถ้าไฟล์หาย · **400** ถ้า decode ไม่ได้
-- `w` = ความกว้างเป้าหมาย, cap ที่ `400` (gallery ใช้ 200, retina ใช้ 400) · สูงคำนวณตาม aspect ratio
-- decode ด้วย stdlib `image` → scale ด้วย `golang.org/x/image/draw` (`draw.ApproxBiLinear` — เร็ว, คมพอสำหรับ grid cell) → encode JPEG q75
+- `path` ผ่าน `checkedPath()` (invariant #8) · **404** ถ้าไฟล์หาย · **400** ถ้า decode ไม่ได้ (gallery ข้าม cell ที่พัง ไม่ทำทั้ง request ล้ม)
+- `w` = ความกว้างเป้าหมาย, min 16, cap ที่ `400` (gallery ใช้ 200, retina ใช้ 400) · สูงคำนวณตาม aspect ratio · **ไม่ upscale** — source ที่เล็กกว่า `w` เสิร์ฟขนาดตัวเอง
+- decode ด้วย stdlib `image` (decoder จาก blank import ใน `imagecheck.go`: jpeg/png/gif/bmp) → scale ด้วย `golang.org/x/image/draw` (`draw.ApproxBiLinear`) → encode JPEG q75
 - ถ้า `If-None-Match` ตรง ETag → **304** ไม่ decode ใหม่
-- **cache:** in-process LRU (`~500` entry, key = `path|w`) — ป้องกัน decode ซ้ำตอน scroll ขึ้นลง
+- **cache:** in-process LRU 512 entry (`container/list`), key = `path|w`
 
 ```go
-// ponytail: in-mem LRU, 500 entries. A cold scroll through a 50k pool re-decodes
-// past the tail; add a .ctflow/_thumbs/ disk cache (Go-owned, sha1(path)_w.jpg)
-// only if that measurably drags.
+// ponytail: in-memory LRU, 512 entries (~8MB at 200px). A cold scroll past the
+// tail of a 50k pool re-decodes; add a .ctflow/_thumbs/ disk cache
+// (Go-owned, sha1(path)_w.jpg) only if that measurably drags.
 ```
 
 - route: `mux.Handle("GET /api/thumb", s.Handle(s.GetThumb))` ใน `backend/cmd/api/main.go`
-- frontend: `export const thumbUrl = (path, w = 200) => \`/api/thumb?path=${encodeURIComponent(path)}&w=${w}\`` ใน `app/lib/api.ts` (ของกลาง — gallery และ Queue card ใช้ร่วม)
+- `app/api/[...path]/route.ts` (proxy) forward `cache-control`+`etag` กลับ และ `if-none-match` ขึ้น — ไม่งั้น browser cache ไม่ทำงานผ่าน proxy
+- frontend: `thumbUrl(path, w = 200)` ใน `app/lib/api.ts` (ของกลาง — re-export ผ่าน `modules/detection/api.ts` เหมือน `imgUrl`)
+
+### 3.4 `images.ListCached` — `internal/infra/images/images.go`
+
+`GET /api/pool` เรียก `images.ListCached(dir)` แทน `List(dir)` — cache ต่อ dir keyed บน mtime ของโฟลเดอร์ (เปลี่ยนเมื่อ entry ถูกเพิ่ม/ลบ = เมื่อชุดภาพเปลี่ยน) ป้องกัน readdir 50k ไฟล์ทุก scroll page
+
+```go
+// ponytail: in-process map + sync.Mutex, one API process. Same "no horizontal
+// scale" ceiling as the job and claim trackers -- when they move, this moves.
+```
 
 ---
 
@@ -116,11 +132,14 @@ GET /api/thumb?path=<abs path>&w=200
 
 ```
 app/modules/detection/
-  panels/GalleryPanel.tsx        ใหม่
-  session.ts                     Panel union += "gallery" · pool state เปลี่ยนจาก images[] เป็น {total, counts}
-  api.ts                         getPool(input_dir, {status, offset, limit})
+  panels/GalleryPanel.tsx        ใหม่ (state อยู่ใน panel เอง, ไม่ยัดเข้า session.ts)
+  session.ts                     Panel union += "gallery" เท่านั้น
+  api.ts                         getPool() + PoolItem · re-export thumbUrl
+  panels/PoolPanel.tsx           Queue card render .slice(0, QUEUE_CAP) + ลิงก์ไป gallery
 app/lib/api.ts                   thumbUrl()  (ของกลาง)
+app/api/[...path]/route.ts       forward cache-control/etag/if-none-match
 app/p/[id]/page.tsx              แท็บ "Gallery" ในแถวแท็บ
+app/globals.css                  .gallery-grid / .gallery-cell / .gallery-dot / ...
 ```
 
 `GalleryPanel` อยู่ใต้ `modules/detection/` — ห้ามถูก import จาก `app/page.tsx` (invariant #11)
@@ -143,44 +162,26 @@ app/p/[id]/page.tsx              แท็บ "Gallery" ในแถวแท็
 
 ### 4.3 การ์ด Queue ที่หดแล้ว (`PoolPanel.tsx`)
 
-- `sortedPool` เลิกต่อท้ายภาพ done ทั้งหมด — เหลือแค่ todo ที่เรียง confidence แล้ว cap ~30 อัน (ที่เกินก็ยังหยิบ "ภาพถัดไป" ได้ผ่าน `nextTodo`)
-- footer ของการ์ด: ลิงก์ `ดูภาพทั้งหมด →` ไปแท็บ Gallery
-- ลบ logic client-side ที่จัดการ done images ใน `sortedPool` (deletion beats addition)
+- render `s.sortedPool.slice(0, QUEUE_CAP)` (`QUEUE_CAP = 60`) แทนทั้งลิสต์ — `sortedPool` ยังคำนวณเต็ม (todo + done) เพื่อให้ keyboard next/prev เดินได้ทั้งโฟลเดอร์ แต่ DOM มีแค่ 60 row
+- footer: ปุ่ม `See all N in the gallery` → `s.setPanel("gallery")` เมื่อ `sortedPool.length > QUEUE_CAP`
+
+> **หมายเหตุ:** แผนเดิมบอก "ลบ done-list logic ออกจาก `sortedPool`" — เลื่อนไปพร้อม T-36b เพราะ keyboard nav (`step()` ใน `page.tsx`) ยังเดินผ่าน `sortedPool` ทั้งชุด การ slice ตอน render แก้ปัญหา DOM ได้โดยไม่แตะ nav
 
 ---
 
-## 5. งานเป็นก้อน
+## 5. งานเป็นก้อน — สิ่งที่ลงจริงบน `feature/gallery`
 
-แต่ละก้อน merge ได้เอง · `smoke_test.py` คือเกณฑ์รับงานของทุกก้อน (ห้ามสร้าง suite ที่สอง)
+| ก้อน | สถานะ | ไฟล์ |
+|---|---|---|
+| **T-36** | `GET /api/pool` ลงแล้ว · `POST /api/session` **ยังส่ง `images[]`** (→ T-36b) | `pool.go` (`GetPool`, `poolItem`), `images.go` (`ListCached`), `main.go` route, `api.ts` (`getPool`, `PoolItem`) |
+| **T-37** | ลงครบ | `thumb.go` (`GetThumb` + LRU + ETag/304), `main.go` route, `lib/api.ts` (`thumbUrl`), `route.ts` (header forwarding) |
+| **T-38** | ลงครบ | `panels/GalleryPanel.tsx` ใหม่, `session.ts` (`Panel` += `"gallery"`), `page.tsx` (แท็บ + render), `globals.css` (`.gallery-*`) |
+| **T-39** | ลง version slice — ดู §4.3 | `panels/PoolPanel.tsx` |
+| **T-36b** | ยังไม่ทำ — PR แยก | `/api/autolabel` + `/api/score` server-enumerate, ถอด `images[]` จาก session, ย้าย `sortedPool`/`nextTodo` ไป `/api/pool` |
 
-### T-36 · `GET /api/pool` + session เลิกส่ง `images[]`
+**smoke_test.py** (`backend/tests/smoke_test.py`): เพิ่ม block สำหรับ `GET /api/pool` (fresh state, pagination, status filter, bad-status → 400, counts เปลี่ยนหลัง label) และ `GET /api/thumb` (image/jpeg เล็กกว่า original, `If-None-Match` → 304, path นอก root → 403)
 
-ก้อนที่ปลดล็อกที่เหลือ · backend + frontend rewiring, ยังไม่มี gallery
-
-- `store` method: `PoolListing(ctx, inputDir, status, offset, limit, order) -> (items, counts, total)`
-- `images.List` cache พร้อม mtime invalidation
-- `OpenSession` ตอบ `pool: {total, counts}` แทน `images`
-- frontend: `pool` state เป็น `{total, counts}` · `current` มาจาก `getPool(status=unlabeled, limit=1)` · Queue card ชั่วคราวยิง `getPool` เอาภาพมาโชว์ (ยังไม่หด)
-- **smoke:** assert `counts` ถูกหลัง label/autolabel · assert pagination boundary (`offset` เกิน `total` → `items: []`) · assert `POST /api/session` ไม่มี key `images` แล้ว
-
-### T-37 · `GET /api/thumb`
-
-- `GetThumb` handler + LRU + ETag/304
-- route + `thumbUrl()` ใน `app/lib/api.ts`
-- **smoke:** assert `GET /api/thumb?path=<pool image>&w=100` คืน `image/jpeg` และเล็กกว่า original · assert path นอก `LABEL_TOOL_VM_ROOT` → 403 · assert `If-None-Match` → 304
-
-### T-38 · GalleryPanel
-
-- panel + แท็บ + filter chips + grid + `content-visibility` + `IntersectionObserver`
-- คลิก card → editor เดิม
-- **CI:** `frontend.yml` (boundary → `tsc` → `build`) · ไม่มี frontend test — งานนี้ไม่เปลี่ยนกติกานั้น
-- **smoke:** ไม่มี assertion ใหม่ (gallery เรียก endpoint ที่ T-36/T-37 assert ไปแล้ว)
-
-### T-39 · หด Queue card
-
-- `sortedPool` เหลือ todo cap 30 · ลบ done-list logic
-- ลิงก์ไป Gallery
-- **smoke:** ปรับ assertion ที่พึ่ง `sortedPool` มี done images (ถ้ามี)
+**Go tests** (`httpapi_test.go`): `TestGetThumbScalesAndRevalidates` (decode ผลลัพธ์ เช็ค 120×80 + ETag + 304), `TestGetThumbNeverUpscales`, `TestGetThumbOnGarbageIs400`, และเพิ่ม `/api/thumb` + `/api/pool` เข้า `TestPathHandlersRefuseOutsideTheRoot`
 
 ---
 
@@ -190,9 +191,9 @@ app/p/[id]/page.tsx              แท็บ "Gallery" ในแถวแท็
 
 - **FR-52** — ผู้ใช้ดูภาพทั้งหมดในโปรเจกต์เป็น gallery แยกจากคิว label, filter ตามสถานะ (มือ / โมเดล / ยังไม่ทำ), คลิกเปิดแก้ได้
 - **FR-53** — ระบบ serve thumbnail ย่อสำหรับ gallery ไม่ส่ง full-res
-- **FR-54** — pool listing paginate ที่ server, `POST /api/session` ไม่ส่งรายการ path ทั้งหมด
+- **FR-54** — pool listing paginate ที่ server (T-36b: `POST /api/session` ไม่ส่งรายการ path ทั้งหมด)
 
-และ [ROADMAP.md](./ROADMAP.md): งานนี้เป็น **Phase 4 (UX polish)** ไม่ใช่ Phase 5 (scale/ops) — มันคือ UX ที่จำเป็นต่อผู้ใช้เมื่อ dataset โต ไม่ใช่ horizontal scale · แต่ `images.List` cache กับ thumbnail LRU มี ceiling "process เดียว" ข้อเดียวกับ jobs/claims — บันทึกในตาราง "ข้อจำกัดที่รู้ตัว"
+และ [ROADMAP.md](./ROADMAP.md): งานนี้เป็น **Phase 4 (UX polish)** ไม่ใช่ Phase 5 (scale/ops) — มันคือ UX ที่จำเป็นต่อผู้ใช้เมื่อ dataset โต ไม่ใช่ horizontal scale · แต่ `images.ListCached` กับ thumbnail LRU มี ceiling "process เดียว" ข้อเดียวกับ jobs/claims — บันทึกในตาราง "ข้อจำกัดที่รู้ตัว"
 
 ---
 
@@ -204,4 +205,4 @@ SMOKE_BASE_URL=http://localhost:8000 python -m backend.tests.smoke_test
 cd frontend && npx tsc --noEmit && npm run build
 ```
 
-`backend/tests/smoke_test.py` **คือ contract** — endpoint หรือ behaviour ที่เปลี่ยนทุกอย่างต้องมี assertion ที่นั่น การเปลี่ยน shape ของ `POST /api/session` (ตัด `images`) จะทำ smoke แดงจนกว่า assertion จะตามไปด้วย — นั่นคือจุดประสงค์
+`backend/tests/smoke_test.py` **คือ contract** — endpoint หรือ behaviour ที่เปลี่ยนทุกอย่างต้องมี assertion ที่นั่น เมื่อ T-36b ตัด `images` ออกจาก `POST /api/session` smoke จะแดงจนกว่า ~30 assertion ที่ index `images[...]` จะตามไปด้วย — นั่นคือเหตุผลที่มันเป็น PR แยก

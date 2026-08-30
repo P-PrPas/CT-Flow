@@ -12,7 +12,7 @@ import { adviseAll, appendHistory, clearHistory, loadHistory, type EvalPoint } f
 import type { BankSummary, EvalImage, EvalResult, ModelInfo, Score } from "./types";
 import { stemOf } from "../../lib/ui";
 
-export type Panel = "pool" | "testset" | "report" | "insights";
+export type Panel = "pool" | "gallery" | "testset" | "report" | "insights";
 
 /** Undo/redo over a box list (FR-24). Kept tiny on purpose: a bounded array of
  *  past states is all a 5-box-per-image workflow ever needs. */

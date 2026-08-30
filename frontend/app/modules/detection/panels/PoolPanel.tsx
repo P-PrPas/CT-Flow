@@ -9,6 +9,12 @@ import { VERDICT_STYLE } from "../history";
 import type { Session } from "../session";
 import { Empty, fileOf, gradeColor, HelpDot, Icon, pct, READY_F1, Term } from "../../../lib/ui";
 
+/** How many rows the Queue shows. It answers "what do I label next", which
+ *  needs the head of the least-confident order, not the whole folder -- browsing
+ *  everything is the Gallery tab's job (docs/GALLERY_PLAN.md T-39). Keyboard
+ *  next/prev still walks the full s.sortedPool. */
+const QUEUE_CAP = 60;
+
 export default function PoolPanel({ s }: { s: Session }) {
   const [confirmAuto, setConfirmAuto] = useState(false);
 
@@ -468,7 +474,7 @@ export default function PoolPanel({ s }: { s: Session }) {
             )}
           </div>
           <div style={{ maxHeight: "46vh", overflow: "auto", padding: "0 8px 8px" }}>
-            {s.sortedPool.map((p) => (
+            {s.sortedPool.slice(0, QUEUE_CAP).map((p) => (
               <div
                 key={p}
                 className="thumb-row"
@@ -499,6 +505,15 @@ export default function PoolPanel({ s }: { s: Session }) {
               <div className="xs muted" style={{ padding: 10 }}>
                 {s.busy ? "Opening…" : "No images in this folder."}
               </div>
+            )}
+            {s.sortedPool.length > QUEUE_CAP && (
+              <button
+                className="btn ghost sm"
+                style={{ width: "100%", marginTop: 6 }}
+                onClick={() => s.setPanel("gallery")}
+              >
+                <Icon name="layers" size={13} /> See all {s.images.length} in the gallery
+              </button>
             )}
           </div>
         </div>

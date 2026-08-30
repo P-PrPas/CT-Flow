@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 )
@@ -40,3 +42,41 @@ func List(dir string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ListCached is List with a per-directory cache, keyed on the folder's mtime --
+// which changes exactly when an entry is added or removed, i.e. exactly when the
+// set of images could differ. GET /api/pool would otherwise readdir tens of
+// thousands of files on every page of every scroll.
+//
+// The returned slice is shared with the cache and with other callers: treat it
+// as read-only (the pool handler filters it into new slices, never mutates it).
+//
+// ponytail: in-process map + sync.Mutex, one API process. Same "no horizontal
+// scale" ceiling as the job and claim trackers -- when they move, this moves.
+func ListCached(dir string) []string {
+	if dir == "" {
+		return []string{}
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return []string{}
+	}
+	listMu.Lock()
+	defer listMu.Unlock()
+	if c, ok := listCache[dir]; ok && c.mtime.Equal(info.ModTime()) {
+		return c.paths
+	}
+	paths := List(dir)
+	listCache[dir] = cachedList{mtime: info.ModTime(), paths: paths}
+	return paths
+}
+
+type cachedList struct {
+	mtime time.Time
+	paths []string
+}
+
+var (
+	listMu    sync.Mutex
+	listCache = map[string]cachedList{}
+)

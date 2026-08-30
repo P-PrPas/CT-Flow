@@ -462,6 +462,32 @@ assert len(auto["bank"]["auto"]) == auto["written"]
 assert len(auto["no_detection_images"]) == auto["no_detection"], auto
 print("autolabel:", auto["written"], "written,", auto["no_detection"], "empty · test image skipped")
 
+# --- GET /api/export: the labels in a training-pipeline format --------------
+# Reads straight out of PostgreSQL; the format builders have their own unit
+# tests, this checks the wiring -- content type, the download filename, and
+# that a bad format or kind is a 400 rather than a stack trace.
+r = c.get("/api/export", params={"input_dir": POOL, "format": "yolo", "kind": "pool"})
+assert r.status_code == 200, r.text
+assert r.headers["content-type"] == "application/zip", r.headers
+assert "labels_yolo.zip" in r.headers.get("content-disposition", ""), r.headers
+assert len(r.content) > 0, "empty export body"
+
+r = c.get("/api/export", params={"input_dir": POOL, "format": "coco", "kind": "pool"})
+assert r.status_code == 200 and r.headers["content-type"] == "application/json", r.headers
+assert json.loads(r.content).get("annotations") is not None, r.text[:200]
+
+assert c.get("/api/export", params={"input_dir": POOL, "format": "xml"}).status_code == 400
+assert c.get("/api/export", params={"input_dir": POOL, "kind": "sideways"}).status_code == 400
+# The test set has ground truth from the block above, so it exports too --
+# proving export reads the two kinds from their separate index spaces.
+assert c.get("/api/export",
+             params={"input_dir": POOL, "format": "yolo", "kind": "testset"}).status_code == 200
+# A folder with nothing labeled for that kind is a 400 with a message, never a
+# valid-but-empty archive.
+r = c.get("/api/export", params={"input_dir": NO_PROJECT, "format": "yolo"})
+assert r.status_code == 400 and "label something first" in r.json()["detail"], r.text
+print("export: yolo zip + coco json, pool and testset, bad format/kind rejected")
+
 # FR-19: pre-annotation for a single image, straight from the bank
 r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.05})
 assert r.status_code == 200, r.text

@@ -220,6 +220,18 @@
 | FR-50 | ดูได้ว่าใคร label ภาพไหน และใครทำงานในโปรเจกต์ไหนบ้าง | ✅ | T-26 + T-33 · `contributors` บนการ์ดโปรเจกต์ และ `labeled_by` ต่อภาพใน `GET /api/boxes` แสดงบน workspace · derive จาก `annotations.created_by` join `users` — เก็บ *ความจริง* ไม่ใช่ *ความตั้งใจ* จึงไม่มีตาราง members · **ต่อภาพ ไม่ใช่ต่อกล่อง**: `Box` เป็น shape ที่ client ส่งกลับมาด้วย การแขวน `created_by` บนนั้นจะเปลี่ยนสัญญาสองทางเพื่อตอบคำถามที่ UI ถามรายภาพอยู่แล้ว · **`oid` กับ `username` เป็นคนละหน้าที่และส่งมาทั้งคู่โดยตั้งใจ** — `oid` ใช้ *เทียบ* ("อันนี้ของฉันไหม") `username` ใช้ *แสดง* · fallback ใช้ `oid` เป็นชื่อเฉพาะเมื่อไม่มีแถวใน `users` ซึ่งเกิดกับ local login (ที่นั่น `oid` **คือ** username อยู่แล้ว) และกับ subject ที่ไม่เคย login เลยตั้งแต่มีตารางนี้ — อ่านไม่ออกยังดีกว่าหายไป |
 | FR-51 | เตือนเมื่อ prompt bank กับ PostgreSQL ไม่ตรงกัน | ✅ | T-34 · `POST /api/session` คืน `bank_orphaned` — bank มี embedding แต่ DB ไม่มีแถว `images` เลย · เกิดได้สองทาง: `docker compose down -v` โดยไม่ลบ `.ctflow/` **และตั้งแต่ T-26 คือ `DELETE /api/projects/{id}` แล้วเปิดโฟลเดอร์เดิมอีกครั้ง** (ดู comment ที่ `httpapi/projects.go::DeleteProject`) |
 
+### Gallery และการรับมือ dataset ขนาดใหญ่ (Phase 4 · T-36)
+
+แผนเต็มและเหตุผล: [GALLERY_PLAN.md](./GALLERY_PLAN.md)
+
+| ID | Requirement | สถานะ | หมายเหตุ |
+|---|---|---|---|
+| FR-52 | ดูภาพทั้งหมดในโปรเจกต์เป็นตาราง กรองตามสถานะได้ และกดกลับไปแก้ภาพเก่าได้ | ✅ | T-36 · แท็บ Gallery + `GET /api/pool` (กรอง `all`/`labeled`/`auto`/`unlabeled`, `offset`/`limit` เพดาน 500) · รายชื่อภาพมาจาก readdir ที่ cache ไว้ ส่วนสถานะมาจาก `images.status` · `unlabeled` คือส่วนต่าง ไม่เสีย query เพิ่ม · `held_by` เป็นชื่อคน ไม่ใช่ `sub` |
+| FR-53 | ตารางภาพต้องไม่ดึงภาพเต็มความละเอียดทีละหลายสิบรูป | ✅ | T-36 · `GET /api/thumb` decode → ย่อด้วย `x/image/draw` → JPEG q75 · ไม่ขยายภาพ กว้างสุด 400 · `ETag` = mtime-size-width, `immutable` หนึ่งปี, `If-None-Match` ตรงกันคืน 304 เปล่า · LRU 512 รายการใน process · **header caching ตั้งเฉพาะ response ที่ cache ได้จริง** ไม่ติดไปกับ 400 |
+| FR-54 | คิว label ต้องไม่ render หนึ่ง DOM node ต่อภาพทั้งโฟลเดอร์ | 🟡 | T-36 · การ์ด Queue ตัดที่ 60 แถวแล้วส่งต่อไป Gallery ซึ่ง page ทีละ 200 และใช้ `content-visibility: auto` (ไม่มี virtualization library) · ยัง 🟡 เพราะ `POST /api/session` ยังส่ง `images[]` เต็ม — เหลือเป็น T-36b ดู [GALLERY_PLAN.md](./GALLERY_PLAN.md) |
+
+**เพดานที่รู้ตัวของ T-36:** cache ของ readdir และของ thumbnail อยู่ใน memory ของ API process เดียว เหมือน `jobs` และ `claims` — ย้ายไป Redis พร้อมกันทั้งสามเมื่อ NFR-06 เป็นจริง
+
 **สิ่งที่ Phase 2 ตั้งใจไม่ทำ:** role/permission · ตาราง project members · upload UI · abstraction ต่อ task type · migration framework · deep link ถึงภาพรายตัว · real-time แบบ websocket
 
 ---

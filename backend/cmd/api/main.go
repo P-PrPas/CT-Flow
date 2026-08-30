@@ -168,6 +168,7 @@ func routes(s *httpapi.Server) http.Handler {
 	mux.Handle("GET /api/config", s.Handle(s.GetConfig))
 	mux.Handle("GET /api/browse", s.Handle(s.Browse))
 	mux.Handle("GET /api/image", s.Handle(s.GetImage))
+	mux.Handle("GET /api/thumb", s.Handle(s.GetThumb))
 
 	mux.Handle("GET /api/projects", s.Handle(s.ListProjects))
 	mux.Handle("POST /api/projects", s.Handle(s.CreateProject))
@@ -176,6 +177,7 @@ func routes(s *httpapi.Server) http.Handler {
 	mux.Handle("DELETE /api/projects/{id}", s.Handle(s.DeleteProject))
 
 	mux.Handle("POST /api/session", s.Handle(s.OpenSession))
+	mux.Handle("GET /api/pool", s.Handle(s.GetPool))
 	mux.Handle("GET /api/boxes", s.Handle(s.GetBoxes))
 	mux.Handle("GET /api/state", s.Handle(s.GetState))
 	mux.Handle("POST /api/claim", s.Handle(s.Claim))

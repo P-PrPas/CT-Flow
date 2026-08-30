@@ -160,6 +160,43 @@ assert r.status_code == 200 and r.json()["project"]["input_dir"] == POOL, r.text
 assert c.get(f"/api/projects/{PROJECT_ID + 10_000}").status_code == 404
 print("pool:", len(images), "images ·", f"project {PROJECT_ID} {project['name']!r}")
 
+# --- GET /api/pool: the gallery's paged, filtered listing (FR-52) -----------
+# Nothing is labeled yet, so all three images are "unlabeled" and the filters
+# partition the folder. The image set comes from a cached readdir; the statuses
+# come from PostgreSQL; "unlabeled" is the difference and costs no query.
+pool0 = c.get("/api/pool", params={"input_dir": POOL}).json()
+assert pool0["total"] == 3, pool0
+assert pool0["counts"] == {"labeled": 0, "auto": 0, "unlabeled": 3}, pool0
+assert [it["path"] for it in pool0["items"]] == images, pool0
+assert all(it["status"] == "unlabeled" and it["held_by"] is None for it in pool0["items"]), pool0
+
+# Paging is server-side: offset/limit slice the same order the array had.
+assert [it["path"] for it in
+        c.get("/api/pool", params={"input_dir": POOL, "limit": 2}).json()["items"]] == images[:2]
+tail = c.get("/api/pool", params={"input_dir": POOL, "offset": 2, "limit": 2}).json()
+assert [it["path"] for it in tail["items"]] == images[2:] and tail["total"] == 3, tail
+
+# Filtering by a status nothing has yet is an empty page with an honest total.
+assert c.get("/api/pool", params={"input_dir": POOL, "status": "labeled"}).json() == {
+    "total": 0, "counts": {"labeled": 0, "auto": 0, "unlabeled": 3}, "items": []}
+assert c.get("/api/pool", params={"input_dir": POOL, "status": "sideways"}).status_code == 400
+print("pool listing: paged and filtered server-side")
+
+# --- GET /api/thumb: a downscaled JPEG for the gallery grid (FR-53) ---------
+full = c.get("/api/image", params={"path": images[0]})
+thumb = c.get("/api/thumb", params={"path": images[0], "w": 96})
+assert thumb.status_code == 200 and thumb.headers["content-type"] == "image/jpeg", thumb.headers
+assert 0 < len(thumb.content) < len(full.content), (len(thumb.content), len(full.content))
+# The ETag is the browser's revalidation token: a matching If-None-Match comes
+# back as a bodiless 304, which is what makes a re-scroll free.
+again = c.get("/api/thumb", params={"path": images[0], "w": 96},
+              headers={"If-None-Match": thumb.headers["etag"]})
+assert again.status_code == 304 and not again.content, (again.status_code, again.content[:40])
+# Same trust boundary as every other path the browser sends -- refused before
+# the file is even stat'd, so it need not exist.
+assert c.get("/api/thumb", params={"path": "/tmp/outside-the-root.jpg"}).status_code == 403
+print("thumb:", len(thumb.content), "bytes vs", len(full.content), "full · 304 · 403 outside root")
+
 target = images[0]
 r = c.post("/api/label", json={
     "input_dir": POOL,
@@ -201,6 +238,19 @@ def bank_names() -> list[str]:
 
 assert bank_names() == ["test_item"]
 assert _dbcheck.list_by_status(POOL, "pool")["labeled"] == [target]
+
+# GET /api/pool reflects the label: one "labeled" now, and asking for just that
+# status returns the one row.
+after = c.get("/api/pool", params={"input_dir": POOL}).json()
+assert after["counts"] == {"labeled": 1, "auto": 0, "unlabeled": 2}, after
+# counts and total describe the same walk, so they cannot drift apart. They can
+# when counts come from the images table while items come from the folder: an
+# images row outliving its file inflates one and shrinks the other, and the
+# gallery then pages forever toward a total it can never reach.
+assert sum(after["counts"].values()) == after["total"], after
+labeled_only = c.get("/api/pool", params={"input_dir": POOL, "status": "labeled"}).json()
+assert [it["path"] for it in labeled_only["items"]] == [target], labeled_only
+assert labeled_only["total"] == 1 and labeled_only["items"][0]["status"] == "labeled"
 
 r = c.post("/api/score", json={"input_dir": POOL, "images": images[1:]})
 assert r.status_code == 200, r.text

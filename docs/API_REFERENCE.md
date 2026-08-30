@@ -128,7 +128,7 @@
 
 ---
 
-## Pool labeling (`internal/transport/httpapi/pool.go`, `label.go`, `state.go`, `project.go`)
+## Pool labeling (`internal/transport/httpapi/pool.go`, `label.go`, `state.go`, `thumb.go`, `project.go`)
 
 วงจร label หลักของพูลภาพ
 
@@ -161,6 +161,26 @@
 - **หนึ่งคนถือได้หนึ่งภาพต่อหนึ่งโปรเจกต์** — จองภาพใหม่ = ปล่อยภาพเดิมอัตโนมัติ จึงไม่ต้องมี endpoint `release` แยกสำหรับการเดินคิว · `release: true` มีไว้สำหรับ "ทำเสร็จแล้ว" — client ไม่ต้องเรียกเองหลัง save เพราะ `POST /api/label` ปล่อยการจองให้ในตัว (เรียก `claims.Release` ตรง ๆ ไม่ได้ยิง endpoint นี้ซ้ำ)
 - **จองซ้ำภาพของตัวเองได้เสมอ** และเป็นการต่ออายุ — นี่คือสิ่งที่ทำให้ frontend เรียกมันเป็น heartbeat ทุก 5 นาทีได้โดยไม่ต้องจำว่าถืออยู่แล้วหรือยัง
 - **TTL 10 นาที** นับจากการจองครั้งล่าสุด · เก็บใน memory (`internal/platform/claims`) ไม่ใช่ใน DB โดยตั้งใจ: มันควรหายไปตอน restart อยู่แล้ว, แถว `images` ถูกสร้างแบบ lazy เฉพาะตอน label จริง (เก็บใน DB จะบวมด้วยภาพที่แค่เปิดดู) และจะต้องมีงานเก็บกวาดแถวหมดอายุ · **ข้อจำกัดเดียวกับ job tracker: รองรับ API process เดียว** — สอง replica จะมองไม่เห็นการจองของกัน ซึ่งเสื่อมกลับไปเป็นพฤติกรรมเดิมก่อน FR-49 ไม่ใช่พังใหม่
+
+### `GET /api/pool`
+รายชื่อภาพในพูล กรองตามสถานะและแบ่งหน้า — หลังบ้านของแท็บ Gallery (FR-52)
+
+- **Query:** `input_dir` · `status` (`all` default \| `labeled` \| `auto` \| `unlabeled`) · `offset` (default 0) · `limit` (default 200, เพดาน 500)
+- **Response:** `{"total": int, "counts": {"labeled": int, "auto": int, "unlabeled": int}, "items": [{"path": str, "status": str, "held_by": str|null}]}`
+- `total` คือจำนวนของ filter ที่เลือก · `counts` คือของทุก filter สำหรับ badge บนปุ่ม · **ทั้งคู่มาจากการเดินรายชื่อภาพรอบเดียวกับที่สร้าง `items`** จึงขัดกันเองไม่ได้ (นับจาก `images.status` ตรง ๆ จะเพี้ยนทันทีที่มีแถวในตารางแต่ไฟล์ถูกลบไปแล้ว)
+- **400** `status must be one of all, labeled, auto, unlabeled` · `no images in <dir>`
+- **403** ถ้า `input_dir` อยู่นอก `LABEL_TOOL_VM_ROOT`
+- รายชื่อภาพมาจาก readdir ที่ cache ไว้ (key = mtime ของโฟลเดอร์) ส่วนสถานะมาจาก PostgreSQL · `unlabeled` คือส่วนต่าง ไม่เสีย query เพิ่ม · `held_by` เป็น **ชื่อคน** ไม่ใช่ `sub` เหมือน `GET /api/state`
+
+### `GET /api/thumb`
+ภาพย่อสำหรับตาราง Gallery (FR-53) — `GET /api/image` ส่งไฟล์เต็ม ซึ่งใช้ทีละหลายสิบรูปไม่ได้
+
+- **Query:** `path` · `w` (ความกว้างเป้าหมาย default 200 ต่ำสุด 16 เพดาน 400)
+- **Response:** `image/jpeg` (q75) · **ไม่ขยายภาพ** — ต้นฉบับที่เล็กกว่า `w` ถูกส่งตามขนาดตัวเอง
+- **Headers:** `ETag` = `"mtime-size-width"` · `Cache-Control: private, max-age=31536000, immutable` · `If-None-Match` ที่ตรงกันได้ **304 ไม่มี body**
+- **400** `cannot decode this image` · **404** `image not found` · **403** ถ้า `path` อยู่นอก root
+- **header สองตัวข้างบนติดเฉพาะ response ที่ cache ได้จริง (200 กับ 304)** — ไม่ติดไปกับ 400 เพราะ `max-age` ที่ระบุชัดทำให้ browser cache error response ได้ ไฟล์ที่ก็อปมายังไม่ครบจะกลายเป็น cell ที่พังถาวรจนกว่าจะ hard refresh
+- decoder คือชุดเดียวกับที่ `config.ImageExts` รับ (jpeg/png/gif/bmp) · ผลลัพธ์ cache ใน LRU 512 รายการต่อ process
 
 ### `GET /api/image`
 เสิร์ฟไฟล์ภาพดิบ

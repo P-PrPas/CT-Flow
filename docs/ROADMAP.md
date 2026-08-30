@@ -73,6 +73,8 @@
 
 ทำเมื่อมีผู้ใช้จริงยืนยันความต้องการ:
 
+- **T-36 · Gallery + การรับมือ dataset ขนาดใหญ่ ✅** (FR-52/53/54, แผน: [GALLERY_PLAN.md](./GALLERY_PLAN.md)) — แท็บ Gallery, `GET /api/pool` แบบ page + filter, `GET /api/thumb` ย่อภาพฝั่ง server, การ์ด Queue ตัดที่ 60 แถว · **อยู่ Phase 4 ไม่ใช่ Phase 5** เพราะเป็น UX ที่ dataset โตแล้วบังคับ ไม่ใช่การ scale แนวนอน
+  - **T-36b ยังไม่ทำ:** `POST /api/session` ยังส่ง `images[]` ทั้งก้อน (~6MB ที่ 50k ภาพ) · ตัดออกได้ต้องให้ `/api/autolabel` กับ `/api/score` enumerate ฝั่ง server เอง แล้วรื้อ call site ใน `session.ts` กับ assertion ใน `smoke_test.py` ที่ index เข้า `images[...]`
 - **T-13 · Upload dropzone** ที่เรียก `POST /api/upload` (backend เสร็จแล้ว) — ต้องตอบก่อนว่าไฟล์ที่อัปโหลดไปลงโฟลเดอร์ไหน ใครตั้งชื่อ ลบโปรเจกต์แล้วไฟล์หายไหม
 - ส่ง usage event จาก frontend ให้สถิติข้าม session และข้ามเครื่องได้จริง (backend สรุปได้แล้ว ดู REQUIREMENTS §7)
 - ~~เพิ่ม frontend type-check/build เข้า CI~~ **ทำแล้วใน T-30** (`.github/workflows/frontend.yml`: module boundary → `tsc --noEmit` → `next build`)

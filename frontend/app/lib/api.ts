@@ -25,6 +25,12 @@ export const post = (url: string, body: unknown) =>
 
 export const imgUrl = (path: string) => `/api/image?path=${encodeURIComponent(path)}`;
 
+/** A downscaled JPEG for grid views. `w` is the target width in CSS pixels;
+ *  the server never upscales and clamps at 400. Cached hard by the browser
+ *  (immutable), keyed on the file's mtime, so a re-scroll costs nothing. */
+export const thumbUrl = (path: string, w = 200) =>
+  `/api/thumb?path=${encodeURIComponent(path)}&w=${w}`;
+
 export type AuthState = {
   /** Always true since T-27 -- signing in is mandatory, and the server will not
    *  start without a way to do it. Kept because it is what the endpoint sends. */

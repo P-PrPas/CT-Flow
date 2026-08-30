@@ -9,17 +9,26 @@ export type EvalBox = {
   conf?: number;
 };
 
-/** Ground truth vs. prediction on one test image, color-coded by match status
- *  so a glance tells you whether an error is a miss or a false alarm. Solid
- *  outlines are truth, dashed are the model. */
+/** Ground truth vs. prediction on one test image. Only the errors are drawn:
+ *  a red solid box for something the model missed, an amber dashed box for
+ *  something it drew that is not there. Correct detections are the majority on
+ *  any usable model and add nothing to "why is the score low" -- they show only
+ *  in the zoomed view, as a faint hairline with no label. */
 export const EVAL_LEGEND = [
-  { color: "var(--ok)", label: "Truth found", key: "tp-gt" },
-  { color: "var(--bad)", label: "Truth missed (FN)", key: "fn" },
-  { color: "var(--info)", label: "Prediction correct (TP)", key: "tp" },
-  { color: "var(--warn)", label: "Prediction wrong (FP)", key: "fp" },
+  { color: "var(--bad)", label: "Missed", key: "fn" },
+  { color: "var(--warn)", label: "False alarm", key: "fp" },
 ];
 
-export default function EvalOverlay({ src, gt, pred }: { src: string; gt: EvalBox[]; pred: EvalBox[] }) {
+export default function EvalOverlay({
+  src, gt, pred, showCorrect = false,
+}: {
+  src: string;
+  gt: EvalBox[];
+  pred: EvalBox[];
+  /** Draw the correct detections too, as an unlabelled hairline. Off for the
+   *  grid thumbnails, on when the image is opened full size. */
+  showCorrect?: boolean;
+}) {
   const [size, setSize] = useState({ w: 1, h: 1 });
 
   const rect = (b: number[]) => ({
@@ -38,26 +47,46 @@ export default function EvalOverlay({ src, gt, pred }: { src: string; gt: EvalBo
         onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
         style={{ width: "100%", display: "block" }}
       />
-      {gt.map((b, i) => {
-        const c = b.matched ? "var(--ok)" : "var(--bad)";
-        return (
-          <div key={`g${i}`} style={{ position: "absolute", ...rect(b.box), border: `2px solid ${c}`, pointerEvents: "none", borderRadius: 2 }}>
-            <span className="box-label" style={{ bottom: -16, color: c, background: "rgba(4,8,16,.8)" }}>
-              truth: {b.cls}{!b.matched && " · missed"}
-            </span>
-          </div>
-        );
-      })}
-      {pred.map((b, i) => {
-        const c = b.matched ? "var(--info)" : "var(--warn)";
-        return (
-          <div key={`p${i}`} style={{ position: "absolute", ...rect(b.box), border: `2px dashed ${c}`, pointerEvents: "none", borderRadius: 2 }}>
-            <span className="box-label" style={{ top: -16, color: c, background: "rgba(4,8,16,.8)" }}>
-              model: {b.cls}{b.conf !== undefined && ` ${b.conf.toFixed(2)}`}{!b.matched && " · wrong"}
-            </span>
-          </div>
-        );
-      })}
+
+      {showCorrect &&
+        gt.filter((b) => b.matched).map((b, i) => (
+          <div
+            key={`c${i}`}
+            style={{
+              position: "absolute", ...rect(b.box),
+              border: "1px solid var(--line)", opacity: 0.55,
+              pointerEvents: "none", borderRadius: 2,
+            }}
+          />
+        ))}
+
+      {gt.filter((b) => !b.matched).map((b, i) => (
+        <div
+          key={`m${i}`}
+          style={{
+            position: "absolute", ...rect(b.box),
+            border: "2px solid var(--bad)", pointerEvents: "none", borderRadius: 2,
+          }}
+        >
+          <span className="box-label" style={{ bottom: -16, color: "var(--bad)", background: "rgba(4,8,16,.8)" }}>
+            missed: {b.cls}
+          </span>
+        </div>
+      ))}
+
+      {pred.filter((b) => !b.matched).map((b, i) => (
+        <div
+          key={`f${i}`}
+          style={{
+            position: "absolute", ...rect(b.box),
+            border: "2px dashed var(--warn)", pointerEvents: "none", borderRadius: 2,
+          }}
+        >
+          <span className="box-label" style={{ top: -16, color: "var(--warn)", background: "rgba(4,8,16,.8)" }}>
+            {b.cls}{b.conf !== undefined ? ` ${b.conf.toFixed(2)}` : ""}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

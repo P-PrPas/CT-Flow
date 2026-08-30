@@ -64,4 +64,4 @@
 
 **Contributor** คนที่ *ลงมือ label จริง* ในโปรเจกต์หนึ่ง — derive จาก `annotations.created_by` join `users` ไม่ใช่รายชื่อที่ใครไปเพิ่มไว้ · ระบบเก็บ **ความจริง** ว่าใครทำ ไม่ใช่ **ความตั้งใจ** ว่าใครควรทำ จึงไม่มีตาราง members
 
-**`bank_orphaned`** ธงที่ `POST /api/session` คืนมาเมื่อ prompt bank มี embedding อยู่แต่ฐานข้อมูลไม่มีป้ายของโปรเจกต์นั้นเลย — อาการของการล้าง `pgdata` โดยไม่ล้าง `.ctflow/` (ดูหัวข้อ "สถานะที่ถูกแบ่งกันอยู่คนละที่" ใน [ARCHITECTURE.md](./ARCHITECTURE.md))
+**`bank_orphaned`** ธงที่ `POST /api/session` คืนมาเมื่อ prompt bank มี embedding อยู่แต่ฐานข้อมูลไม่มีป้ายของโปรเจกต์นั้นเลย — อาการของการล้าง `pgdata` โดยไม่ล้าง `.ctflow/` (ดูหัวข้อ "สถานะที่ถูกแบ่งกันอยู่คนละที่" ใน [ARCHITECTURE.md](./ARCHITECTURE.md)) · กู้ DB จาก bank ที่เหลือได้ด้วย `backend/tools/import_ctflow.py` — วิธีใช้และข้อจำกัดอยู่ที่ [RECOVER_FROM_BANK.md](./RECOVER_FROM_BANK.md)

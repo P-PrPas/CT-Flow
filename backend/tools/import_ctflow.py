@@ -8,6 +8,8 @@ docs/PHASE2_WORKSPACE.md #8): the normal fix is `pg_dump` + restore of both
 halves together, and code that writes the append-only `classes.idx` should
 run by hand, once, with someone watching -- not on a button.
 
+Full how-to, and what this cannot recover: docs/RECOVER_FROM_BANK.md.
+
     DATABASE_URL=postgresql://labeltool:PW@localhost:5433/labeltool \
         python -m backend.tools.import_ctflow --input-dir /opt/mount/project/mydataset --dry-run
 

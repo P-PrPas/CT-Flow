@@ -581,6 +581,7 @@ Coming in cold? [`CLAUDE.md`](CLAUDE.md) → [`ARCHITECTURE.md`](docs/ARCHITECTU
 | [`PHASE2_WORKSPACE.md`](docs/PHASE2_WORKSPACE.md) | Why workspaces, multi-user and mandatory login were built the way they were — a record of the reasoning, not a status page |
 | [`GALLERY_PLAN.md`](docs/GALLERY_PLAN.md) | Why the gallery, the thumbnail endpoint and the paged pool listing exist, and what is left in T-36b |
 | [`GLOSSARY.md`](docs/GLOSSARY.md) | Terminology (SAVPE, prompt bank, etc.) in the order you'll meet it |
+| [`RECOVER_FROM_BANK.md`](docs/RECOVER_FROM_BANK.md) | Rebuilding the database from a surviving `.ctflow` after a half-wipe, with `backend/tools/import_ctflow.py` — and what it cannot bring back |
 | [`history/REFACTOR_PLAN.md`](docs/history/REFACTOR_PLAN.md) | The Python→Go port: what moved, what stayed Python and why, and what it cost |
 | [`history/DB_MIGRATION_PLAN.md`](docs/history/DB_MIGRATION_PLAN.md) | Why labels moved to PostgreSQL and why the prompt bank did not |
 | [`history/EXPERIMENT_T01_CONF.md`](docs/history/EXPERIMENT_T01_CONF.md) | The conf-threshold experiment behind the accuracy table above |

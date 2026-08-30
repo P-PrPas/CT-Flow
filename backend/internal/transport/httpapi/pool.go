@@ -122,7 +122,7 @@ func (s *Server) OpenSession(w http.ResponseWriter, r *http.Request) error {
 // is on it right now.
 type poolItem struct {
 	Path   string  `json:"path"`
-	Status string  `json:"status"` // "labeled" | "auto" | "unlabeled"
+	Status string  `json:"status"` // "labeled" | "auto" | "test" | "unlabeled"
 	HeldBy *string `json:"held_by"`
 }
 
@@ -146,10 +146,10 @@ func (s *Server) GetPool(w http.ResponseWriter, r *http.Request) error {
 		want = "all"
 	}
 	switch want {
-	case "all", "labeled", "auto", "unlabeled":
+	case "all", "labeled", "auto", "test", "unlabeled":
 	default:
 		return errStatus(http.StatusBadRequest,
-			"status must be one of all, labeled, auto, unlabeled")
+			"status must be one of all, labeled, auto, test, unlabeled")
 	}
 	offset := max(queryInt(q.Get("offset"), 0), 0)
 	limit := queryInt(q.Get("limit"), 200)
@@ -165,24 +165,35 @@ func (s *Server) GetPool(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	testImgs, err := s.Store.ListTestImages(r.Context(), inputDir)
+	if err != nil {
+		return err
+	}
 	held, err := s.namedClaims(r, inputDir)
 	if err != nil {
 		return err
 	}
 	labeled := sliceSet(st.Labeled)
 	auto := sliceSet(st.Auto)
+	test := sliceSet(testImgs)
 
 	// Counted from the same walk that builds the page, not from len(st.Labeled).
 	// The two disagree whenever an images row outlives its file -- label an
 	// image, delete it from the folder -- and then the chip badge promises rows
 	// this loop can never yield, items.length never reaches total, and the
 	// gallery's "that's all of them" never arrives. One pass answers both.
-	counts := map[string]int{"labeled": 0, "auto": 0, "unlabeled": 0}
+	//
+	// `test` wins over labeled/auto: a test image is the same file as its pool
+	// row, and the held-out ground truth is the authoritative label for it --
+	// the pool annotations, if any, are not what a combined export should use.
+	counts := map[string]int{"labeled": 0, "auto": 0, "test": 0, "unlabeled": 0}
 	items := make([]poolItem, 0, min(limit, len(all)))
 	matched := 0
 	for _, p := range all {
 		status := "unlabeled"
 		switch {
+		case test[p]:
+			status = "test"
 		case labeled[p]:
 			status = "labeled"
 		case auto[p]:
@@ -229,6 +240,34 @@ func sliceSet(xs []string) map[string]bool {
 		m[x] = true
 	}
 	return m
+}
+
+// dropTestImages removes any path that is in this project's test set. A test
+// image is held-out ground truth: /api/autolabel must not write a guess over
+// it, the same way /api/label and /api/relabel refuse one outright.
+//
+// Returns a new slice rather than filtering in place. The one caller today
+// hands it a fresh slice from checkedPaths, so paths[:0] was safe -- but the
+// obvious next argument to pass is images.ListCached's result, which is shared
+// with the cache and with every other caller, and reusing its array would
+// rewrite the listing under them. A batch is small; the copy is not worth the
+// trap.
+func (s *Server) dropTestImages(ctx context.Context, inputDir string, paths []string) ([]string, error) {
+	testImgs, err := s.Store.ListTestImages(ctx, inputDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(testImgs) == 0 {
+		return paths, nil
+	}
+	held := sliceSet(testImgs)
+	kept := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if !held[p] {
+			kept = append(kept, p)
+		}
+	}
+	return kept, nil
 }
 
 // GetBoxes returns the boxes already saved for one image, so revisiting it

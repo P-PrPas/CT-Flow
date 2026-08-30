@@ -138,7 +138,7 @@ export default function InsightsPanel({ s }: { s: Session }) {
             {[
               ["Time to first auto-label", s.firstAutoSecs === null ? "—" : mins(s.firstAutoSecs)],
               ["Median time per image", median(s.labelSecs) === null ? "—" : `${median(s.labelSecs)!.toFixed(0)}s`],
-              ["Corrected in review", s.auto.size ? `${s.reviewed}/${s.auto.size}` : "—"],
+              ["Machine labels corrected", s.reviewed || "—"],
               ["Hand-labeled share", s.images.length ? `${((s.labeled.size / s.images.length) * 100).toFixed(0)}%` : "—"],
             ].map(([k, v]) => (
               <div key={k} className="metric">

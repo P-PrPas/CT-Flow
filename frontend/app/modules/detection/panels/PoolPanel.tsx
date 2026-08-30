@@ -21,8 +21,9 @@ export default function PoolPanel({ s }: { s: Session }) {
   const f1 = s.evalResult?.overall.f1 ?? null;
   const notReady = f1 !== null && f1 < READY_F1;
 
-  const doneCount = s.labeled.size + s.auto.size;
-  const total = s.images.length || 1;
+  const prog = s.progressBuckets;
+  const doneCount = prog.hand + prog.model + prog.test;
+  const total = prog.total || 1;
 
   const askAutoLabel = () => {
     if (notReady) setConfirmAuto(true);
@@ -44,15 +45,25 @@ export default function PoolPanel({ s }: { s: Session }) {
         )}
 
         {s.isReview && (
-          /* FR-25 — the single most misunderstood thing in the tool: fixing a
-             machine label writes the file but teaches nothing. Say so, and put
-             the alternative right next to it. */
+          /* FR-25 — the single most misunderstood thing in the tool: an edit
+             here does not, by itself, change what the model learned. Say so,
+             and put the alternative right next to it. */
           <div className="note warn">
             <Icon name="alert" size={15} />
             <span>
-              <strong>Corrections here do not teach the model.</strong> This image was labeled
-              automatically; editing it rewrites the label file only. If this image shows something
-              the model keeps getting wrong, use <em>Fix and teach</em> so it becomes an example too.
+              {s.current && s.auto.has(s.current) ? (
+                <>
+                  <strong>The model labeled this one.</strong> Fix the boxes, then <em>Save</em> to
+                  keep the correction — that alone does <em>not</em> teach the model. Use{" "}
+                  <em>Save &amp; teach</em> when this image should become an example too.
+                </>
+              ) : (
+                <>
+                  <strong>Already labeled by hand.</strong> Edits <em>Save</em> as a plain correction —
+                  the model does not relearn from it. Use <em>Save &amp; teach</em> only if the fixed
+                  boxes should also update its examples.
+                </>
+              )}
             </span>
           </div>
         )}
@@ -119,7 +130,7 @@ export default function PoolPanel({ s }: { s: Session }) {
                 <div className="row between wrap" style={{ gap: 8 }}>
                   <span className="mono muted truncate" title={s.current}>{fileOf(s.current)}</span>
                   <div className="row" style={{ gap: 6 }}>
-                    {s.isReview ? (
+                    {s.auto.has(s.current) ? (
                       <span className="chip warn"><Icon name="bot" size={12} /> Machine-labeled</span>
                     ) : s.labeled.has(s.current) ? (
                       <span className="chip ok"><Icon name="check" size={12} /> Labeled by hand</span>
@@ -158,7 +169,6 @@ export default function PoolPanel({ s }: { s: Session }) {
                 <BoxCanvas
                   src={imgUrl(s.current)}
                   boxes={s.pool.boxes}
-                  savedBoxes={s.savedBoxes}
                   draftBoxes={s.drafts}
                   onRemoveDraft={(i) => s.setDrafts((cur) => cur.filter((_, idx) => idx !== i))}
                   color={s.color}
@@ -183,8 +193,12 @@ export default function PoolPanel({ s }: { s: Session }) {
                       className="btn ghost"
                       onClick={() =>
                         s.goToImage(
-                          s.isReview
-                            ? s.images.find((p) => p !== s.current && s.auto.has(p)) ?? null
+                          // Mid review pass (this image is machine-labeled): keep
+                          // walking the machine-labeled ones. Otherwise: next thing
+                          // that still needs a first label.
+                          s.current && s.auto.has(s.current)
+                            ? s.images.find((p) => p !== s.current && s.auto.has(p))
+                              ?? s.nextTodo(s.doneSet, s.current)
                             : s.nextTodo(s.doneSet, s.current)
                         )
                       }
@@ -204,16 +218,17 @@ export default function PoolPanel({ s }: { s: Session }) {
 
                     {s.isReview ? (
                       <>
-                        <button className="btn" onClick={s.saveReview} disabled={s.busy}>
-                          <Icon name="save" size={14} /> Save corrections
+                        <button className="btn" onClick={s.saveReview} disabled={s.busy}
+                          title="Save these boxes as the label. Does not change what the model learned.">
+                          <Icon name="save" size={14} /> Save
                         </button>
                         <button
                           className="btn primary"
                           onClick={s.teachFromReview}
                           disabled={!s.pool.boxes.length || s.busy}
-                          title="Save the corrections AND add this image to the model's examples"
+                          title="Save the boxes AND add this image to the model's examples"
                         >
-                          <Icon name="brain" size={14} /> Fix and teach
+                          <Icon name="brain" size={14} /> Save &amp; teach
                         </button>
                       </>
                     ) : (
@@ -275,19 +290,33 @@ export default function PoolPanel({ s }: { s: Session }) {
           </div>
           <div className="card-body col tight" style={{ gap: 10 }}>
             <div className="track">
-              <span className="fill-ok" style={{ width: `${(s.labeled.size / total) * 100}%` }} />
-              <span className="fill-brand" style={{ width: `${(s.auto.size / total) * 100}%` }} />
+              <span className="fill-ok" style={{ width: `${(prog.hand / total) * 100}%` }} />
+              <span className="fill-brand" style={{ width: `${(prog.model / total) * 100}%` }} />
+              <span className="fill-info" style={{ width: `${(prog.test / total) * 100}%` }} />
+              <span className="fill-warn" style={{ width: `${(prog.nothing / total) * 100}%` }} />
             </div>
-            <div className="row between xs">
+            <div className="row wrap xs" style={{ gap: 10 }}>
               <span className="row" style={{ gap: 5 }}>
-                <span className="dot" style={{ color: "var(--ok)" }} /> {s.labeled.size} by hand
+                <span className="dot" style={{ color: "var(--ok)" }} /> {prog.hand} by hand
               </span>
               <span className="row" style={{ gap: 5 }}>
-                <span className="dot" style={{ color: "var(--brand)" }} /> {s.auto.size} by model
+                <span className="dot" style={{ color: "var(--brand)" }} /> {prog.model} by model
               </span>
-              <span className="row muted" style={{ gap: 5 }}>
-                <span className="dot" style={{ color: "var(--line)" }} /> {s.remaining.length} left
-              </span>
+              {prog.test > 0 && (
+                <span className="row" style={{ gap: 5 }}>
+                  <span className="dot" style={{ color: "var(--info)" }} /> {prog.test} test set
+                </span>
+              )}
+              {prog.nothing > 0 && (
+                <span className="row" style={{ gap: 5 }}>
+                  <span className="dot" style={{ color: "var(--warn)" }} /> {prog.nothing} found nothing
+                </span>
+              )}
+              {prog.left > 0 && (
+                <span className="row muted" style={{ gap: 5 }}>
+                  <span className="dot" style={{ color: "var(--line)" }} /> {prog.left} left
+                </span>
+              )}
             </div>
           </div>
         </div>

@@ -238,6 +238,15 @@ func (s *Server) Autolabel(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// A test-set image is held-out ground truth -- writing a guess over it is
+	// the same mistake /api/label and /api/relabel refuse with a 400. The
+	// frontend already keeps these out of the batch; this is the server-side
+	// enforcement, so a client working from a stale test-set list cannot get
+	// one through. Dropped silently rather than 400: the rest of the batch is
+	// legitimate and should still run.
+	if paths, err = s.dropTestImages(r.Context(), inputDir, paths); err != nil {
+		return err
+	}
 	conf := orDefaultConf(req.Conf)
 	confByClass := req.ConfByClass
 	jobID := s.Jobs.Create(len(paths))

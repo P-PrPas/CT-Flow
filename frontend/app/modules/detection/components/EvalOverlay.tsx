@@ -9,14 +9,20 @@ export type EvalBox = {
   conf?: number;
 };
 
-/** Ground truth vs. prediction on one test image, color-coded by match status
- *  so a glance tells you whether an error is a miss or a false alarm. Solid
- *  outlines are truth, dashed are the model. */
+/** Ground truth vs. prediction on one test image, one box per object:
+ *
+ *   - green solid, no label  -- a correct detection (TP). Shown so the image
+ *     never looks like the model did nothing, but unlabelled so it stays quiet.
+ *   - red solid, labelled    -- a real object the model missed (FN).
+ *   - amber dashed, labelled -- a box the model drew that is not there (FP).
+ *
+ * The errors carry the labels because the errors are the reason to open the
+ * grid: "why is the score low" is answered by the red and amber, not the green.
+ */
 export const EVAL_LEGEND = [
-  { color: "var(--ok)", label: "Truth found", key: "tp-gt" },
-  { color: "var(--bad)", label: "Truth missed (FN)", key: "fn" },
-  { color: "var(--info)", label: "Prediction correct (TP)", key: "tp" },
-  { color: "var(--warn)", label: "Prediction wrong (FP)", key: "fp" },
+  { color: "var(--ok)", label: "Correct", dashed: false },
+  { color: "var(--bad)", label: "Missed", dashed: false },
+  { color: "var(--warn)", label: "False alarm", dashed: true },
 ];
 
 export default function EvalOverlay({ src, gt, pred }: { src: string; gt: EvalBox[]; pred: EvalBox[] }) {
@@ -38,26 +44,45 @@ export default function EvalOverlay({ src, gt, pred }: { src: string; gt: EvalBo
         onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
         style={{ width: "100%", display: "block" }}
       />
-      {gt.map((b, i) => {
-        const c = b.matched ? "var(--ok)" : "var(--bad)";
-        return (
-          <div key={`g${i}`} style={{ position: "absolute", ...rect(b.box), border: `2px solid ${c}`, pointerEvents: "none", borderRadius: 2 }}>
-            <span className="box-label" style={{ bottom: -16, color: c, background: "rgba(4,8,16,.8)" }}>
-              truth: {b.cls}{!b.matched && " · missed"}
-            </span>
-          </div>
-        );
-      })}
-      {pred.map((b, i) => {
-        const c = b.matched ? "var(--info)" : "var(--warn)";
-        return (
-          <div key={`p${i}`} style={{ position: "absolute", ...rect(b.box), border: `2px dashed ${c}`, pointerEvents: "none", borderRadius: 2 }}>
-            <span className="box-label" style={{ top: -16, color: c, background: "rgba(4,8,16,.8)" }}>
-              model: {b.cls}{b.conf !== undefined && ` ${b.conf.toFixed(2)}`}{!b.matched && " · wrong"}
-            </span>
-          </div>
-        );
-      })}
+
+      {gt.filter((b) => b.matched).map((b, i) => (
+        <div
+          key={`c${i}`}
+          style={{
+            position: "absolute", ...rect(b.box),
+            border: "2px solid var(--ok)", opacity: 0.8,
+            pointerEvents: "none", borderRadius: 2,
+          }}
+        />
+      ))}
+
+      {gt.filter((b) => !b.matched).map((b, i) => (
+        <div
+          key={`m${i}`}
+          style={{
+            position: "absolute", ...rect(b.box),
+            border: "2px solid var(--bad)", pointerEvents: "none", borderRadius: 2,
+          }}
+        >
+          <span className="box-label" style={{ bottom: -16, color: "var(--bad)", background: "rgba(4,8,16,.8)" }}>
+            missed: {b.cls}
+          </span>
+        </div>
+      ))}
+
+      {pred.filter((b) => !b.matched).map((b, i) => (
+        <div
+          key={`f${i}`}
+          style={{
+            position: "absolute", ...rect(b.box),
+            border: "2px dashed var(--warn)", pointerEvents: "none", borderRadius: 2,
+          }}
+        >
+          <span className="box-label" style={{ top: -16, color: "var(--warn)", background: "rgba(4,8,16,.8)" }}>
+            {b.cls}{b.conf !== undefined ? ` ${b.conf.toFixed(2)}` : ""}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

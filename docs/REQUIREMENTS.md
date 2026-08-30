@@ -168,7 +168,7 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| FR-25 | **แจ้งใน review mode ว่าการแก้นี้ไม่สอนโมเดล + ปุ่ม "สอนโมเดลด้วย" (ส่งเข้า `/api/label` แทน)** | ✅ | แถบเตือน + ปุ่มคู่ "Save corrections" / "Fix and teach" |
+| FR-25 | **แจ้งใน review mode ว่าการแก้นี้ไม่สอนโมเดล + ปุ่ม "สอนโมเดลด้วย" (ส่งเข้า `/api/label` แทน)** | ✅ | แถบเตือน + ปุ่มคู่ **`Save`** (→ `/api/relabel` ไม่สอน) / **`Save & teach`** (→ `/api/label` สอน) · ครอบภาพที่ label ด้วยมือด้วย ไม่ใช่เฉพาะภาพที่โมเดล label — **`Enter`/`Ctrl+S` คือ `Save`** จึงไม่เพิ่ม prompt ซ้ำเมื่อกดบันทึกภาพเดิมอีกครั้ง |
 | FR-26 | **อธิบายศัพท์เทคนิคใน UI** (tooltip: bank, embedding, rescore) | ✅ | `Term`/`HelpDot` ครอบศัพท์ทุกคำบนหน้าจอ |
 | FR-27 | **เตือนเมื่อผู้ใช้กด auto-label ทั้งที่ F1 ยังต่ำ** | ✅ | dialog แสดง F1 จริง + คำแนะนำรายคลาส ก่อนยอมให้กดต่อ (เกณฑ์ `READY_F1 = 0.75`) |
 | FR-28 | แสดงเหตุผลเมื่อ auto-label ไม่เขียนป้ายให้บางภาพ (`no_detection`) | ✅ | คืน `no_detection_images` + การ์ดพร้อมปุ่มเปิดภาพแรก |
@@ -226,7 +226,7 @@
 
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
-| FR-52 | ดูภาพทั้งหมดในโปรเจกต์เป็นตาราง กรองตามสถานะได้ และกดกลับไปแก้ภาพเก่าได้ | ✅ | T-36 · แท็บ Gallery + `GET /api/pool` (กรอง `all`/`labeled`/`auto`/`unlabeled`, `offset`/`limit` เพดาน 500) · รายชื่อภาพมาจาก readdir ที่ cache ไว้ ส่วนสถานะมาจาก `images.status` · `unlabeled` คือส่วนต่าง ไม่เสีย query เพิ่ม · `held_by` เป็นชื่อคน ไม่ใช่ `sub` |
+| FR-52 | ดูภาพทั้งหมดในโปรเจกต์เป็นตาราง กรองตามสถานะได้ และกดกลับไปแก้ภาพเก่าได้ | ✅ | T-36 · แท็บ Gallery + `GET /api/pool` (กรอง `all`/`labeled`/`auto`/`test`/`unlabeled`, `offset`/`limit` เพดาน 500) · `test` ชนะ `labeled`/`auto` เพราะ ground truth ที่กันไว้คือป้ายที่เชื่อถือได้ของไฟล์นั้น · รายชื่อภาพมาจาก readdir ที่ cache ไว้ ส่วนสถานะมาจาก `images.status` · `unlabeled` คือส่วนต่าง ไม่เสีย query เพิ่ม · `held_by` เป็นชื่อคน ไม่ใช่ `sub` |
 | FR-53 | ตารางภาพต้องไม่ดึงภาพเต็มความละเอียดทีละหลายสิบรูป | ✅ | T-36 · `GET /api/thumb` decode → ย่อด้วย `x/image/draw` → JPEG q75 · ไม่ขยายภาพ กว้างสุด 400 · `ETag` = mtime-size-width, `immutable` หนึ่งปี, `If-None-Match` ตรงกันคืน 304 เปล่า · LRU 512 รายการใน process · **header caching ตั้งเฉพาะ response ที่ cache ได้จริง** ไม่ติดไปกับ 400 |
 | FR-54 | คิว label ต้องไม่ render หนึ่ง DOM node ต่อภาพทั้งโฟลเดอร์ | 🟡 | T-36 · การ์ด Queue ตัดที่ 60 แถวแล้วส่งต่อไป Gallery ซึ่ง page ทีละ 200 และใช้ `content-visibility: auto` (ไม่มี virtualization library) · ยัง 🟡 เพราะ `POST /api/session` ยังส่ง `images[]` เต็ม — เหลือเป็น T-36b ดู [GALLERY_PLAN.md](./GALLERY_PLAN.md) |
 

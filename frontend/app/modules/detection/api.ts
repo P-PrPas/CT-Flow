@@ -51,10 +51,11 @@ export function saveLabel(
 }
 
 /** One image in the gallery: its path, how it was labeled, and whoever is on
- *  it right now (FR-49). */
+ *  it right now (FR-49). "test" means it is a held-out test image -- it has
+ *  ground truth and counts as done, it is just kept out of the prompt bank. */
 export type PoolItem = {
   path: string;
-  status: "labeled" | "auto" | "unlabeled";
+  status: "labeled" | "auto" | "test" | "unlabeled";
   held_by: string | null;
 };
 
@@ -63,7 +64,7 @@ export type PoolItem = {
  *  filter; `counts` is every filter's, for the chip badges. */
 export function getPool(
   input_dir: string,
-  opts: { status?: "all" | "labeled" | "auto" | "unlabeled"; offset?: number; limit?: number } = {}
+  opts: { status?: "all" | "labeled" | "auto" | "test" | "unlabeled"; offset?: number; limit?: number } = {}
 ): Promise<{ total: number; counts: Record<string, number>; items: PoolItem[] }> {
   const p = new URLSearchParams({ input_dir });
   if (opts.status) p.set("status", opts.status);

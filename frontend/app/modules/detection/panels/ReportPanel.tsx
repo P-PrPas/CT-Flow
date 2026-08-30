@@ -103,11 +103,11 @@ export default function ReportPanel({ s }: { s: Session }) {
         <div className="card-head" style={{ flexWrap: "wrap", rowGap: 8 }}>
           <div className="row wrap" style={{ gap: 14 }}>
             {EVAL_LEGEND.map((l) => (
-              <span key={l.key} className="row xs muted" style={{ gap: 6 }}>
+              <span key={l.label} className="row xs muted" style={{ gap: 6 }}>
                 <span
                   style={{
                     width: 12, height: 9, borderRadius: 2,
-                    border: `2px ${l.key.startsWith("tp-") || l.key === "fn" ? "solid" : "dashed"} ${l.color}`,
+                    border: `2px ${l.dashed ? "dashed" : "solid"} ${l.color}`,
                   }}
                 />
                 {l.label}

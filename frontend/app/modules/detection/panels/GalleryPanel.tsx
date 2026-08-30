@@ -17,18 +17,20 @@ import { Empty, fileOf, Icon } from "../../../lib/ui";
 
 const PAGE = 200;
 
-type Filter = "all" | "labeled" | "auto" | "unlabeled";
+type Filter = "all" | "labeled" | "auto" | "test" | "unlabeled";
 
 const CHIPS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "labeled", label: "By hand" },
   { key: "auto", label: "By model" },
+  { key: "test", label: "Test set" },
   { key: "unlabeled", label: "Unlabeled" },
 ];
 
 const DOT: Record<PoolItem["status"], string> = {
   labeled: "var(--ok)",
   auto: "var(--brand)",
+  test: "var(--info)",
   unlabeled: "var(--line)",
 };
 
@@ -111,14 +113,14 @@ export default function GalleryPanel({ s }: { s: Session }) {
               {c.label}
               <span className="chip" style={{ marginLeft: 6 }}>
                 {c.key === "all"
-                  ? (counts.labeled ?? 0) + (counts.auto ?? 0) + (counts.unlabeled ?? 0)
+                  ? Object.values(counts).reduce((a, b) => a + b, 0)
                   : (counts[c.key] ?? 0)}
               </span>
             </button>
           ))}
         </div>
         <span className="xs faint row" style={{ gap: 5 }}>
-          <Icon name="user" size={12} /> green = by hand · cyan = by model · grey = not labeled
+          <Icon name="user" size={12} /> green = by hand · cyan = by model · blue = test set · grey = not labeled
         </span>
       </div>
 

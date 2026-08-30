@@ -132,7 +132,7 @@ function Workspace({
   }, [s]);
 
   const steps: { key: Panel; label: string; icon: IconName; badge?: string; disabled?: boolean; hint?: string }[] = [
-    { key: "pool", label: "Label", icon: "image", badge: s.images.length ? `${s.labeled.size + s.auto.size}/${s.images.length}` : undefined },
+    { key: "pool", label: "Label", icon: "image", badge: s.images.length ? `${s.progressBuckets.hand + s.progressBuckets.model + s.progressBuckets.test}/${s.images.length}` : undefined },
     { key: "gallery", label: "Gallery", icon: "layers", badge: s.images.length ? `${s.images.length}` : undefined },
     { key: "testset", label: "Test set", icon: "target", badge: s.tsImages.length ? `${s.tsLabeled.length}/${s.tsImages.length}` : undefined },
     { key: "report", label: "Report", icon: "chart", badge: s.evalResult ? pct(s.evalResult.overall.f1) : undefined, disabled: !s.evalResult, hint: "Run Evaluate first" },

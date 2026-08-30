@@ -166,9 +166,11 @@ print("pool:", len(images), "images ·", f"project {PROJECT_ID} {project['name']
 # come from PostgreSQL; "unlabeled" is the difference and costs no query.
 pool0 = c.get("/api/pool", params={"input_dir": POOL}).json()
 assert pool0["total"] == 3, pool0
-assert pool0["counts"] == {"labeled": 0, "auto": 0, "unlabeled": 3}, pool0
+assert pool0["counts"] == {"labeled": 0, "auto": 0, "test": 0, "unlabeled": 3}, pool0
 assert [it["path"] for it in pool0["items"]] == images, pool0
 assert all(it["status"] == "unlabeled" and it["held_by"] is None for it in pool0["items"]), pool0
+# Every file lands in exactly one bucket, so the counts sum to the folder.
+assert sum(pool0["counts"].values()) == pool0["total"], pool0["counts"]
 
 # Paging is server-side: offset/limit slice the same order the array had.
 assert [it["path"] for it in
@@ -178,8 +180,14 @@ assert [it["path"] for it in tail["items"]] == images[2:] and tail["total"] == 3
 
 # Filtering by a status nothing has yet is an empty page with an honest total.
 assert c.get("/api/pool", params={"input_dir": POOL, "status": "labeled"}).json() == {
-    "total": 0, "counts": {"labeled": 0, "auto": 0, "unlabeled": 3}, "items": []}
-assert c.get("/api/pool", params={"input_dir": POOL, "status": "sideways"}).status_code == 400
+    "total": 0, "counts": {"labeled": 0, "auto": 0, "test": 0, "unlabeled": 3}, "items": []}
+bad_status = c.get("/api/pool", params={"input_dir": POOL, "status": "sideways"})
+# The text, not just the code: error messages are asserted here and shown in the
+# UI, so a reword has to be deliberate. Without this the only record of the
+# wording is docs/API_REFERENCE.md, which is where it went stale last time.
+assert bad_status.status_code == 400, bad_status.text
+assert bad_status.json()["detail"] == \
+    "status must be one of all, labeled, auto, test, unlabeled", bad_status.json()
 print("pool listing: paged and filtered server-side")
 
 # --- GET /api/thumb: a downscaled JPEG for the gallery grid (FR-53) ---------
@@ -242,7 +250,7 @@ assert _dbcheck.list_by_status(POOL, "pool")["labeled"] == [target]
 # GET /api/pool reflects the label: one "labeled" now, and asking for just that
 # status returns the one row.
 after = c.get("/api/pool", params={"input_dir": POOL}).json()
-assert after["counts"] == {"labeled": 1, "auto": 0, "unlabeled": 2}, after
+assert after["counts"] == {"labeled": 1, "auto": 0, "test": 0, "unlabeled": 2}, after
 # counts and total describe the same walk, so they cannot drift apart. They can
 # when counts come from the images table while items come from the folder: an
 # images row outliving its file inflates one and shrinks the other, and the
@@ -328,6 +336,11 @@ r = c.post("/api/relabel", json={"input_dir": POOL, "image": target, "boxes": []
 assert r.status_code == 200, r.text
 r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 assert r.json()["boxes"] == [], r.json()
+# relabel marks the image 'labeled' -- a human decided its boxes (even zero of
+# them). target was already labeled so this is a no-op here, but it is the same
+# MarkLabeled call that lets a review pass over the auto set actually shrink it
+# instead of landing on the first machine-labeled image every time.
+assert target in _dbcheck.list_by_status(POOL, "pool")["labeled"], _dbcheck.list_by_status(POOL, "pool")
 
 # a class never taught to the bank must be rejected, not silently mis-indexed
 r = c.post("/api/relabel", json={
@@ -397,6 +410,19 @@ assert bank_classes() == bank_before  # unaffected by testset writes
 r = c.post("/api/testset/import", json={"input_dir": POOL, "images": []})  # cheap way to re-read state
 assert r.json()["labeled"] == [Path(test_img).stem]
 
+# GET /api/pool reports a test-flagged image as its own status, so the gallery
+# and the progress bar count it as done -- it has ground truth and is part of
+# the final dataset, it is only held out of the bank. `test` wins even though
+# test_img was pool-labeled earlier: the held-out ground truth is the
+# authoritative label for that file.
+pt = c.get("/api/pool", params={"input_dir": POOL, "status": "test"}).json()
+assert [it["path"] for it in pt["items"]] == [test_img], pt
+assert pt["total"] == 1 and pt["counts"]["test"] == 1, pt
+full_pool = c.get("/api/pool", params={"input_dir": POOL}).json()
+assert full_pool["counts"]["test"] == 1, full_pool
+assert next(i["status"] for i in full_pool["items"] if i["path"] == test_img) == "test", full_pool
+assert sum(full_pool["counts"].values()) == full_pool["total"], full_pool
+
 # test-set manager: flag a second image, then unflag it -- manifest entry +
 # label gone, the first image and both pool sources untouched
 r = c.post("/api/testset/import", json={"input_dir": POOL, "images": [images[2]]})
@@ -426,14 +452,47 @@ assert set(img0) >= {"image", "gt", "pred", "tp", "fp", "fn"}, img0
 assert all("matched" in g for g in img0["gt"]), img0
 print("eval:", ev["overall"], "| per-image gt/pred:", len(img0["gt"]), len(img0["pred"]))
 
+# images[1] is test_img, still flagged. Auto-labeling it would write a guess
+# over held-out ground truth -- the same refusal /api/label and /api/relabel
+# make -- so the batch drops it before predicting rather than 400-ing the whole
+# call. images[1:] is two paths; one survives.
 r = c.post("/api/autolabel", json={"input_dir": POOL, "images": images[1:], "conf": 0.1})
 assert r.status_code == 200, r.text
+assert r.json()["total"] == 1, r.json()
 auto = wait_job(r.json()["job_id"])
-assert auto["written"] + auto["no_detection"] == 2, auto
+assert auto["written"] + auto["no_detection"] == 1, auto
+assert test_img not in auto["bank"]["auto"], auto
+assert test_img not in auto["no_detection_images"], auto
 assert len(auto["bank"]["auto"]) == auto["written"]
 # FR-28: the empty ones are named, not just counted
 assert len(auto["no_detection_images"]) == auto["no_detection"], auto
-print("autolabel:", auto["written"], "written,", auto["no_detection"], "empty")
+print("autolabel:", auto["written"], "written,", auto["no_detection"], "empty · test image skipped")
+
+# --- GET /api/export: the labels in a training-pipeline format --------------
+# Reads straight out of PostgreSQL; the format builders have their own unit
+# tests, this checks the wiring -- content type, the download filename, and
+# that a bad format or kind is a 400 rather than a stack trace.
+r = c.get("/api/export", params={"input_dir": POOL, "format": "yolo", "kind": "pool"})
+assert r.status_code == 200, r.text
+assert r.headers["content-type"] == "application/zip", r.headers
+assert "labels_yolo.zip" in r.headers.get("content-disposition", ""), r.headers
+assert len(r.content) > 0, "empty export body"
+
+r = c.get("/api/export", params={"input_dir": POOL, "format": "coco", "kind": "pool"})
+assert r.status_code == 200 and r.headers["content-type"] == "application/json", r.headers
+assert json.loads(r.content).get("annotations") is not None, r.text[:200]
+
+assert c.get("/api/export", params={"input_dir": POOL, "format": "xml"}).status_code == 400
+assert c.get("/api/export", params={"input_dir": POOL, "kind": "sideways"}).status_code == 400
+# The test set has ground truth from the block above, so it exports too --
+# proving export reads the two kinds from their separate index spaces.
+assert c.get("/api/export",
+             params={"input_dir": POOL, "format": "yolo", "kind": "testset"}).status_code == 200
+# A folder with nothing labeled for that kind is a 400 with a message, never a
+# valid-but-empty archive.
+r = c.get("/api/export", params={"input_dir": NO_PROJECT, "format": "yolo"})
+assert r.status_code == 400 and "label something first" in r.json()["detail"], r.text
+print("export: yolo zip + coco json, pool and testset, bad format/kind rejected")
 
 # FR-19: pre-annotation for a single image, straight from the bank
 r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.05})

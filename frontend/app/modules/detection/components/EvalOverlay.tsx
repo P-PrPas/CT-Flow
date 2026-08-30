@@ -9,26 +9,23 @@ export type EvalBox = {
   conf?: number;
 };
 
-/** Ground truth vs. prediction on one test image. Only the errors are drawn:
- *  a red solid box for something the model missed, an amber dashed box for
- *  something it drew that is not there. Correct detections are the majority on
- *  any usable model and add nothing to "why is the score low" -- they show only
- *  in the zoomed view, as a faint hairline with no label. */
+/** Ground truth vs. prediction on one test image, one box per object:
+ *
+ *   - green solid, no label  -- a correct detection (TP). Shown so the image
+ *     never looks like the model did nothing, but unlabelled so it stays quiet.
+ *   - red solid, labelled    -- a real object the model missed (FN).
+ *   - amber dashed, labelled -- a box the model drew that is not there (FP).
+ *
+ * The errors carry the labels because the errors are the reason to open the
+ * grid: "why is the score low" is answered by the red and amber, not the green.
+ */
 export const EVAL_LEGEND = [
-  { color: "var(--bad)", label: "Missed", key: "fn" },
-  { color: "var(--warn)", label: "False alarm", key: "fp" },
+  { color: "var(--ok)", label: "Correct", dashed: false },
+  { color: "var(--bad)", label: "Missed", dashed: false },
+  { color: "var(--warn)", label: "False alarm", dashed: true },
 ];
 
-export default function EvalOverlay({
-  src, gt, pred, showCorrect = false,
-}: {
-  src: string;
-  gt: EvalBox[];
-  pred: EvalBox[];
-  /** Draw the correct detections too, as an unlabelled hairline. Off for the
-   *  grid thumbnails, on when the image is opened full size. */
-  showCorrect?: boolean;
-}) {
+export default function EvalOverlay({ src, gt, pred }: { src: string; gt: EvalBox[]; pred: EvalBox[] }) {
   const [size, setSize] = useState({ w: 1, h: 1 });
 
   const rect = (b: number[]) => ({
@@ -48,17 +45,16 @@ export default function EvalOverlay({
         style={{ width: "100%", display: "block" }}
       />
 
-      {showCorrect &&
-        gt.filter((b) => b.matched).map((b, i) => (
-          <div
-            key={`c${i}`}
-            style={{
-              position: "absolute", ...rect(b.box),
-              border: "1px solid var(--line)", opacity: 0.55,
-              pointerEvents: "none", borderRadius: 2,
-            }}
-          />
-        ))}
+      {gt.filter((b) => b.matched).map((b, i) => (
+        <div
+          key={`c${i}`}
+          style={{
+            position: "absolute", ...rect(b.box),
+            border: "2px solid var(--ok)", opacity: 0.8,
+            pointerEvents: "none", borderRadius: 2,
+          }}
+        />
+      ))}
 
       {gt.filter((b) => !b.matched).map((b, i) => (
         <div

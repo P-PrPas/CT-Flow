@@ -103,17 +103,16 @@ export default function ReportPanel({ s }: { s: Session }) {
         <div className="card-head" style={{ flexWrap: "wrap", rowGap: 8 }}>
           <div className="row wrap" style={{ gap: 14 }}>
             {EVAL_LEGEND.map((l) => (
-              <span key={l.key} className="row xs muted" style={{ gap: 6 }}>
+              <span key={l.label} className="row xs muted" style={{ gap: 6 }}>
                 <span
                   style={{
                     width: 12, height: 9, borderRadius: 2,
-                    border: `2px ${l.key === "fn" ? "solid" : "dashed"} ${l.color}`,
+                    border: `2px ${l.dashed ? "dashed" : "solid"} ${l.color}`,
                   }}
                 />
                 {l.label}
               </span>
             ))}
-            <span className="row xs faint" style={{ gap: 6 }}>correct detections show only when opened full size</span>
           </div>
           <div className="row" style={{ gap: 4 }}>
             {([["all", `All ${r.per_image.length}`], ["errors", `With errors ${errorImages}`], ["clean", `Clean ${r.per_image.length - errorImages}`]] as [Filter, string][])
@@ -170,7 +169,7 @@ export default function ReportPanel({ s }: { s: Session }) {
               </button>
             </div>
             <div style={{ overflow: "auto" }}>
-              <EvalOverlay src={imgUrl(s.zoomed.image)} gt={s.zoomed.gt} pred={s.zoomed.pred} showCorrect />
+              <EvalOverlay src={imgUrl(s.zoomed.image)} gt={s.zoomed.gt} pred={s.zoomed.pred} />
             </div>
             <span className="row xs" style={{ gap: 14 }}>
               <span style={{ color: "var(--ok)" }}>{s.zoomed.tp} found</span>

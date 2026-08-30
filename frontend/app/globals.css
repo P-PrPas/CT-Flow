@@ -421,6 +421,7 @@ kbd {
 .track .fill-brand { background: var(--brand); }
 .track .fill-ok { background: var(--ok); }
 .track .fill-warn { background: var(--warn); }
+.track .fill-info { background: var(--info); }
 
 .bar-indeterminate {
   position: relative;

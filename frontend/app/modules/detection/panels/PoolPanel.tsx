@@ -21,8 +21,9 @@ export default function PoolPanel({ s }: { s: Session }) {
   const f1 = s.evalResult?.overall.f1 ?? null;
   const notReady = f1 !== null && f1 < READY_F1;
 
-  const doneCount = s.labeled.size + s.auto.size;
-  const total = s.images.length || 1;
+  const prog = s.progressBuckets;
+  const doneCount = prog.hand + prog.model + prog.test;
+  const total = prog.total || 1;
 
   const askAutoLabel = () => {
     if (notReady) setConfirmAuto(true);
@@ -275,19 +276,33 @@ export default function PoolPanel({ s }: { s: Session }) {
           </div>
           <div className="card-body col tight" style={{ gap: 10 }}>
             <div className="track">
-              <span className="fill-ok" style={{ width: `${(s.labeled.size / total) * 100}%` }} />
-              <span className="fill-brand" style={{ width: `${(s.auto.size / total) * 100}%` }} />
+              <span className="fill-ok" style={{ width: `${(prog.hand / total) * 100}%` }} />
+              <span className="fill-brand" style={{ width: `${(prog.model / total) * 100}%` }} />
+              <span className="fill-info" style={{ width: `${(prog.test / total) * 100}%` }} />
+              <span className="fill-warn" style={{ width: `${(prog.nothing / total) * 100}%` }} />
             </div>
-            <div className="row between xs">
+            <div className="row wrap xs" style={{ gap: 10 }}>
               <span className="row" style={{ gap: 5 }}>
-                <span className="dot" style={{ color: "var(--ok)" }} /> {s.labeled.size} by hand
+                <span className="dot" style={{ color: "var(--ok)" }} /> {prog.hand} by hand
               </span>
               <span className="row" style={{ gap: 5 }}>
-                <span className="dot" style={{ color: "var(--brand)" }} /> {s.auto.size} by model
+                <span className="dot" style={{ color: "var(--brand)" }} /> {prog.model} by model
               </span>
-              <span className="row muted" style={{ gap: 5 }}>
-                <span className="dot" style={{ color: "var(--line)" }} /> {s.remaining.length} left
-              </span>
+              {prog.test > 0 && (
+                <span className="row" style={{ gap: 5 }}>
+                  <span className="dot" style={{ color: "var(--info)" }} /> {prog.test} test set
+                </span>
+              )}
+              {prog.nothing > 0 && (
+                <span className="row" style={{ gap: 5 }}>
+                  <span className="dot" style={{ color: "var(--warn)" }} /> {prog.nothing} found nothing
+                </span>
+              )}
+              {prog.left > 0 && (
+                <span className="row muted" style={{ gap: 5 }}>
+                  <span className="dot" style={{ color: "var(--line)" }} /> {prog.left} left
+                </span>
+              )}
             </div>
           </div>
         </div>

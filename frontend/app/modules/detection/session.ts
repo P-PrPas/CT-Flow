@@ -321,6 +321,26 @@ export function useSession(inputDir: string, me: string) {
 
   const doneSet = useMemo(() => new Set([...labeled, ...auto]), [labeled, auto]);
 
+  /** Every file in the folder in exactly one bucket, so the Progress bar reads
+   *  as a whole. A test image has ground truth and is part of the final dataset
+   *  (pool and test export as one) -- it is only held out of the *bank*; an
+   *  image the model found nothing in is triaged, not done. Priority:
+   *  test > hand > model > found-nothing > left. `noDetection` is only known
+   *  right after an auto-label run, so before that those images fall into
+   *  "left" -- the count is right either way, only the reason is missing. */
+  const progressBuckets = useMemo(() => {
+    const nothingFound = new Set(noDetection);
+    let hand = 0, model = 0, test = 0, nothing = 0, left = 0;
+    for (const p of images) {
+      if (testFlagged.has(p)) test++;
+      else if (labeled.has(p)) hand++;
+      else if (auto.has(p)) model++;
+      else if (nothingFound.has(p)) nothing++;
+      else left++;
+    }
+    return { hand, model, test, nothing, left, total: images.length };
+  }, [images, labeled, auto, testFlagged, noDetection]);
+
   // --- saved-box loading -------------------------------------------------
   useEffect(() => {
     if (!current || !inputDir || !(labeled.has(current) || auto.has(current))) {
@@ -659,7 +679,7 @@ export function useSession(inputDir: string, me: string) {
     // pool
     images, bank, scores, current, savedBoxes, cls, setCls, updateMode, setUpdateMode, selected, setSelected,
     pool, clipboard, setClipboard, classNames, labeled, auto, remaining, bankTotal,
-    promptCounts, isReview, color, sortedPool, goToImage, nextTodo, doneSet,
+    promptCounts, isReview, color, sortedPool, goToImage, nextTodo, doneSet, progressBuckets,
     drafts, drafting, acceptDrafts, setDrafts, preAnnotate, setPreAnnotate,
     spread, setSpread, noDetection, staleScores,
     labelSecs, reviewed, firstAutoSecs,

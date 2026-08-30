@@ -40,6 +40,11 @@ export default function GalleryPanel({ s }: { s: Session }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const sentinel = useRef<HTMLDivElement | null>(null);
+  /** In-flight guard. A ref rather than the `loading` state because a state
+   *  updater has to be pure, and React deliberately calls it twice under
+   *  StrictMode to prove it -- running the fetch inside one made `next dev`
+   *  request every page twice. */
+  const busy = useRef(false);
   const exhausted = items.length >= total;
 
   /** Reload from the top whenever the filter changes, the folder changes, or a
@@ -51,6 +56,7 @@ export default function GalleryPanel({ s }: { s: Session }) {
   useEffect(() => {
     if (s.panel !== "gallery") return;
     let cancelled = false;
+    busy.current = true;
     setLoading(true);
     setError("");
     getPool(s.inputDir, { status: filter, offset: 0, limit: PAGE })
@@ -61,23 +67,22 @@ export default function GalleryPanel({ s }: { s: Session }) {
         setTotal(d.total);
       })
       .catch((e: Error) => { if (!cancelled) setError(e.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .finally(() => { busy.current = false; if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [s.inputDir, s.panel, filter, s.labeled, s.auto]);
 
   const loadMore = useCallback(() => {
-    setLoading((busy) => {
-      if (busy) return busy;
-      getPool(s.inputDir, { status: filter, offset: items.length, limit: PAGE })
-        .then((d) => {
-          setItems((cur) => [...cur, ...d.items]);
-          setCounts(d.counts);
-          setTotal(d.total);
-        })
-        .catch((e: Error) => setError(e.message))
-        .finally(() => setLoading(false));
-      return true;
-    });
+    if (busy.current) return;
+    busy.current = true;
+    setLoading(true);
+    getPool(s.inputDir, { status: filter, offset: items.length, limit: PAGE })
+      .then((d) => {
+        setItems((cur) => [...cur, ...d.items]);
+        setCounts(d.counts);
+        setTotal(d.total);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => { busy.current = false; setLoading(false); });
   }, [s.inputDir, filter, items.length]);
 
   useEffect(() => {

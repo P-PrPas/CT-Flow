@@ -17,9 +17,18 @@ run by hand, once, with someone watching -- not on a button.
     python -m backend.tools.import_ctflow --self-check    # no DB needed
 
 What it restores (kind='pool' only):
-  - classes, in `metadata.json` insertion order == embeddings.pt order ==
-    the idx a label's class column means (invariant #1). This is the part
-    that has to be exact.
+  - classes, in `metadata.json` insertion order, used as the idx a label's
+    class column means (invariant #1). This is the part that has to be exact,
+    and it rests on an ASSUMPTION this tool cannot check: the idx that
+    matters is the order of `embeddings.pt` (`Bank.classes` is
+    `list(self.embeddings.keys())`), and metadata.json is a second file.
+    `Bank.add()` appends to both under one lock so they agree in normal
+    operation -- but a crash between the two halves of `_save()` is exactly
+    the kind of half-written state this tool exists to clean up after, and
+    reading embeddings.pt to compare would mean importing torch here.
+    So: the run prints the class list it is about to write. Compare it,
+    in order, against what the app reports for that bank (the `classes`
+    array from POST /api/session) before answering the prompt.
   - one images row per distinct source_image, status='labeled'.
   - one annotations row per bank instance (bbox + labeled_by + added_at).
 

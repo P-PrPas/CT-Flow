@@ -108,6 +108,7 @@ export default function GalleryPanel({ s }: { s: Session }) {
             <button
               key={c.key}
               className={filter === c.key ? "btn sm primary" : "btn sm"}
+              aria-pressed={filter === c.key}
               onClick={() => setFilter(c.key)}
             >
               {c.label}
@@ -125,7 +126,7 @@ export default function GalleryPanel({ s }: { s: Session }) {
       </div>
 
       {error && (
-        <div className="note bad"><Icon name="alert" size={14} /><span>{error}</span></div>
+        <div className="note bad" role="alert"><Icon name="alert" size={14} /><span>{error}</span></div>
       )}
 
       {!error && !loading && items.length === 0 ? (

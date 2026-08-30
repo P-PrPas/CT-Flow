@@ -4,6 +4,7 @@
  *  plain-language switch. No emoji icons anywhere -- they render differently
  *  per OS and don't take a color. */
 
+import { useEffect } from "react";
 import type { ReactNode } from "react";
 
 // ---------------------------------------------------------------- icons
@@ -115,6 +116,13 @@ export function HelpDot({ text }: { text: ReactNode }) {
 }
 
 // ---------------------------------------------------------------- misc
+
+/** Per-route document title. Every page in this app is a client component, so
+ *  Next's `metadata` export is out of reach and all five would otherwise share
+ *  the one title set in layout.tsx (2.4.2). */
+export function useTitle(what: string) {
+  useEffect(() => { document.title = `${what} · CT-Flow`; }, [what]);
+}
 
 export const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 export const fileOf = (p: string) => p.split(/[\\/]/).pop() ?? p;

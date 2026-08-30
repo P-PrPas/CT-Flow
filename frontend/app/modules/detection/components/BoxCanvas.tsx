@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 export type Rect = [number, number, number, number];
 export type Box = { cls: string; box: Rect };
@@ -9,6 +9,17 @@ export type Box = { cls: string; box: Rect };
 const CORNERS: [number, number][] = [[0, 0], [1, 0], [0, 1], [1, 1]];
 /** Grab radius for a corner handle, in displayed pixels. */
 const GRAB = 12;
+
+/** How far one arrow press moves things, in source-image pixels. Shift is the
+ *  coarse tier.
+ *  ponytail: two tiers is enough for the frames this tool sees; if someone
+ *  starts labeling 4K stills by keyboard, add a third on PageUp/PageDown. */
+const NUDGE = 1;
+const NUDGE_FAST = 10;
+
+const ARROWS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+};
 
 /** Keep receiving move/up after the pointer leaves the image. Best-effort:
  *  losing capture costs a drag that stops at the edge, never the drag itself. */
@@ -22,7 +33,16 @@ const capture = (e: React.PointerEvent) => {
  *  drag a corner to resize -- a model's guess is usually nearly right, and
  *  "delete it and draw it again" throws that away. Delete removes the
  *  selection (or hit the ×). Coordinates live in the source image's pixel
- *  space, so they survive any display scaling. */
+ *  space, so they survive any display scaling.
+ *
+ *  All of that has a keyboard equivalent, because drawing a box is the whole
+ *  job and a pointer used to be the only way to do it (WCAG 2.1.1, and 2.5.7
+ *  which wants every drag to have a non-drag route). Focus the image and:
+ *  arrows move a crosshair, Enter drops one corner and then the other, Tab
+ *  steps through the boxes already there, arrows move the selected one,
+ *  Alt+arrows resize it, Delete removes it, Escape backs out. Every change is
+ *  announced in the live region below, because a box has no other way of
+ *  saying where it went. */
 export default function BoxCanvas({
   src,
   boxes,
@@ -64,6 +84,13 @@ export default function BoxCanvas({
   const [live, setLive] = useState<{ i: number; box: Rect; grab: [number, number] | null; from: { x: number; y: number } } | null>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
   const [ownSelected, setOwnSelected] = useState<number | null>(null);
+  /** Keyboard drawing state: where the crosshair is, and the first corner once
+   *  it has been dropped. Both in source-image pixels, like everything else. */
+  const [caret, setCaret] = useState({ x: 0, y: 0 });
+  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
+  const [focused, setFocused] = useState(false);
+  const [said, setSaid] = useState("");
+  const helpId = useId();
   /** Drafts have their own selection -- they live in a separate array from
    *  `boxes`, so one index space can't cover both. */
   const [draftSel, setDraftSel] = useState<number | null>(null);
@@ -72,7 +99,10 @@ export default function BoxCanvas({
   const setSel = (i: number | null) => (onSelect ? onSelect(i) : setOwnSelected(i));
 
   // A new image loaded -> the old index would point at the wrong box.
-  useEffect(() => { setSel(null); setDraftSel(null); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [src]);
+  useEffect(() => {
+    setSel(null); setDraftSel(null); setAnchor(null); setSaid("");
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [src]);
 
   /** Source-image pixels per displayed pixel -- the grab radius has to be
    *  constant on screen, not in the image's coordinate space. */
@@ -171,6 +201,91 @@ export default function BoxCanvas({
     return [x1 + dx, y1 + dy, x2 + dx, y2 + dy];
   };
 
+  const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+
+  /** Spoken to the live region. Boxes have no text of their own, so this is
+   *  the only way a screen-reader user knows the arrow key did anything. */
+  const say = (b: Rect, what: string, cls?: string) =>
+    setSaid(`${what}${cls ? ` ${cls}` : ""}, ${Math.round(b[2] - b[0])} by ${Math.round(b[3] - b[1])} pixels, ` +
+            `at ${Math.round(b[0])}, ${Math.round(b[1])}`);
+
+  /** Move or resize the selected box, keeping it inside the image. */
+  const nudge = (i: number, dx: number, dy: number, resize: boolean): Rect => {
+    const [x1, y1, x2, y2] = boxes[i].box;
+    if (resize) return [x1, y1, Math.max(x1 + 1, clamp(x2 + dx, size.w)), Math.max(y1 + 1, clamp(y2 + dy, size.h))];
+    const w = x2 - x1, h = y2 - y1;
+    const nx = clamp(x1 + dx, size.w - w), ny = clamp(y1 + dy, size.h - h);
+    return [nx, ny, nx + w, ny + h];
+  };
+
+  /** Only the keys this canvas actually consumes get stopPropagation, so the
+   *  page's own shortcuts (class digits, Ctrl+S, ?, skip) still work while the
+   *  image has focus -- and the arrow keys, which used to change the image
+   *  from anywhere, now belong to whatever is focused. */
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey) return;             // undo/redo/save are the page's
+    const eat = () => { e.preventDefault(); e.stopPropagation(); };
+    const d = e.shiftKey ? NUDGE_FAST : NUDGE;
+    const arrow = ARROWS[e.key];
+
+    if (arrow) {
+      eat();
+      const [dx, dy] = [arrow[0] * d, arrow[1] * d];
+      if (sel !== null && boxes[sel] && onUpdate) {
+        // One press is one undo step. The pointer path collapses a whole drag
+        // into one; here each press is already the smallest edit there is.
+        const b = nudge(sel, dx, dy, e.altKey);
+        onUpdate(sel, b);
+        say(b, e.altKey ? "resized" : "moved", boxes[sel].cls);
+      } else {
+        setCaret((c) => ({ x: clamp(c.x + dx, size.w), y: clamp(c.y + dy, size.h) }));
+      }
+      return;
+    }
+
+    if (e.key === "Tab") {
+      if (!boxes.length) return;                    // nothing to step through
+      const back = e.shiftKey;
+      const next = sel === null ? (back ? -1 : 0) : sel + (back ? -1 : 1);
+      // Off either end means "leave the canvas" -- a Tab that never escapes is
+      // a keyboard trap, which is a worse failure than the one being fixed.
+      if (next < 0 || next >= boxes.length) { setSel(null); return; }
+      eat();
+      setSel(next);
+      setAnchor(null);
+      say(boxes[next].box, `box ${next + 1} of ${boxes.length},`, boxes[next].cls);
+      return;
+    }
+
+    if (e.key === "Enter") {
+      eat();
+      if (sel !== null) { setSel(null); setSaid("Nothing selected"); return; }
+      if (!anchor) {
+        setAnchor(caret);
+        setSaid(`First corner at ${Math.round(caret.x)}, ${Math.round(caret.y)}. Move with the arrows, then press Enter again.`);
+        return;
+      }
+      const b = norm([anchor.x, anchor.y, caret.x, caret.y]);
+      setAnchor(null);
+      if (b[2] - b[0] > 4 && b[3] - b[1] > 4) { onAdd(b); say(b, "Box added"); }
+      else setSaid("Too small to be a box — cancelled");
+      return;
+    }
+
+    if ((e.key === "Delete" || e.key === "Backspace") && sel !== null && onRemove) {
+      eat();
+      onRemove(sel);
+      setSel(null);
+      setSaid("Box removed");
+      return;
+    }
+
+    if (e.key === "Escape") {
+      if (anchor) { eat(); setAnchor(null); setSaid("Cancelled"); return; }
+      if (sel !== null) { eat(); setSel(null); setSaid("Nothing selected"); }
+    }
+  };
+
   const rect = (b: number[]) => ({
     left: `${(b[0] / size.w) * 100}%`,
     top: `${(b[1] / size.h) * 100}%`,
@@ -182,6 +297,13 @@ export default function BoxCanvas({
     <div
       className="canvas-wrap"
       style={{ userSelect: "none", touchAction: "none", cursor }}
+      tabIndex={0}
+      role="application"
+      aria-label="Image being labeled. Draw and edit boxes here."
+      aria-describedby={helpId}
+      onFocus={() => setFocused(true)}
+      onBlur={() => { setFocused(false); setAnchor(null); }}
+      onKeyDown={onKeyDown}
       onPointerDown={(e) => {
         const p = at(e);
         if (onUpdate) {
@@ -205,6 +327,7 @@ export default function BoxCanvas({
         }
         setSel(null);
         setDraftSel(null);
+        setCaret(p);    // so a hand that leaves the mouse finds the crosshair where it left off
         setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
         capture(e);
       }}
@@ -239,7 +362,11 @@ export default function BoxCanvas({
         src={src}
         alt="Image being labeled"
         draggable={false}
-        onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+        onLoad={(e) => {
+          const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
+          setSize({ w, h });
+          setCaret({ x: Math.round(w / 2), y: Math.round(h / 2) });
+        }}
         style={{ width: "100%", display: "block" }}
       />
 
@@ -354,6 +481,35 @@ export default function BoxCanvas({
           }}
         />
       )}
+
+      {/* The keyboard crosshair, and the box it is halfway through drawing.
+          Only while the canvas has focus -- a crosshair sitting on an image
+          nobody is typing at reads as a bug. */}
+      {focused && !drag && !live && (
+        <span
+          className="caret"
+          style={{ left: `${(caret.x / size.w) * 100}%`, top: `${(caret.y / size.h) * 100}%` }}
+        />
+      )}
+      {focused && anchor && (
+        <div
+          style={{
+            position: "absolute",
+            ...rect(norm([anchor.x, anchor.y, caret.x, caret.y])),
+            border: "2px dashed var(--brand)",
+            background: "rgba(8,217,214,.12)",
+            pointerEvents: "none", borderRadius: 2,
+          }}
+        />
+      )}
+
+      <span id={helpId} className="sr-only">
+        Arrow keys move the crosshair, Enter drops a corner and then the opposite one.
+        Tab steps through the boxes on this image; with one selected, arrows move it,
+        Alt and arrows resize it, Delete removes it. Escape backs out. Hold Shift to
+        move ten times as far.
+      </span>
+      <span className="sr-only" role="status" aria-live="polite">{said}</span>
     </div>
   );
 }

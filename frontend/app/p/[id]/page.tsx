@@ -13,7 +13,7 @@ import ProgressBar from "../../components/ProgressBar";
 import ShortcutsDialog from "../../modules/detection/components/ShortcutsDialog";
 import { useSession, type Panel } from "../../modules/detection/session";
 import * as api from "../../lib/api";
-import { BrandMark, fileOf, Icon, pct, Tip, type IconName } from "../../lib/ui";
+import { BrandMark, fileOf, Icon, pct, Tip, useTitle, type IconName } from "../../lib/ui";
 import GalleryPanel from "../../modules/detection/panels/GalleryPanel";
 import InsightsPanel from "../../modules/detection/panels/InsightsPanel";
 import PoolPanel from "../../modules/detection/panels/PoolPanel";
@@ -62,6 +62,7 @@ function Workspace({
   auth, me, project,
 }: { auth: api.AuthState; me: string; project: api.Project }) {
   const s = useSession(project.input_dir, me);
+  useTitle(project.name);
 
   /** FR-20 — the whole repetitive part of the loop, on keys. Deliberately inert
    *  while a field or a dialog has focus: nothing is worse than a shortcut that
@@ -71,6 +72,10 @@ function Workspace({
       const el = e.target as HTMLElement | null;
       if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
       if (s.showShortcuts) return;
+      // 2.1.4 — with the single-key shortcuts switched off, only the modified
+      // ones survive. Dropping Ctrl+S along with them would be a downgrade
+      // nobody asked for, and 2.1.4 is about unmodified characters anyway.
+      if (!s.shortcuts && !e.ctrlKey && !e.metaKey) return;
 
       const inTestset = s.panel === "testset";
       const stack = inTestset ? s.ts : s.pool;
@@ -85,9 +90,11 @@ function Workspace({
 
       if (e.key === "?") { e.preventDefault(); s.setShowShortcuts(true); return; }
       /** Enter saves too. Ctrl+S is the one people expect; Enter is the one
-       *  that keeps a hand on the mouse and still finishes an image. Not while
-       *  a button has focus -- there it already means "press this button". */
-      if (e.key === "Enter" && el?.tagName === "BUTTON") return;
+       *  that keeps a hand on the mouse and still finishes an image. Never
+       *  while something activatable has focus -- there Enter already means
+       *  "press this", and testing tagName === "BUTTON" quietly swallowed it
+       *  on every link, including the one back to the project list. */
+      if (e.key === "Enter" && el?.closest("a,button,summary,[role=button],[role=link]")) return;
       if (e.key === "Enter" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s")) {
         e.preventDefault();
         if (inTestset) s.saveTestset();
@@ -152,13 +159,16 @@ function Workspace({
             </span>
           </a>
 
-          <nav className="steps" role="tablist" aria-label="Workflow" style={{ marginLeft: 8 }}>
+          {/* Not a tablist: there were no tabpanels behind it, nothing carried
+              aria-controls, and the arrow keys a tablist owes its user were
+              already taken by the image stepper. A nav with aria-current says
+              the true thing and leaves the arrows to whatever has focus. */}
+          <nav className="steps" aria-label="Workflow" style={{ marginLeft: 8 }}>
             {steps.map((st) => (
               <button
                 key={st.key}
-                role="tab"
                 className="step"
-                aria-selected={s.panel === st.key}
+                aria-current={s.panel === st.key ? "page" : undefined}
                 disabled={st.disabled}
                 title={st.disabled ? st.hint : undefined}
                 onClick={() => s.setPanel(st.key)}
@@ -185,10 +195,11 @@ function Workspace({
             <button
               className="btn ghost icon"
               onClick={() => s.setShowShortcuts(true)}
-              title="Keyboard shortcuts (?)"
-              aria-label="Keyboard shortcuts"
+              title={s.shortcuts ? "Keyboard shortcuts (?)" : "Keyboard shortcuts — single-key shortcuts are off"}
+              aria-label={`Keyboard shortcuts, single-key shortcuts are ${s.shortcuts ? "on" : "off"}`}
             >
               <Icon name="keyboard" size={15} />
+              {!s.shortcuts && <span className="dot" style={{ color: "var(--warn)" }} />}
             </button>
 
             {/* Signing in is mandatory (T-27), so there is no signed-out
@@ -207,13 +218,18 @@ function Workspace({
       </header>
 
       <main
+        id="main"
         className="col"
         style={{ gap: 14, padding: "14px var(--s5) var(--s6)", maxWidth: 1600, margin: "0 auto" }}
       >
+        {/* The app bar shows the project name but has no room for a heading,
+            and a screen reader's heading list was empty on the one screen
+            people spend the day in. */}
+        <h1 className="sr-only">{project.name} — object detection workspace</h1>
         {/* FR-51 -- the two halves of a project's state are wiped by different
             commands, and this is what half-wiped looks like from inside. */}
         {s.bankOrphaned && (
-          <div className="note warn">
+          <div className="note warn" role="alert">
             <Icon name="alert" size={15} />
             <span>
               <strong>The taught examples and the labels disagree.</strong> This
@@ -227,7 +243,7 @@ function Workspace({
         )}
 
         {s.reachable === false && (
-          <div className="note bad">
+          <div className="note bad" role="alert">
             <Icon name="alert" size={15} />
             <span><strong>Cannot reach the backend.</strong> The API server is not responding — start it, then reload.</span>
           </div>
@@ -259,7 +275,13 @@ function Workspace({
         {s.panel === "insights" && <InsightsPanel s={s} />}
       </main>
 
-      {s.showShortcuts && <ShortcutsDialog onClose={() => s.setShowShortcuts(false)} />}
+      {s.showShortcuts && (
+        <ShortcutsDialog
+          enabled={s.shortcuts}
+          onToggle={s.setShortcuts}
+          onClose={() => s.setShowShortcuts(false)}
+        />
+      )}
 
     </>
   );

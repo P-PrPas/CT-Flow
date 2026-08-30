@@ -12,8 +12,9 @@ import type { FormEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Confirm from "./components/Confirm";
 import DirPicker from "./components/DirPicker";
+import Modal from "./components/Modal";
 import * as api from "./lib/api";
-import { BrandMark, Empty, fileOf, Icon, Soon, Tip } from "./lib/ui";
+import { BrandMark, Empty, fileOf, Icon, Soon, Tip, useTitle } from "./lib/ui";
 
 /** Where a project of this type is labeled. One entry today; a second module
  *  adds a branch here and a folder, and every card above keeps working. */
@@ -21,6 +22,7 @@ const workspaceHref = (p: api.Project) => `/p/${p.id}`;
 
 export default function Home() {
   const router = useRouter();
+  useTitle("Projects");
   const [auth, setAuth] = useState<api.AuthState | null>(null);
   const [projects, setProjects] = useState<api.Project[] | null>(null);
   const [error, setError] = useState("");
@@ -87,7 +89,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="col" style={{ gap: 18, padding: "18px var(--s5) var(--s6)", maxWidth: 1200, margin: "0 auto" }}>
+      <main id="main" className="col" style={{ gap: 18, padding: "18px var(--s5) var(--s6)", maxWidth: 1200, margin: "0 auto" }}>
         <div className="row between wrap" style={{ gap: 12 }}>
           <div className="col" style={{ gap: 2 }}>
             <h1 style={{ margin: 0, fontSize: 19 }}>Projects</h1>
@@ -323,15 +325,10 @@ function CreateDialog({
   }
 
   return (
-    <div className="scrim" onClick={onClose}>
-      <form
-        className="modal"
-        style={{ maxWidth: 520 }}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
+    <Modal label="New project" width={520} onClose={onClose}>
+      <form onSubmit={submit} className="col" style={{ gap: 0, flex: 1, minHeight: 0 }}>
         <div className="modal-head">
-          <span className="card-title"><Icon name="plus" size={13} /> New project</span>
+          <h2 className="card-title"><Icon name="plus" size={13} /> New project</h2>
         </div>
 
         <div className="modal-body col" style={{ gap: 14 }}>
@@ -392,7 +389,7 @@ function CreateDialog({
           </div>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 

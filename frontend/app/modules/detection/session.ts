@@ -117,6 +117,17 @@ export function useSession(inputDir: string, me: string) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  /** 2.1.4 — the single-key shortcuts have to be turnable off, or anyone
+   *  dictating into this page fires them by talking. Remembered per browser
+   *  rather than per project: it is a fact about how someone types, not about
+   *  what they are labeling. Read in an effect because localStorage does not
+   *  exist while this renders on the server. */
+  const [shortcuts, setShortcutsOn] = useState(true);
+  useEffect(() => { setShortcutsOn(localStorage.getItem("ctflow.shortcuts") !== "off"); }, []);
+  const setShortcuts = useCallback((on: boolean) => {
+    setShortcutsOn(on);
+    localStorage.setItem("ctflow.shortcuts", on ? "on" : "off");
+  }, []);
 
   // --- session config ---------------------------------------------------
   const [conf, setConf] = useState(0.25);
@@ -707,6 +718,7 @@ export function useSession(inputDir: string, me: string) {
     // env + shell
     colors, reachable, panel, setPanel, simple, setSimple,
     status, setStatus, busy, progress, showShortcuts, setShowShortcuts,
+    shortcuts, setShortcuts,
     claims, heldByOthers, claimNote, bankOrphaned, labeledBy,
     // config
     inputDir, conf, setConf,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import Modal from "../../../components/Modal";
 import { Icon } from "../../../lib/ui";
 
 /** FR-20 — the shortcut sheet, opened with `?`. Every repeated action in the
@@ -16,7 +16,7 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     ],
   },
   {
-    group: "Drawing",
+    group: "Drawing with the mouse",
     items: [
       ["Drag", "Draw a box"],
       ["A", "Take the model's suggested boxes"],
@@ -30,6 +30,18 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     ],
   },
   {
+    group: "Drawing from the keyboard",
+    items: [
+      ["Tab", "Focus the image, then step through its boxes"],
+      ["Arrows", "Move the crosshair, or the selected box"],
+      ["Shift + Arrows", "The same, ten times faster"],
+      ["Enter", "Drop the first corner, then the second"],
+      ["Alt + Arrows", "Resize the selected box"],
+      ["Delete", "Remove the selected box"],
+      ["Esc", "Cancel the box being drawn, or deselect"],
+    ],
+  },
+  {
     group: "Saving",
     items: [
       ["Enter", "Save and move to the next image"],
@@ -39,49 +51,61 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
   },
 ];
 
-export default function ShortcutsDialog({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
+export default function ShortcutsDialog({
+  enabled, onToggle, onClose,
+}: { enabled: boolean; onToggle: (on: boolean) => void; onClose: () => void }) {
   return (
-    <div className="scrim" onClick={onClose} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
-        <div className="modal-head">
-          <strong className="row" style={{ gap: 8, fontSize: 14 }}>
-            <span style={{ color: "var(--brand)" }}><Icon name="keyboard" size={16} /></span>
-            Keyboard shortcuts
-          </strong>
-          <button className="btn ghost icon" onClick={onClose} aria-label="Close">
-            <Icon name="x" size={15} />
-          </button>
-        </div>
-        <div className="modal-body col" style={{ gap: 18 }}>
-          {SHORTCUTS.map((g) => (
-            <div key={g.group} className="col" style={{ gap: 7 }}>
-              <div className="card-title">{g.group}</div>
-              {g.items.map(([key, what]) => (
-                <div key={key} className="row between" style={{ gap: 16 }}>
-                  <span className="sm">{what}</span>
-                  <span className="row" style={{ gap: 4 }}>
-                    {key.split(" ").map((k, i) =>
-                      k === "+" || k === "/" || k === "–"
-                        ? <span key={i} className="faint xs">{k}</span>
-                        : <kbd key={i}>{k}</kbd>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-        <div className="modal-foot">
-          <span className="xs muted">Shortcuts pause while you are typing in a field.</span>
-          <button className="btn primary" onClick={onClose}>Got it</button>
-        </div>
+    <Modal label="Keyboard shortcuts" width={560} onClose={onClose}>
+      <div className="modal-head">
+        <h2 className="row" style={{ gap: 8, fontSize: 14 }}>
+          <span style={{ color: "var(--brand)" }}><Icon name="keyboard" size={16} /></span>
+          Keyboard shortcuts
+        </h2>
+        <button className="btn ghost icon" onClick={onClose} aria-label="Close">
+          <Icon name="x" size={15} />
+        </button>
       </div>
-    </div>
+
+      <div className="modal-body col" style={{ gap: 18 }}>
+        {/* 2.1.4 — single-character shortcuts have to be turnable off, or
+            anyone dictating into this page fires them by talking. */}
+        <label className="check note info" style={{ alignItems: "flex-start" }}>
+          <input type="checkbox" checked={enabled} onChange={(e) => onToggle(e.target.checked)} />
+          <span className="col" style={{ gap: 2 }}>
+            <strong style={{ color: "var(--text)" }}>
+              Single-key shortcuts are {enabled ? "on" : "off"}
+            </strong>
+            <span className="xs">
+              Turn them off if you use speech input — otherwise dictating a word with an
+              &ldquo;s&rdquo; in it skips an image. Ctrl-key shortcuts keep working either way,
+              and so does everything on the image itself.
+            </span>
+          </span>
+        </label>
+
+        {SHORTCUTS.map((g) => (
+          <div key={g.group} className="col" style={{ gap: 7 }}>
+            <h3 className="card-title">{g.group}</h3>
+            {g.items.map(([key, what]) => (
+              <div key={key} className="row between" style={{ gap: 16 }}>
+                <span className="sm">{what}</span>
+                <span className="row" style={{ gap: 4 }}>
+                  {key.split(" ").map((k, i) =>
+                    k === "+" || k === "/" || k === "–"
+                      ? <span key={i} className="faint xs">{k}</span>
+                      : <kbd key={i}>{k}</kbd>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div className="modal-foot">
+        <span className="xs muted">Shortcuts pause while you are typing in a field.</span>
+        <button className="btn primary" onClick={onClose}>Got it</button>
+      </div>
+    </Modal>
   );
 }

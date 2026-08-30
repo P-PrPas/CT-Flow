@@ -130,7 +130,6 @@ export function useSession(inputDir: string, me: string) {
   const [bank, setBank] = useState<BankSummary | null>(null);
   const [scores, setScores] = useState<Record<string, Score>>({});
   const [current, setCurrent] = useState<string | null>(null);
-  const [savedBoxes, setSavedBoxes] = useState<Box[]>([]);
   const [cls, setCls] = useState("item");
   const [updateMode, setUpdateMode] = useState(false);
   const pool = useBoxStack();
@@ -244,7 +243,12 @@ export function useSession(inputDir: string, me: string) {
     [classNames, history]
   );
 
-  const isReview = current !== null && auto.has(current);
+  /** True once the image on screen already has a label -- machine or hand.
+   *  Both open editable now: a wrong hand label needs fixing as much as a wrong
+   *  machine one. Drives the Save/"Save & teach" pair, the reminder banner, and
+   *  the restriction to classes the bank already knows (a relabel teaches
+   *  nothing, so a brand-new name would have no prompt behind it). */
+  const isReview = current !== null && (labeled.has(current) || auto.has(current));
 
   const color = useCallback((name: string) => {
     const i = classNames.indexOf(name);
@@ -342,24 +346,31 @@ export function useSession(inputDir: string, me: string) {
   }, [images, labeled, auto, testFlagged, noDetection]);
 
   // --- saved-box loading -------------------------------------------------
+  // Any already-labeled image opens with its boxes in the editable set, so a
+  // wrong label -- machine or hand -- is fixed in place, not redrawn from
+  // scratch.
+  //
+  // Keyed on `current`, but `labeled`/`auto` stay in the dep list (they gate
+  // whether there is anything to load). loadedFor guards the difference: when
+  // those sets change under you -- a poll, your own save landing -- while you
+  // are mid-correction on the same image, re-fetching would wipe the edits.
+  const loadedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!current || !inputDir || !(labeled.has(current) || auto.has(current))) {
-      setSavedBoxes(EMPTY.boxes);
-      setLabeledBy([]);
-      return;
-    }
-    const reviewing = auto.has(current);
+    const movedImage = current !== loadedFor.current;
+    loadedFor.current = current;
+    if (!movedImage) return;
+
+    setLabeledBy([]);
+    if (!current || !inputDir || !(labeled.has(current) || auto.has(current))) return;
+
     let cancelled = false;
     api.getBoxes(inputDir, current)
       .then((d) => {
-        if (cancelled) return;
-        // Auto-labeled images open *in* review mode: the model's boxes land in
-        // the editable set so the job is correcting, not redrawing.
-        if (reviewing) { poolReset(d.boxes ?? []); setSavedBoxes([]); }
-        else setSavedBoxes(d.boxes ?? []);
+        if (cancelled || current !== loadedFor.current) return;
+        poolReset(d.boxes ?? []);
         setLabeledBy((d.labeled_by ?? []).map((u) => u.username));
       })
-      .catch(() => { if (!cancelled) { setSavedBoxes([]); setLabeledBy([]); } });
+      .catch(() => { /* leave the canvas as goToImage left it */ });
     return () => { cancelled = true; };
   }, [current, inputDir, labeled, auto, poolReset]);
 
@@ -536,39 +547,49 @@ export function useSession(inputDir: string, me: string) {
       setStatus(`Saved — ${d.bank.classes.reduce((n, c) => n + c.count, 0)} example(s) taught so far`);
     });
 
-  /** Review edits go through /api/relabel: rewriting a label file, no embedding
-   *  extraction. Deleting a wrong prediction isn't a new visual prompt. */
+  /** Advance to the next machine-labeled image if there is one -- the review
+   *  pass after Auto-label -- and otherwise stay put with the boxes on screen.
+   *  Not nextTodo: jumping to an unrelated unlabeled image after a one-off fix
+   *  from the gallery is the opposite of what the click asked for. The
+   *  just-saved image is 'labeled' now (both save paths call MarkLabeled), so
+   *  it has already left `bank.auto`. */
+  const afterCorrection = (bank: BankSummary) => {
+    const autoSet = new Set(bank.auto);
+    const nextAuto = current ? images.find((p) => p !== current && autoSet.has(p)) : undefined;
+    if (nextAuto) {
+      poolReset([]);
+      setCurrent(nextAuto);
+    }
+  };
+
+  /** Review edits go through /api/relabel: rewriting the boxes, no embedding
+   *  extraction. Fixing a box the model got wrong isn't a new visual prompt. */
   const saveReview = () =>
-    guard("Saving corrections…", async () => {
+    guard("Saving…", async () => {
       if (!current) return;
       const kept = pool.boxes.length;
       const d = await api.relabel(inputDir, current, pool.boxes, updateMode ? "update" : "replace");
       setBank(d.bank);
-      poolReset([]);
       setReviewed((n) => n + 1);
-      const autoSet = new Set<string>(d.bank.auto);
-      const nextAuto = images.find((p) => p !== current && autoSet.has(p));
-      setCurrent(nextAuto ?? nextTodo(new Set<string>([...d.bank.labeled, ...d.bank.auto]), current));
-      setStatus(`Corrections saved — ${kept} box(es) kept`);
+      afterCorrection(d.bank);
+      setStatus(`Saved — ${kept} box${kept === 1 ? "" : "es"}`);
     });
 
-  /** FR-25: the same corrected boxes, but through /api/label so the model
-   *  actually learns from them. The difference between this and Save
-   *  corrections is the whole reason review work can feel wasted. */
+  /** The same boxes, but through /api/label so the model learns from them too.
+   *  The gap between this and a plain Save is the whole reason review work can
+   *  feel wasted (FR-25). */
   const teachFromReview = () =>
-    guard("Teaching the model from your corrections…", async () => {
+    guard("Saving and teaching the model…", async () => {
       if (!current || !pool.boxes.length) return;
       const saved = pool.boxes;
       const d = await api.saveLabel(inputDir, current, saved, "replace", modelId);
       setBank(d.bank);
+      setReviewed((n) => n + 1);
       setClipboard({ from: current, boxes: saved });
-      poolReset([]);
       setStaleScores((n) => n + 1);
       setLabelSecs((t) => [...t, (Date.now() - imageAt.current) / 1000]);
-      const autoSet = new Set<string>(d.bank.auto);
-      setCurrent(images.find((p) => p !== current && autoSet.has(p))
-        ?? nextTodo(new Set<string>([...d.bank.labeled, ...d.bank.auto]), current));
-      setStatus("Corrections saved and added to the model's examples");
+      afterCorrection(d.bank);
+      setStatus("Saved and added to the model's examples");
     });
 
   const rescore = () =>
@@ -596,7 +617,21 @@ export function useSession(inputDir: string, me: string) {
       if (firstAutoSecs === null && openedAt.current) {
         setFirstAutoSecs((Date.now() - openedAt.current) / 1000);
       }
-      setStatus(`Auto-labeled ${d.written} image(s) · ${d.no_detection} with nothing found`);
+      // Auto-label is only the first half -- the boxes still need a human pass.
+      // Drop straight onto the first machine-labeled image so review is one
+      // glance away, not a hunt through the gallery.
+      const autoSet = new Set(d.bank.auto);
+      const first = images.find((p) => autoSet.has(p));
+      if (first) {
+        setPanel("pool");
+        goToImage(first);
+      }
+      setStatus(
+        d.written
+          ? `Auto-labeled ${d.written} image(s) — review them below.` +
+            (d.no_detection ? ` ${d.no_detection} had nothing found.` : "")
+          : `Nothing written — the model found nothing in all ${d.no_detection} image(s).`
+      );
     });
 
   const resetHistory = () => clearHistory(inputDir).then(setHistory);
@@ -677,7 +712,7 @@ export function useSession(inputDir: string, me: string) {
     inputDir, conf, setConf,
     models, modelId, setModelId, reembedModel,
     // pool
-    images, bank, scores, current, savedBoxes, cls, setCls, updateMode, setUpdateMode, selected, setSelected,
+    images, bank, scores, current, cls, setCls, updateMode, setUpdateMode, selected, setSelected,
     pool, clipboard, setClipboard, classNames, labeled, auto, remaining, bankTotal,
     promptCounts, isReview, color, sortedPool, goToImage, nextTodo, doneSet, progressBuckets,
     drafts, drafting, acceptDrafts, setDrafts, preAnnotate, setPreAnnotate,

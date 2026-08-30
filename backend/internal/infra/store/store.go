@@ -338,9 +338,9 @@ func (s *Store) ReadBoxes(ctx context.Context, inputDir, kind, imagePath string)
 // boxes may be empty: that is a legitimate "the model was wrong about
 // everything here". New class names are get-or-created, append-only.
 //
-// Deliberately does NOT touch images.status: a caller meaning "this image just
-// got manually labeled" calls MarkLabeled itself, and relabel deliberately does
-// not, same as before.
+// Deliberately does NOT touch images.status: the caller decides. /api/label and
+// /api/relabel both follow it with MarkLabeled -- a human has decided the boxes
+// either way -- while autolabel calls MarkAuto instead.
 //
 // Returns the project's class list for this kind after the write.
 func (s *Store) WriteBoxes(ctx context.Context, inputDir, kind, imagePath string,

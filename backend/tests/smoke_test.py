@@ -330,6 +330,11 @@ r = c.post("/api/relabel", json={"input_dir": POOL, "image": target, "boxes": []
 assert r.status_code == 200, r.text
 r = c.get("/api/boxes", params={"input_dir": POOL, "image": target})
 assert r.json()["boxes"] == [], r.json()
+# relabel marks the image 'labeled' -- a human decided its boxes (even zero of
+# them). target was already labeled so this is a no-op here, but it is the same
+# MarkLabeled call that lets a review pass over the auto set actually shrink it
+# instead of landing on the first machine-labeled image every time.
+assert target in _dbcheck.list_by_status(POOL, "pool")["labeled"], _dbcheck.list_by_status(POOL, "pool")
 
 # a class never taught to the bank must be rejected, not silently mis-indexed
 r = c.post("/api/relabel", json={

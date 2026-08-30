@@ -91,11 +91,16 @@ func deref(s *string) string {
 }
 
 // Relabel rewrites this image's label directly -- no embedding extraction, no
-// bank write, no status change.
+// bank write.
 //
 // For fixing generated labels (delete an over-prediction, drag in a box the
 // model missed) without the correction being treated as a new visual prompt.
 // Empty boxes are legitimate: "the model was wrong about everything here".
+//
+// It does mark the image 'labeled': a human has now decided its boxes, so it is
+// no longer a raw machine guess. Without this a review pass over the
+// auto-labeled set never shrinks that set -- "next unreviewed" keeps landing on
+// the first one -- and the gallery goes on calling a checked image "by model".
 func (s *Server) Relabel(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
 		InputDir string      `json:"input_dir"`
@@ -156,6 +161,9 @@ func (s *Server) Relabel(w http.ResponseWriter, r *http.Request) error {
 	}
 	if _, err := s.Store.WriteBoxes(r.Context(), inputDir, store.KindPool, req.Image,
 		req.Boxes, user, req.Mode == "update"); err != nil {
+		return err
+	}
+	if err := s.Store.MarkLabeled(r.Context(), inputDir, store.KindPool, req.Image); err != nil {
 		return err
 	}
 	return s.writeBankSummary(w, r, inputDir, stateDir)

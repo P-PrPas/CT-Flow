@@ -4,8 +4,8 @@
  *  plain-language switch. No emoji icons anywhere -- they render differently
  *  per OS and don't take a color. */
 
-import { useEffect } from "react";
-import type { ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useState } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 // ---------------------------------------------------------------- icons
 
@@ -86,21 +86,49 @@ export function BrandMark({ size = 17 }: { size?: number }) {
 
 /** FR-26: every piece of jargon on screen gets a plain-language explanation
  *  within hover/focus reach, so a QC operator never has to ask what a
- *  "prompt bank" is. */
+ *  "prompt bank" is.
+ *
+ *  The wrapper used to be a `tabIndex={0}` span with no role, which bought a
+ *  tab stop that announced nothing and, where it wrapped a real button, a
+ *  second tab stop for the same control. Now the child carries the
+ *  description and the wrapper carries nothing. 1.4.13 also wants the thing
+ *  dismissible without moving the pointer, hence Escape -- listened for on the
+ *  window while hovered, because that is the case where focus is elsewhere. */
 export function Tip({ text, children }: { text: ReactNode; children: ReactNode }) {
+  const id = useId();
+  const [hovered, setHovered] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!hovered || dismissed) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDismissed(true); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hovered, dismissed]);
+
   return (
-    <span className="tip" tabIndex={0}>
-      {children}
-      <span className="tip-body" role="tooltip">{text}</span>
+    <span
+      className="tip"
+      onPointerEnter={() => { setHovered(true); setDismissed(false); }}
+      onPointerLeave={() => { setHovered(false); setDismissed(false); }}
+      onFocus={() => setDismissed(false)}
+      onKeyDown={(e) => { if (e.key === "Escape") setDismissed(true); }}
+    >
+      {isValidElement(children)
+        ? cloneElement(children as ReactElement<{ "aria-describedby"?: string }>, { "aria-describedby": id })
+        : children}
+      <span className="tip-body" role="tooltip" id={id} hidden={dismissed}>{text}</span>
     </span>
   );
 }
 
-/** A term with a dotted underline that explains itself on hover. */
+/** A term with a dotted underline that explains itself on hover. A button, so
+ *  that a keyboard can reach the explanation at all -- there is nothing else
+ *  focusable here to hang it off. */
 export function Term({ children, explain }: { children: ReactNode; explain: ReactNode }) {
   return (
     <Tip text={explain}>
-      <span className="tip-anchor">{children}</span>
+      <button type="button" className="tip-anchor">{children}</button>
     </Tip>
   );
 }
@@ -108,9 +136,9 @@ export function Term({ children, explain }: { children: ReactNode; explain: Reac
 export function HelpDot({ text }: { text: ReactNode }) {
   return (
     <Tip text={text}>
-      <span style={{ display: "inline-flex", color: "var(--faint)", cursor: "help" }}>
+      <button type="button" className="tip-dot" aria-label="What this means">
         <Icon name="help" size={13} />
-      </span>
+      </button>
     </Tip>
   );
 }

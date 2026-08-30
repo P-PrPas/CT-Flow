@@ -113,7 +113,20 @@ export function useSession(inputDir: string, me: string) {
   // --- shell ------------------------------------------------------------
   const [panel, setPanel] = useState<Panel>("pool");
   const [simple, setSimple] = useState(false);
-  const [status, setStatus] = useState("");
+  /** One line used to carry "Saved — 14 examples taught" and "connection
+   *  refused" in the same muted grey, announced with the same politeness. The
+   *  tone is what tells them apart: 3.3.1 wants an error identified, 4.1.3
+   *  wants it announced like one. */
+  const [status, setStatusText] = useState("");
+  const [statusTone, setStatusTone] = useState<"info" | "bad">("info");
+  const setStatus = useCallback((text: string) => {
+    setStatusText(text);
+    setStatusTone("info");
+  }, []);
+  const failed = useCallback((text: string) => {
+    setStatusText(text);
+    setStatusTone("bad");
+  }, []);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -220,8 +233,8 @@ export function useSession(inputDir: string, me: string) {
         setColors(c.colors); setReachable(true);
         setModels(c.models); setModelId(c.default_model);
       })
-      .catch(() => { setReachable(false); setStatus("Backend not reachable — is the API running?"); });
-  }, []);
+      .catch(() => { setReachable(false); failed("Backend not reachable — is the API running?"); });
+  }, [failed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -422,11 +435,11 @@ export function useSession(inputDir: string, me: string) {
     try {
       await fn();
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : String(e));
+      failed(e instanceof Error ? e.message : String(e));
     }
     setBusy(false);
     setProgress(null);
-  }, []);
+  }, [setStatus, failed]);
 
   const openSession = useCallback(() =>
     guard("Opening session…", async () => {
@@ -717,7 +730,7 @@ export function useSession(inputDir: string, me: string) {
   return {
     // env + shell
     colors, reachable, panel, setPanel, simple, setSimple,
-    status, setStatus, busy, progress, showShortcuts, setShowShortcuts,
+    status, statusTone, setStatus, busy, progress, showShortcuts, setShowShortcuts,
     shortcuts, setShortcuts,
     claims, heldByOthers, claimNote, bankOrphaned, labeledBy,
     // config

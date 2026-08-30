@@ -215,8 +215,12 @@ function ProjectCard({
         <div className="row between" style={{ gap: 8, alignItems: "flex-start" }}>
           {renaming ? (
             <form onSubmit={rename} className="row grow" style={{ gap: 6 }}>
+              {/* Blur saves, so Escape has to be the way out -- otherwise a
+                  rename you have changed your mind about has no cancel. */}
               <input className="grow" autoFocus value={name} aria-label="Project name"
-                onChange={(e) => setName(e.target.value)} onBlur={rename} />
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { setName(p.name); setRenaming(false); } }}
+                onBlur={rename} />
             </form>
           ) : (
             <button className="link-title" onClick={() => router.push(workspaceHref(p))}>{p.name}</button>
@@ -338,16 +342,20 @@ function CreateDialog({
               onChange={(e) => setName(e.target.value)} />
           </label>
 
+          {/* A real <label>, like the Name field above it. This one only ever
+              had a placeholder for a name, and a placeholder leaves the moment
+              you type -- on the field the whole project hangs off. */}
           <div className="col" style={{ gap: 6 }}>
-            <span className="xs muted">Image folder on the server</span>
+            <label className="xs muted" htmlFor="project-dir">Image folder on the server</label>
             <div className="row" style={{ gap: 6 }}>
-              <input className="grow input-mono" value={dir} required spellCheck={false}
+              <input id="project-dir" aria-describedby="project-dir-help"
+                className="grow input-mono" value={dir} required spellCheck={false}
                 placeholder="folder of images to label" onChange={(e) => setDir(e.target.value)} />
               <button type="button" className="btn" onClick={() => setPicking(true)}>
                 <Icon name="folder" size={14} /> Browse
               </button>
             </div>
-            <span className="xs faint">
+            <span className="xs faint" id="project-dir-help">
               Labels, the taught examples and the held-out test set are all managed for
               you — in the database and a hidden <code>.ctflow</code> folder in here.
             </span>

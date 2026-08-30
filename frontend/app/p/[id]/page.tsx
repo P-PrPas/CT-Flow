@@ -64,6 +64,18 @@ function Workspace({
   const s = useSession(project.input_dir, me);
   useTitle(project.name);
 
+  /** F-19 — the app bar's link home is a full navigation, so ten minutes of
+   *  boxes used to leave without a word. `canUndo` is the dirty flag: the box
+   *  stack is reset on every image change, so anything in its history is an
+   *  edit made since this image opened. */
+  const unsaved = s.pool.canUndo;
+  useEffect(() => {
+    if (!unsaved) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsaved]);
+
   /** FR-20 — the whole repetitive part of the loop, on keys. Deliberately inert
    *  while a field or a dialog has focus: nothing is worse than a shortcut that
    *  eats the class name you were typing. */
@@ -251,7 +263,17 @@ function Workspace({
 
         {s.progress && <ProgressBar label={s.status} progress={s.progress} />}
 
-        {!s.progress && s.status && (
+        {/* A failure is not a status update. It gets the error treatment and
+            role="alert", so it is neither read in the same breath as "Saved"
+            nor left waiting behind whatever the polite queue is doing. */}
+        {!s.progress && s.status && s.statusTone === "bad" && (
+          <div className="note bad" role="alert">
+            <Icon name="alert" size={15} />
+            <span>{s.status}</span>
+          </div>
+        )}
+
+        {!s.progress && s.status && s.statusTone !== "bad" && (
           <div className="row between wrap" style={{ gap: 10, padding: "0 2px" }}>
             <span className="row xs muted" style={{ gap: 7 }} role="status" aria-live="polite">
               <span className={`dot${s.busy ? " pulse" : ""}`} style={{ color: s.busy ? "var(--brand)" : "var(--faint)" }} />

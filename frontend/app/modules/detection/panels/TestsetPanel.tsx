@@ -77,6 +77,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
 
                 <BoxCanvas
                   src={imgUrl(s.tsCurrent)}
+                  label={fileOf(s.tsCurrent)}
                   boxes={s.ts.boxes}
                   savedBoxes={s.tsSavedBoxes}
                   color={s.tsColor}

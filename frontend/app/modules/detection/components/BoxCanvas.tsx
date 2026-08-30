@@ -45,6 +45,7 @@ const capture = (e: React.PointerEvent) => {
  *  saying where it went. */
 export default function BoxCanvas({
   src,
+  label,
   boxes,
   color,
   onAdd,
@@ -57,6 +58,9 @@ export default function BoxCanvas({
   onSelect,
 }: {
   src: string;
+  /** The image's filename, for the alt text and the canvas's accessible name.
+   *  "Image being labeled" was the same string on all fifty thousand of them. */
+  label?: string;
   boxes: Box[];
   color: (cls: string) => string;
   onAdd: (b: Rect) => void;
@@ -299,7 +303,7 @@ export default function BoxCanvas({
       style={{ userSelect: "none", touchAction: "none", cursor }}
       tabIndex={0}
       role="application"
-      aria-label="Image being labeled. Draw and edit boxes here."
+      aria-label={`${label ?? "Image"} — draw and edit boxes here`}
       aria-describedby={helpId}
       onFocus={() => setFocused(true)}
       onBlur={() => { setFocused(false); setAnchor(null); }}
@@ -360,7 +364,7 @@ export default function BoxCanvas({
       <img
         ref={imgRef}
         src={src}
-        alt="Image being labeled"
+        alt={label ? `Image being labeled: ${label}` : "Image being labeled"}
         draggable={false}
         onLoad={(e) => {
           const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
@@ -406,7 +410,7 @@ export default function BoxCanvas({
               title="Discard this suggestion (Delete)"
               aria-label="Discard this suggested box"
               style={{
-                position: "absolute", top: -28, right: -8, width: 22, height: 22,
+                position: "absolute", top: -36, right: -6, width: 28, height: 28,
                 borderRadius: "50%", background: "var(--bad)", color: "#fff",
                 border: "2px solid #0b1120", cursor: "pointer", fontSize: 13,
                 lineHeight: "16px", padding: 0, pointerEvents: "auto",
@@ -453,8 +457,9 @@ export default function BoxCanvas({
               aria-label="Remove this box"
               style={{
                 // Clear of the top-right resize handle -- one of them has to
-                // move, and deleting by accident is the worse mistake.
-                position: "absolute", top: -28, right: -8, width: 22, height: 22,
+                // move, and deleting by accident is the worse mistake. 28px
+                // rather than 22, so it is a target 2.5.8 accepts.
+                position: "absolute", top: -36, right: -6, width: 28, height: 28,
                 borderRadius: "50%", background: "var(--bad)", color: "#fff",
                 border: "2px solid #0b1120", cursor: "pointer", fontSize: 13,
                 lineHeight: "16px", padding: 0, pointerEvents: "auto",

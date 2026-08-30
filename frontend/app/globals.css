@@ -216,10 +216,19 @@ input[type="checkbox"] {
   border-radius: 4px;
   background: var(--bg-deep);
   cursor: pointer;
+  position: relative;
   display: grid;
   place-content: center;
   padding: 0;
   flex: none;
+}
+/* 2.5.8 -- 16px is the tick people see, 24px is the target they hit. The
+   pseudo-element is absolutely positioned, so it never becomes a grid item
+   competing with the checkmark. */
+input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 input[type="checkbox"]:checked { background: var(--brand); border-color: var(--brand); }
 input[type="checkbox"]:checked::after {
@@ -551,11 +560,16 @@ kbd {
   object-fit: cover;
   background: var(--bg-deep);
 }
-.gallery-dot {
-  position: absolute; top: 6px; left: 6px;
-  width: 9px; height: 9px;
+/* A shape, not just a colour (1.4.1). The empty ring is "not labeled" -- the
+   one status with nothing in it, which is the point. */
+.gallery-mark {
+  position: absolute; top: 5px; left: 5px;
+  display: grid;
+  place-items: center;
+  width: 17px; height: 17px;
   border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, .45);
+  border: 1.5px solid currentColor;
+  background: rgba(3, 6, 13, .82);
 }
 .gallery-held {
   position: absolute; top: 4px; right: 4px;
@@ -606,10 +620,19 @@ kbd {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
-.tip-anchor {
-  border-bottom: 1px dashed var(--faint);
+/* Both anchors are buttons so a keyboard can open the explanation; these
+   strip the button back to the text it is wrapping. */
+.tip-anchor, .tip-dot {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
   cursor: help;
 }
+.tip-anchor { border-bottom: 1px dashed var(--faint); }
+.tip-dot { display: inline-flex; color: var(--faint); }
+.tip-dot:hover { color: var(--brand); }
 
 /* ================================================================ callouts */
 .note {

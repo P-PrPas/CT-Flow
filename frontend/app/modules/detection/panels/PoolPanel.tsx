@@ -168,6 +168,7 @@ export default function PoolPanel({ s }: { s: Session }) {
 
                 <BoxCanvas
                   src={imgUrl(s.current)}
+                  label={fileOf(s.current)}
                   boxes={s.pool.boxes}
                   draftBoxes={s.drafts}
                   onRemoveDraft={(i) => s.setDrafts((cur) => cur.filter((_, idx) => idx !== i))}

@@ -243,6 +243,11 @@ assert _dbcheck.list_by_status(POOL, "pool")["labeled"] == [target]
 # status returns the one row.
 after = c.get("/api/pool", params={"input_dir": POOL}).json()
 assert after["counts"] == {"labeled": 1, "auto": 0, "unlabeled": 2}, after
+# counts and total describe the same walk, so they cannot drift apart. They can
+# when counts come from the images table while items come from the folder: an
+# images row outliving its file inflates one and shrinks the other, and the
+# gallery then pages forever toward a total it can never reach.
+assert sum(after["counts"].values()) == after["total"], after
 labeled_only = c.get("/api/pool", params={"input_dir": POOL, "status": "labeled"}).json()
 assert [it["path"] for it in labeled_only["items"]] == [target], labeled_only
 assert labeled_only["total"] == 1 and labeled_only["items"][0]["status"] == "labeled"

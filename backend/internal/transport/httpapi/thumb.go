@@ -41,9 +41,19 @@ func (s *Server) GetThumb(w http.ResponseWriter, r *http.Request) error {
 	// mtime+size+width is enough: the file's bytes cannot change without one of
 	// mtime or size moving, and a different width is a different rendering.
 	etag := fmt.Sprintf(`"%d-%d-%d"`, info.ModTime().UnixNano(), info.Size(), width)
-	w.Header().Set("ETag", etag)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+
+	// Set only on the way out, never before the render. Handle() writes an error
+	// status through writeJSON, which does not clear headers already on the
+	// ResponseWriter -- so setting these up front put `immutable, max-age=1y` on
+	// the 400 below, and an explicit max-age is enough for a browser to cache an
+	// error response. A half-copied file in the dataset folder would then be a
+	// permanently broken cell until someone hard-refreshed.
+	cacheable := func() {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	}
 	if r.Header.Get("If-None-Match") == etag {
+		cacheable()
 		w.WriteHeader(http.StatusNotModified)
 		return nil
 	}
@@ -59,6 +69,7 @@ func (s *Server) GetThumb(w http.ResponseWriter, r *http.Request) error {
 		thumbs.put(entry)
 	}
 
+	cacheable()
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(entry.body)

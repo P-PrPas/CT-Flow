@@ -172,18 +172,14 @@ func (s *Server) GetPool(w http.ResponseWriter, r *http.Request) error {
 	labeled := sliceSet(st.Labeled)
 	auto := sliceSet(st.Auto)
 
-	counts := map[string]int{
-		"labeled":   len(st.Labeled),
-		"auto":      len(st.Auto),
-		"unlabeled": max(len(all)-len(st.Labeled)-len(st.Auto), 0),
-	}
-	total := len(all)
-	if want != "all" {
-		total = counts[want]
-	}
-
-	items := make([]poolItem, 0, min(limit, total))
-	skipped := 0
+	// Counted from the same walk that builds the page, not from len(st.Labeled).
+	// The two disagree whenever an images row outlives its file -- label an
+	// image, delete it from the folder -- and then the chip badge promises rows
+	// this loop can never yield, items.length never reaches total, and the
+	// gallery's "that's all of them" never arrives. One pass answers both.
+	counts := map[string]int{"labeled": 0, "auto": 0, "unlabeled": 0}
+	items := make([]poolItem, 0, min(limit, len(all)))
+	matched := 0
 	for _, p := range all {
 		status := "unlabeled"
 		switch {
@@ -192,15 +188,13 @@ func (s *Server) GetPool(w http.ResponseWriter, r *http.Request) error {
 		case auto[p]:
 			status = "auto"
 		}
+		counts[status]++
 		if want != "all" && want != status {
 			continue
 		}
-		if skipped < offset {
-			skipped++
+		matched++
+		if matched <= offset || len(items) >= limit {
 			continue
-		}
-		if len(items) >= limit {
-			break
 		}
 		var by *string
 		if n, ok := held[p]; ok {
@@ -208,6 +202,7 @@ func (s *Server) GetPool(w http.ResponseWriter, r *http.Request) error {
 		}
 		items = append(items, poolItem{Path: p, Status: status, HeldBy: by})
 	}
+	total := matched
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total":  total,

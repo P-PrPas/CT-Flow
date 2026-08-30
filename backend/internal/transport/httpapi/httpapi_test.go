@@ -500,6 +500,17 @@ func TestGetThumbOnGarbageIs400(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 -- %s", w.Code, w.Body)
 	}
+	// ...and it must not be cacheable. The success path sets a one-year
+	// immutable Cache-Control, and Handle writes error statuses through
+	// writeJSON, which leaves headers already on the ResponseWriter in place.
+	// An explicit max-age is enough for a browser to cache a 400, so a
+	// half-copied file would be a broken cell until someone hard-refreshed.
+	if cc := w.Header().Get("Cache-Control"); cc != "" {
+		t.Errorf("Cache-Control = %q on a 400, want none", cc)
+	}
+	if et := w.Header().Get("ETag"); et != "" {
+		t.Errorf("ETag = %q on a 400, want none", et)
+	}
 }
 
 // ---------------------------------------------------------------------- /jobs

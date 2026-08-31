@@ -113,6 +113,11 @@ cd frontend && npx tsc --noEmit && npm run build
 - Models are cached per `model_id` per process with no VRAM eviction.
 - Duplicate detection uses an 8×8 thumbnail hash, not embedding distance.
 - The app serves no HTTPS of its own; that is a reverse proxy's job.
+- The label list a project shows is the bank's classes plus a *plan* — names
+  set up in the Labels dialog but not yet drawn — and a colour override per
+  name. Both live in `localStorage` per `input_dir`, because a class is only
+  created as a side effect of saving a box and there is no endpoint for either.
+  Two people on one project can therefore see the same class in two colours.
 
 ## Conventions
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 export type Rect = [number, number, number, number];
 export type Box = { cls: string; box: Rect };
@@ -9,6 +9,17 @@ export type Box = { cls: string; box: Rect };
 const CORNERS: [number, number][] = [[0, 0], [1, 0], [0, 1], [1, 1]];
 /** Grab radius for a corner handle, in displayed pixels. */
 const GRAB = 12;
+
+/** How far one arrow press moves things, in source-image pixels. Shift is the
+ *  coarse tier.
+ *  ponytail: two tiers is enough for the frames this tool sees; if someone
+ *  starts labeling 4K stills by keyboard, add a third on PageUp/PageDown. */
+const NUDGE = 1;
+const NUDGE_FAST = 10;
+
+const ARROWS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+};
 
 /** Keep receiving move/up after the pointer leaves the image. Best-effort:
  *  losing capture costs a drag that stops at the edge, never the drag itself. */
@@ -22,9 +33,21 @@ const capture = (e: React.PointerEvent) => {
  *  drag a corner to resize -- a model's guess is usually nearly right, and
  *  "delete it and draw it again" throws that away. Delete removes the
  *  selection (or hit the ×). Coordinates live in the source image's pixel
- *  space, so they survive any display scaling. */
+ *  space, so they survive any display scaling.
+ *
+ *  Editing an existing box has a keyboard equivalent, which is what 2.5.7
+ *  asks of the move and resize drags: focus the image, Tab steps through the
+ *  boxes on it, arrows move the selected one, Alt+arrows resize it, Delete
+ *  removes it, Escape deselects. Every change is announced in the live region
+ *  below, because a box has no other way of saying where it went.
+ *
+ *  Drawing a *new* box is pointer-only. A keyboard crosshair was built for it
+ *  and taken back out -- nobody drew a box with it, and an unused path in the
+ *  middle of the hot loop costs more than it returns. So 2.1.1 is still open
+ *  for box creation; see docs/UX_AUDIT.md F-01. */
 export default function BoxCanvas({
   src,
+  label,
   boxes,
   color,
   onAdd,
@@ -37,6 +60,9 @@ export default function BoxCanvas({
   onSelect,
 }: {
   src: string;
+  /** The image's filename, for the alt text and the canvas's accessible name.
+   *  "Image being labeled" was the same string on all fifty thousand of them. */
+  label?: string;
   boxes: Box[];
   color: (cls: string) => string;
   onAdd: (b: Rect) => void;
@@ -64,6 +90,8 @@ export default function BoxCanvas({
   const [live, setLive] = useState<{ i: number; box: Rect; grab: [number, number] | null; from: { x: number; y: number } } | null>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
   const [ownSelected, setOwnSelected] = useState<number | null>(null);
+  const [said, setSaid] = useState("");
+  const helpId = useId();
   /** Drafts have their own selection -- they live in a separate array from
    *  `boxes`, so one index space can't cover both. */
   const [draftSel, setDraftSel] = useState<number | null>(null);
@@ -72,7 +100,10 @@ export default function BoxCanvas({
   const setSel = (i: number | null) => (onSelect ? onSelect(i) : setOwnSelected(i));
 
   // A new image loaded -> the old index would point at the wrong box.
-  useEffect(() => { setSel(null); setDraftSel(null); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [src]);
+  useEffect(() => {
+    setSel(null); setDraftSel(null); setSaid("");
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [src]);
 
   /** Source-image pixels per displayed pixel -- the grab radius has to be
    *  constant on screen, not in the image's coordinate space. */
@@ -171,6 +202,74 @@ export default function BoxCanvas({
     return [x1 + dx, y1 + dy, x2 + dx, y2 + dy];
   };
 
+  const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+
+  /** Spoken to the live region. Boxes have no text of their own, so this is
+   *  the only way a screen-reader user knows the arrow key did anything. */
+  const say = (b: Rect, what: string, cls?: string) =>
+    setSaid(`${what}${cls ? ` ${cls}` : ""}, ${Math.round(b[2] - b[0])} by ${Math.round(b[3] - b[1])} pixels, ` +
+            `at ${Math.round(b[0])}, ${Math.round(b[1])}`);
+
+  /** Move or resize the selected box, keeping it inside the image. */
+  const nudge = (i: number, dx: number, dy: number, resize: boolean): Rect => {
+    const [x1, y1, x2, y2] = boxes[i].box;
+    if (resize) return [x1, y1, Math.max(x1 + 1, clamp(x2 + dx, size.w)), Math.max(y1 + 1, clamp(y2 + dy, size.h))];
+    const w = x2 - x1, h = y2 - y1;
+    const nx = clamp(x1 + dx, size.w - w), ny = clamp(y1 + dy, size.h - h);
+    return [nx, ny, nx + w, ny + h];
+  };
+
+  /** Only the keys this canvas actually consumes get stopPropagation, so the
+   *  page's own shortcuts (class digits, Ctrl+S, ?, skip) still work while the
+   *  image has focus -- and the arrow keys, which used to change the image
+   *  from anywhere, now belong to whatever is focused. */
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey) return;             // undo/redo/save are the page's
+    const eat = () => { e.preventDefault(); e.stopPropagation(); };
+    const d = e.shiftKey ? NUDGE_FAST : NUDGE;
+    const arrow = ARROWS[e.key];
+
+    if (arrow) {
+      eat();
+      const [dx, dy] = [arrow[0] * d, arrow[1] * d];
+      if (sel !== null && boxes[sel] && onUpdate) {
+        // One press is one undo step. The pointer path collapses a whole drag
+        // into one; here each press is already the smallest edit there is.
+        const b = nudge(sel, dx, dy, e.altKey);
+        onUpdate(sel, b);
+        say(b, e.altKey ? "resized" : "moved", boxes[sel].cls);
+      }
+      return;
+    }
+
+    if (e.key === "Tab") {
+      if (!boxes.length) return;                    // nothing to step through
+      const back = e.shiftKey;
+      const next = sel === null ? (back ? -1 : 0) : sel + (back ? -1 : 1);
+      // Off either end means "leave the canvas" -- a Tab that never escapes is
+      // a keyboard trap, which is a worse failure than the one being fixed.
+      if (next < 0 || next >= boxes.length) { setSel(null); return; }
+      eat();
+      setSel(next);
+      say(boxes[next].box, `box ${next + 1} of ${boxes.length},`, boxes[next].cls);
+      return;
+    }
+
+    if ((e.key === "Delete" || e.key === "Backspace") && sel !== null && onRemove) {
+      eat();
+      onRemove(sel);
+      setSel(null);
+      setSaid("Box removed");
+      return;
+    }
+
+    if (e.key === "Escape" && sel !== null) {
+      eat();
+      setSel(null);
+      setSaid("Nothing selected");
+    }
+  };
+
   const rect = (b: number[]) => ({
     left: `${(b[0] / size.w) * 100}%`,
     top: `${(b[1] / size.h) * 100}%`,
@@ -182,6 +281,11 @@ export default function BoxCanvas({
     <div
       className="canvas-wrap"
       style={{ userSelect: "none", touchAction: "none", cursor }}
+      tabIndex={0}
+      role="application"
+      aria-label={`${label ?? "Image"} — the boxes on this image`}
+      aria-describedby={helpId}
+      onKeyDown={onKeyDown}
       onPointerDown={(e) => {
         const p = at(e);
         if (onUpdate) {
@@ -237,7 +341,7 @@ export default function BoxCanvas({
       <img
         ref={imgRef}
         src={src}
-        alt="Image being labeled"
+        alt={label ? `Image being labeled: ${label}` : "Image being labeled"}
         draggable={false}
         onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
         style={{ width: "100%", display: "block" }}
@@ -279,7 +383,7 @@ export default function BoxCanvas({
               title="Discard this suggestion (Delete)"
               aria-label="Discard this suggested box"
               style={{
-                position: "absolute", top: -28, right: -8, width: 22, height: 22,
+                position: "absolute", top: -36, right: -6, width: 28, height: 28,
                 borderRadius: "50%", background: "var(--bad)", color: "#fff",
                 border: "2px solid #0b1120", cursor: "pointer", fontSize: 13,
                 lineHeight: "16px", padding: 0, pointerEvents: "auto",
@@ -326,8 +430,9 @@ export default function BoxCanvas({
               aria-label="Remove this box"
               style={{
                 // Clear of the top-right resize handle -- one of them has to
-                // move, and deleting by accident is the worse mistake.
-                position: "absolute", top: -28, right: -8, width: 22, height: 22,
+                // move, and deleting by accident is the worse mistake. 28px
+                // rather than 22, so it is a target 2.5.8 accepts.
+                position: "absolute", top: -36, right: -6, width: 28, height: 28,
                 borderRadius: "50%", background: "var(--bad)", color: "#fff",
                 border: "2px solid #0b1120", cursor: "pointer", fontSize: 13,
                 lineHeight: "16px", padding: 0, pointerEvents: "auto",
@@ -354,6 +459,14 @@ export default function BoxCanvas({
           }}
         />
       )}
+
+      <span id={helpId} className="sr-only">
+        Tab steps through the boxes on this image. With one selected, the arrow keys
+        move it, Alt and the arrow keys resize it, Delete removes it and Escape
+        deselects. Hold Shift to move ten times as far. Drawing a new box needs a
+        pointer.
+      </span>
+      <span className="sr-only" role="status" aria-live="polite">{said}</span>
     </div>
   );
 }

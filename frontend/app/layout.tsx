@@ -21,7 +21,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {/* 2.4.1 — the app bar repeats on every page and is the first thing in
+            the tab order. This is the way past it; it is invisible until it
+            takes focus. */}
+        <a className="skip" href="#main">Skip to main content</a>
+        {children}
+      </body>
     </html>
   );
 }

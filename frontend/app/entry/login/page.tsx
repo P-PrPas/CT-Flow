@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { BrandMark } from "../../lib/ui";
+import { BrandMark, useTitle } from "../../lib/ui";
 import * as api from "../../lib/api";
 
 export default function LoginPage() {
+  useTitle("Sign in");
   const [auth, setAuth] = useState<api.AuthState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -37,7 +38,7 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="row" style={{ minHeight: "100dvh", justifyContent: "center", padding: 16 }}>
+    <main id="main" className="row" style={{ minHeight: "100dvh", justifyContent: "center", padding: 16 }}>
       <section className="card pad col" style={{ width: "100%", maxWidth: 420, gap: 20 }}>
         <div className="row">
           <span className="brand-mark"><BrandMark /></span>

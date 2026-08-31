@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BrandMark } from "../../lib/ui";
+import { BrandMark, useTitle } from "../../lib/ui";
 import * as api from "../../lib/api";
 
 export default function CallbackPage() {
+  useTitle("Signing in");
   const started = useRef(false);
   const [error, setError] = useState("");
 
@@ -24,7 +25,7 @@ export default function CallbackPage() {
   }, []);
 
   return (
-    <main className="row" style={{ minHeight: "100dvh", justifyContent: "center", padding: 16 }}>
+    <main id="main" className="row" style={{ minHeight: "100dvh", justifyContent: "center", padding: 16 }}>
       <section className="card pad col" style={{ width: "100%", maxWidth: 420, textAlign: "center", gap: 20 }}>
         <div><span className="brand-mark" style={{ margin: "0 auto 12px" }}><BrandMark /></span><h1>Processing Login</h1></div>
         {error ? <><div className="note bad" role="alert">{error}</div><a className="btn" href="/entry/login">Back to login</a></> : <p className="muted">Please wait while we verify your credentials…</p>}

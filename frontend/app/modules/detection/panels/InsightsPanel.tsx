@@ -26,7 +26,7 @@ export default function InsightsPanel({ s }: { s: Session }) {
       {/* headline recommendation */}
       <div className="card">
         <div className="card-head">
-          <span className="card-title"><Icon name="spark" size={13} /> What to do next</span>
+          <h2 className="card-title"><Icon name="spark" size={13} /> What to do next</h2>
           <span className="xs muted">{s.history.length} measurement{s.history.length === 1 ? "" : "s"} recorded</span>
         </div>
         <div className="card-body col" style={{ gap: 10 }}>
@@ -77,7 +77,7 @@ export default function InsightsPanel({ s }: { s: Session }) {
       {/* curve */}
       <div className="card">
         <div className="card-head">
-          <span className="card-title"><Icon name="chart" size={13} /> Learning curve</span>
+          <h2 className="card-title"><Icon name="chart" size={13} /> Learning curve</h2>
           {s.history.length > 0 && (
             <button className="btn ghost sm" onClick={s.resetHistory} title="Discard the recorded measurements for this output folder">
               <Icon name="trash" size={13} /> Reset
@@ -93,7 +93,7 @@ export default function InsightsPanel({ s }: { s: Session }) {
       {s.advice.some((a) => a.verdict !== "cold") && (
         <div className="card">
           <div className="card-head">
-            <span className="card-title"><Icon name="layers" size={13} /> Class by class</span>
+            <h2 className="card-title"><Icon name="layers" size={13} /> Class by class</h2>
           </div>
           <div className="card-body col" style={{ gap: 12 }}>
             {s.advice.map((a) => {
@@ -130,7 +130,7 @@ export default function InsightsPanel({ s }: { s: Session }) {
       {/* Success metrics, §7 of the requirements doc. */}
       <div className="card">
         <div className="card-head">
-          <span className="card-title"><Icon name="clock" size={13} /> Effort saved</span>
+          <h2 className="card-title"><Icon name="clock" size={13} /> Effort saved</h2>
           <span className="xs faint">this session</span>
         </div>
         <div className="card-body col" style={{ gap: 8 }}>

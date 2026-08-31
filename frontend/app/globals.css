@@ -800,16 +800,7 @@ dialog.modal.bare {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
-/* Where the next keyboard-drawn corner lands. */
-.caret { position: absolute; pointer-events: none; z-index: 4; }
-.caret::before, .caret::after {
-  content: "";
-  position: absolute;
-  background: var(--brand);
-  box-shadow: 0 0 0 1px rgba(3, 6, 13, .75);
-}
-.caret::before { left: -11px; top: -1px; width: 22px; height: 2px; }
-.caret::after { top: -11px; left: -1px; width: 2px; height: 22px; }
+
 .box-label {
   position: absolute;
   left: -1px;

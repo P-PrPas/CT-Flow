@@ -35,14 +35,16 @@ const capture = (e: React.PointerEvent) => {
  *  selection (or hit the ×). Coordinates live in the source image's pixel
  *  space, so they survive any display scaling.
  *
- *  All of that has a keyboard equivalent, because drawing a box is the whole
- *  job and a pointer used to be the only way to do it (WCAG 2.1.1, and 2.5.7
- *  which wants every drag to have a non-drag route). Focus the image and:
- *  arrows move a crosshair, Enter drops one corner and then the other, Tab
- *  steps through the boxes already there, arrows move the selected one,
- *  Alt+arrows resize it, Delete removes it, Escape backs out. Every change is
- *  announced in the live region below, because a box has no other way of
- *  saying where it went. */
+ *  Editing an existing box has a keyboard equivalent, which is what 2.5.7
+ *  asks of the move and resize drags: focus the image, Tab steps through the
+ *  boxes on it, arrows move the selected one, Alt+arrows resize it, Delete
+ *  removes it, Escape deselects. Every change is announced in the live region
+ *  below, because a box has no other way of saying where it went.
+ *
+ *  Drawing a *new* box is pointer-only. A keyboard crosshair was built for it
+ *  and taken back out -- nobody drew a box with it, and an unused path in the
+ *  middle of the hot loop costs more than it returns. So 2.1.1 is still open
+ *  for box creation; see docs/UX_AUDIT.md F-01. */
 export default function BoxCanvas({
   src,
   label,
@@ -88,11 +90,6 @@ export default function BoxCanvas({
   const [live, setLive] = useState<{ i: number; box: Rect; grab: [number, number] | null; from: { x: number; y: number } } | null>(null);
   const [size, setSize] = useState({ w: 1, h: 1 });
   const [ownSelected, setOwnSelected] = useState<number | null>(null);
-  /** Keyboard drawing state: where the crosshair is, and the first corner once
-   *  it has been dropped. Both in source-image pixels, like everything else. */
-  const [caret, setCaret] = useState({ x: 0, y: 0 });
-  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
-  const [focused, setFocused] = useState(false);
   const [said, setSaid] = useState("");
   const helpId = useId();
   /** Drafts have their own selection -- they live in a separate array from
@@ -104,7 +101,7 @@ export default function BoxCanvas({
 
   // A new image loaded -> the old index would point at the wrong box.
   useEffect(() => {
-    setSel(null); setDraftSel(null); setAnchor(null); setSaid("");
+    setSel(null); setDraftSel(null); setSaid("");
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [src]);
 
@@ -241,8 +238,6 @@ export default function BoxCanvas({
         const b = nudge(sel, dx, dy, e.altKey);
         onUpdate(sel, b);
         say(b, e.altKey ? "resized" : "moved", boxes[sel].cls);
-      } else {
-        setCaret((c) => ({ x: clamp(c.x + dx, size.w), y: clamp(c.y + dy, size.h) }));
       }
       return;
     }
@@ -256,23 +251,7 @@ export default function BoxCanvas({
       if (next < 0 || next >= boxes.length) { setSel(null); return; }
       eat();
       setSel(next);
-      setAnchor(null);
       say(boxes[next].box, `box ${next + 1} of ${boxes.length},`, boxes[next].cls);
-      return;
-    }
-
-    if (e.key === "Enter") {
-      eat();
-      if (sel !== null) { setSel(null); setSaid("Nothing selected"); return; }
-      if (!anchor) {
-        setAnchor(caret);
-        setSaid(`First corner at ${Math.round(caret.x)}, ${Math.round(caret.y)}. Move with the arrows, then press Enter again.`);
-        return;
-      }
-      const b = norm([anchor.x, anchor.y, caret.x, caret.y]);
-      setAnchor(null);
-      if (b[2] - b[0] > 4 && b[3] - b[1] > 4) { onAdd(b); say(b, "Box added"); }
-      else setSaid("Too small to be a box — cancelled");
       return;
     }
 
@@ -284,9 +263,10 @@ export default function BoxCanvas({
       return;
     }
 
-    if (e.key === "Escape") {
-      if (anchor) { eat(); setAnchor(null); setSaid("Cancelled"); return; }
-      if (sel !== null) { eat(); setSel(null); setSaid("Nothing selected"); }
+    if (e.key === "Escape" && sel !== null) {
+      eat();
+      setSel(null);
+      setSaid("Nothing selected");
     }
   };
 
@@ -303,10 +283,8 @@ export default function BoxCanvas({
       style={{ userSelect: "none", touchAction: "none", cursor }}
       tabIndex={0}
       role="application"
-      aria-label={`${label ?? "Image"} — draw and edit boxes here`}
+      aria-label={`${label ?? "Image"} — the boxes on this image`}
       aria-describedby={helpId}
-      onFocus={() => setFocused(true)}
-      onBlur={() => { setFocused(false); setAnchor(null); }}
       onKeyDown={onKeyDown}
       onPointerDown={(e) => {
         const p = at(e);
@@ -331,7 +309,6 @@ export default function BoxCanvas({
         }
         setSel(null);
         setDraftSel(null);
-        setCaret(p);    // so a hand that leaves the mouse finds the crosshair where it left off
         setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
         capture(e);
       }}
@@ -366,11 +343,7 @@ export default function BoxCanvas({
         src={src}
         alt={label ? `Image being labeled: ${label}` : "Image being labeled"}
         draggable={false}
-        onLoad={(e) => {
-          const { naturalWidth: w, naturalHeight: h } = e.currentTarget;
-          setSize({ w, h });
-          setCaret({ x: Math.round(w / 2), y: Math.round(h / 2) });
-        }}
+        onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
         style={{ width: "100%", display: "block" }}
       />
 
@@ -487,32 +460,11 @@ export default function BoxCanvas({
         />
       )}
 
-      {/* The keyboard crosshair, and the box it is halfway through drawing.
-          Only while the canvas has focus -- a crosshair sitting on an image
-          nobody is typing at reads as a bug. */}
-      {focused && !drag && !live && (
-        <span
-          className="caret"
-          style={{ left: `${(caret.x / size.w) * 100}%`, top: `${(caret.y / size.h) * 100}%` }}
-        />
-      )}
-      {focused && anchor && (
-        <div
-          style={{
-            position: "absolute",
-            ...rect(norm([anchor.x, anchor.y, caret.x, caret.y])),
-            border: "2px dashed var(--brand)",
-            background: "rgba(8,217,214,.12)",
-            pointerEvents: "none", borderRadius: 2,
-          }}
-        />
-      )}
-
       <span id={helpId} className="sr-only">
-        Arrow keys move the crosshair, Enter drops a corner and then the opposite one.
-        Tab steps through the boxes on this image; with one selected, arrows move it,
-        Alt and arrows resize it, Delete removes it. Escape backs out. Hold Shift to
-        move ten times as far.
+        Tab steps through the boxes on this image. With one selected, the arrow keys
+        move it, Alt and the arrow keys resize it, Delete removes it and Escape
+        deselects. Hold Shift to move ten times as far. Drawing a new box needs a
+        pointer.
       </span>
       <span className="sr-only" role="status" aria-live="polite">{said}</span>
     </div>

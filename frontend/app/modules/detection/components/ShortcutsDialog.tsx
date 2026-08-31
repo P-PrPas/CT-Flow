@@ -30,15 +30,14 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
     ],
   },
   {
-    group: "Drawing from the keyboard",
+    group: "Editing boxes from the keyboard",
     items: [
       ["Tab", "Focus the image, then step through its boxes"],
-      ["Arrows", "Move the crosshair, or the selected box"],
+      ["Arrows", "Move the selected box"],
       ["Shift + Arrows", "The same, ten times faster"],
-      ["Enter", "Drop the first corner, then the second"],
       ["Alt + Arrows", "Resize the selected box"],
       ["Delete", "Remove the selected box"],
-      ["Esc", "Cancel the box being drawn, or deselect"],
+      ["Esc", "Deselect"],
     ],
   },
   {

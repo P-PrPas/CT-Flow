@@ -141,7 +141,9 @@ function Workspace({
         s.acceptDrafts();
       }
       else if (/^[1-9]$/.test(e.key)) {
-        const names = inTestset ? s.tsClasses : s.classNames;
+        // Same restriction as the swatch row: a review can only pick from what
+        // the bank already knows.
+        const names = inTestset ? s.tsClasses : s.isReview ? s.bankNames : s.classNames;
         const name = names[Number(e.key) - 1];
         if (name) { e.preventDefault(); (inTestset ? s.setTsCls : s.setCls)(name); }
       }

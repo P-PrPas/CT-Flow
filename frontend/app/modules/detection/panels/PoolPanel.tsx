@@ -3,6 +3,7 @@
 import { useState } from "react";
 import BoxCanvas from "../components/BoxCanvas";
 import Confirm from "../../../components/Confirm";
+import LabelsDialog from "../components/LabelsDialog";
 import ModelPicker from "../components/ModelPicker";
 import { imgUrl } from "../api";
 import { VERDICT_STYLE } from "../history";
@@ -17,6 +18,13 @@ const QUEUE_CAP = 60;
 
 export default function PoolPanel({ s }: { s: Session }) {
   const [confirmAuto, setConfirmAuto] = useState(false);
+  const [editingLabels, setEditingLabels] = useState(false);
+
+  /** Relabelling an image teaches the model nothing, so a name the bank has
+   *  never seen would have no prompt behind it -- review offers only what is
+   *  already taught. This used to fall out of classNames being the bank's list;
+   *  now that it also carries planned names, it has to be said. */
+  const swatchNames = s.isReview ? s.bankNames : s.classNames;
 
   const f1 = s.evalResult?.overall.f1 ?? null;
   const notReady = f1 !== null && f1 < READY_F1;
@@ -72,7 +80,7 @@ export default function PoolPanel({ s }: { s: Session }) {
           <div className="card-head" style={{ flexWrap: "wrap", rowGap: 8 }}>
             <div className="row wrap" style={{ gap: 6 }}>
               {/* FR-21 — the class sticks between boxes and images; keys 1-9 switch it. */}
-              {s.classNames.map((n, i) => (
+              {swatchNames.map((n, i) => (
                 <button
                   key={n}
                   className="swatch"
@@ -86,7 +94,11 @@ export default function PoolPanel({ s }: { s: Session }) {
                   {i < 9 && <span className="key">{i + 1}</span>}
                 </button>
               ))}
-              {!s.isReview && (
+              {/* Naming a class in a 128px box mid-draw is a bad moment to be
+                  deciding what the classes are, and on a new project it was the
+                  only moment there was. The input stays for speed; the dialog is
+                  where the list is actually set up. */}
+              {!s.isReview && s.classNames.length > 0 && (
                 <input
                   value={s.cls}
                   onChange={(e) => s.setCls(e.target.value)}
@@ -94,6 +106,16 @@ export default function PoolPanel({ s }: { s: Session }) {
                   aria-label="Class for the next box"
                   style={{ width: 128, height: 28, minHeight: 28, fontSize: 12.5 }}
                 />
+              )}
+              {!s.isReview && (
+                <button
+                  type="button"
+                  className={s.classNames.length ? "btn sm" : "btn sm primary"}
+                  onClick={() => setEditingLabels(true)}
+                >
+                  <Icon name="sliders" size={13} />
+                  {s.classNames.length ? "Labels" : "Set up labels"}
+                </button>
               )}
             </div>
 
@@ -177,7 +199,7 @@ export default function PoolPanel({ s }: { s: Session }) {
                   onSelect={s.setSelected}
                   onAdd={(b) => {
                     const cls = s.isReview
-                      ? (s.classNames.includes(s.cls) ? s.cls : s.classNames[0] ?? "item")
+                      ? (s.bankNames.includes(s.cls) ? s.cls : s.bankNames[0] ?? "item")
                       : (s.cls || "item");
                     s.pool.set((cur) => [...cur, { cls, box: b }]);
                   }}
@@ -549,6 +571,8 @@ export default function PoolPanel({ s }: { s: Session }) {
           </div>
         </div>
       </div>
+
+      {editingLabels && <LabelsDialog s={s} onClose={() => setEditingLabels(false)} />}
 
       {/* FR-27 */}
       {confirmAuto && s.evalResult && (

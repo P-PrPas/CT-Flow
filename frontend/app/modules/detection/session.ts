@@ -10,6 +10,12 @@ import type { JobProgress } from "../../components/ProgressBar";
 import * as api from "./api";
 import { adviseAll, appendHistory, clearHistory, loadHistory, type EvalPoint } from "./history";
 import type { BankSummary, EvalImage, EvalResult, ModelInfo, Score } from "./types";
+
+/** Names set up but not yet drawn, plus a colour picked for a name. Kept out
+ *  of the hook so the shape is one thing to read. */
+type LabelPlan = { planned: string[]; colors: Record<string, string> };
+const EMPTY_PLAN: LabelPlan = { planned: [], colors: {} };
+const planKey = (dir: string) => `ctflow.labels.${dir}`;
 import { stemOf } from "../../lib/ui";
 
 export type Panel = "pool" | "gallery" | "testset" | "report" | "insights";
@@ -243,7 +249,76 @@ export function useSession(inputDir: string, me: string) {
   }, [inputDir]);
 
   // --- derived ----------------------------------------------------------
-  const classNames = useMemo(() => bank?.classes.map((c) => c.name) ?? [], [bank]);
+  /** Classes the server actually knows about. One exists the moment a box is
+   *  saved under it, and its index is fixed from then on (CLAUDE.md invariant
+   *  1), which is why nothing here can delete or reorder one. */
+  const bankNames = useMemo(() => bank?.classes.map((c) => c.name) ?? [], [bank]);
+
+  /** The rest of the label list: names someone has set up but not drawn yet,
+   *  and a colour chosen for a name.
+   *
+   *  ponytail: per browser, in localStorage. There is no endpoint that stores
+   *  either -- a class is created as a side effect of saving a box, and colour
+   *  is derived from the palette index. The upgrade is a colour column on
+   *  `classes` and a POST that creates one empty; until then two people on the
+   *  same project can see the same class in two colours, which is worth
+   *  knowing before someone files it as a bug. */
+  const [plan, setPlan] = useState<LabelPlan>(EMPTY_PLAN);
+  useEffect(() => {
+    if (!inputDir) return;
+    try {
+      const raw = localStorage.getItem(planKey(inputDir));
+      setPlan(raw ? { ...EMPTY_PLAN, ...JSON.parse(raw) } : EMPTY_PLAN);
+    } catch { setPlan(EMPTY_PLAN); }
+  }, [inputDir]);
+
+  const savePlan = useCallback((next: LabelPlan) => {
+    setPlan(next);
+    // Private-mode browsers throw on write; losing the plan is not worth
+    // losing the session over.
+    try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
+  }, [inputDir]);
+
+  const addClass = useCallback((raw: string) => {
+    const name = raw.trim();
+    setPlan((cur) => {
+      if (!name || cur.planned.includes(name)) return cur;
+      const next = { ...cur, planned: [...cur.planned, name] };
+      try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
+      return next;
+    });
+  }, [inputDir]);
+
+  /** Only ever removes a *planned* name. A class the bank holds is referenced
+   *  by index from every box saved under it, so there is nothing here that
+   *  could delete one safely -- the dialog disables the button and says why. */
+  const removeClass = useCallback((name: string) => {
+    setPlan((cur) => {
+      const next = {
+        planned: cur.planned.filter((n) => n !== name),
+        colors: Object.fromEntries(Object.entries(cur.colors).filter(([n]) => n !== name)),
+      };
+      try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
+      return next;
+    });
+  }, [inputDir]);
+
+  /** `null` puts the name back on its palette default. */
+  const setClassColor = useCallback((name: string, hex: string | null) => {
+    setPlan((cur) => {
+      const colors = { ...cur.colors };
+      if (hex) colors[name] = hex; else delete colors[name];
+      const next = { ...cur, colors };
+      try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
+      return next;
+    });
+  }, [inputDir]);
+
+  /** What the swatch row offers: what the bank has, then what is only planned. */
+  const classNames = useMemo(
+    () => [...bankNames, ...plan.planned.filter((n) => !bankNames.includes(n))],
+    [bankNames, plan.planned]
+  );
   const labeled = useMemo(() => new Set(bank?.labeled ?? []), [bank]);
   const auto = useMemo(() => new Set(bank?.auto ?? []), [bank]);
   /** Test-flagged images never enter the pool queue -- they're the same file
@@ -263,8 +338,8 @@ export function useSession(inputDir: string, me: string) {
     [bank]
   );
   const advice = useMemo(
-    () => adviseAll(classNames, history),
-    [classNames, history]
+    () => adviseAll(bankNames, history),
+    [bankNames, history]
   );
 
   /** True once the image on screen already has a label -- machine or hand.
@@ -275,14 +350,18 @@ export function useSession(inputDir: string, me: string) {
   const isReview = current !== null && (labeled.has(current) || auto.has(current));
 
   const color = useCallback((name: string) => {
+    const chosen = plan.colors[name];
+    if (chosen) return chosen;
     const i = classNames.indexOf(name);
     return colors[(i < 0 ? classNames.length : i) % (colors.length || 1)] ?? "#08d9d6";
-  }, [classNames, colors]);
+  }, [classNames, colors, plan.colors]);
 
   const tsColor = useCallback((name: string) => {
+    const chosen = plan.colors[name];
+    if (chosen) return chosen;
     const i = tsClasses.indexOf(name);
     return colors[(i < 0 ? tsClasses.length : i) % (colors.length || 1)] ?? "#08d9d6";
-  }, [tsClasses, colors]);
+  }, [tsClasses, colors, plan.colors]);
 
   const tsLabeledSet = useMemo(() => new Set(tsLabeled), [tsLabeled]);
   /** Test images are pool images by path now (no copy, no filename dance) --
@@ -405,7 +484,7 @@ export function useSession(inputDir: string, me: string) {
    *  just means drawing by hand, which is what the tool did yesterday. */
   useEffect(() => {
     setDrafts([]);
-    if (!preAnnotate || !current || !inputDir || !classNames.length) return;
+    if (!preAnnotate || !current || !inputDir || !bankNames.length) return;
     if (doneSet.has(current)) return;
     let cancelled = false;
     setDrafting(true);
@@ -414,7 +493,7 @@ export function useSession(inputDir: string, me: string) {
       .catch(() => { /* silent by design */ })
       .finally(() => { if (!cancelled) setDrafting(false); });
     return () => { cancelled = true; };
-  }, [current, inputDir, preAnnotate, classNames, doneSet]);
+  }, [current, inputDir, preAnnotate, bankNames, doneSet]);
 
   useEffect(() => {
     if (!tsCurrent || !inputDir || !tsLabeledSet.has(stemOf(tsCurrent))) {
@@ -738,7 +817,8 @@ export function useSession(inputDir: string, me: string) {
     models, modelId, setModelId, reembedModel,
     // pool
     images, bank, scores, current, cls, setCls, updateMode, setUpdateMode, selected, setSelected,
-    pool, clipboard, setClipboard, classNames, labeled, auto, remaining, bankTotal,
+    pool, clipboard, setClipboard, classNames, bankNames, labeled, auto, remaining, bankTotal,
+    classColors: plan.colors, addClass, removeClass, setClassColor,
     promptCounts, isReview, color, sortedPool, goToImage, nextTodo, doneSet, progressBuckets,
     drafts, drafting, acceptDrafts, setDrafts, preAnnotate, setPreAnnotate,
     spread, setSpread, noDetection, staleScores,

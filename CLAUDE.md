@@ -113,6 +113,10 @@ cd frontend && npx tsc --noEmit && npm run build
 - Models are cached per `model_id` per process with no VRAM eviction.
 - Duplicate detection uses an 8×8 thumbnail hash, not embedding distance.
 - The app serves no HTTPS of its own; that is a reverse proxy's job.
+- Drawing a *new* box needs a pointer: `BoxCanvas` gives every other box
+  operation a keyboard route, but not creation (WCAG 2.1.1, NFR-11). A
+  deliberate trade, not an oversight — `docs/UX_AUDIT.md` F-01 has the cheaper
+  way to close it.
 - The label list a project shows is the bank's classes plus a *plan* — names
   set up in the Labels dialog but not yet drawn — and a colour override per
   name. Both live in `localStorage` per `input_dir`, because a class is only

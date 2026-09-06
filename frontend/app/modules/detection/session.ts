@@ -10,13 +10,27 @@ import type { JobProgress } from "../../components/ProgressBar";
 import * as api from "./api";
 import { adviseAll, appendHistory, clearHistory, loadHistory, type EvalPoint } from "./history";
 import type { BankSummary, EvalImage, EvalResult, ModelInfo, Score } from "./types";
+import { stemOf } from "../../lib/ui";
 
 /** Names set up but not yet drawn, plus a colour picked for a name. Kept out
  *  of the hook so the shape is one thing to read. */
 type LabelPlan = { planned: string[]; colors: Record<string, string> };
 const EMPTY_PLAN: LabelPlan = { planned: [], colors: {} };
 const planKey = (dir: string) => `ctflow.labels.${dir}`;
-import { stemOf } from "../../lib/ui";
+
+/** Write-through for the plan. Private-mode browsers throw on write, and
+ *  losing the plan is not worth losing the session over.
+ *
+ *  Called from inside the setPlan updaters below. That is a side effect in an
+ *  updater, which is normally the wrong place for one -- React calls updaters
+ *  twice under StrictMode -- but writing the same string to the same key twice
+ *  is not a second action the way a second fetch would be. The functional form
+ *  is what matters here: it is the only way these read the current plan without
+ *  capturing a stale one. */
+const persist = (dir: string, next: LabelPlan) => {
+  try { if (dir) localStorage.setItem(planKey(dir), JSON.stringify(next)); } catch { /* no-op */ }
+  return next;
+};
 
 export type Panel = "pool" | "gallery" | "testset" | "report" | "insights";
 
@@ -272,20 +286,11 @@ export function useSession(inputDir: string, me: string) {
     } catch { setPlan(EMPTY_PLAN); }
   }, [inputDir]);
 
-  const savePlan = useCallback((next: LabelPlan) => {
-    setPlan(next);
-    // Private-mode browsers throw on write; losing the plan is not worth
-    // losing the session over.
-    try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
-  }, [inputDir]);
-
   const addClass = useCallback((raw: string) => {
     const name = raw.trim();
     setPlan((cur) => {
       if (!name || cur.planned.includes(name)) return cur;
-      const next = { ...cur, planned: [...cur.planned, name] };
-      try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
-      return next;
+      return persist(inputDir, { ...cur, planned: [...cur.planned, name] });
     });
   }, [inputDir]);
 
@@ -294,12 +299,10 @@ export function useSession(inputDir: string, me: string) {
    *  could delete one safely -- the dialog disables the button and says why. */
   const removeClass = useCallback((name: string) => {
     setPlan((cur) => {
-      const next = {
+      return persist(inputDir, {
         planned: cur.planned.filter((n) => n !== name),
         colors: Object.fromEntries(Object.entries(cur.colors).filter(([n]) => n !== name)),
-      };
-      try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
-      return next;
+      });
     });
   }, [inputDir]);
 
@@ -308,9 +311,7 @@ export function useSession(inputDir: string, me: string) {
     setPlan((cur) => {
       const colors = { ...cur.colors };
       if (hex) colors[name] = hex; else delete colors[name];
-      const next = { ...cur, colors };
-      try { if (inputDir) localStorage.setItem(planKey(inputDir), JSON.stringify(next)); } catch { /* no-op */ }
-      return next;
+      return persist(inputDir, { ...cur, colors });
     });
   }, [inputDir]);
 

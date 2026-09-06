@@ -118,6 +118,7 @@ export default function LearningCurve({
         <div style={{ position: "relative" }}>
           <svg
             ref={svgRef}
+            className="learning-plot"
             viewBox={`0 0 ${W} ${H}`}
             width="100%"
             style={{ display: "block", overflow: "visible" }}
@@ -187,7 +188,7 @@ export default function LearningCurve({
                 left: `${(x(hp.totalPrompts) / W) * 100}%`,
                 transform: `translateX(${x(hp.totalPrompts) > W / 2 ? "-104%" : "4%"})`,
                 pointerEvents: "none", zIndex: 5,
-                background: "#0a1020", border: "1px solid var(--line)",
+                background: "var(--surface)", border: "1px solid var(--line)",
                 borderRadius: "var(--r)", padding: "8px 10px", minWidth: 150,
                 boxShadow: "var(--shadow-3)",
               }}

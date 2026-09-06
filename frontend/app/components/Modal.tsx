@@ -32,15 +32,13 @@ export default function Modal({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Capture before React commits autoFocus inside the dialog.
+  const opener = useRef<HTMLElement | null>(typeof document === "undefined" ? null : document.activeElement as HTMLElement);
 
   useEffect(() => {
     const d = ref.current;
-    // Who to hand focus back to. showModal() restores focus on close(), but
-    // this box closes by being unmounted -- the node is gone before the UA
-    // ever sees a close -- so the restore is done here instead.
-    const opener = document.activeElement as HTMLElement | null;
     if (d && !d.open) d.showModal();
-    return () => opener?.focus?.();
+    return () => { d?.close(); opener.current?.focus(); };
   }, []);
 
   return (

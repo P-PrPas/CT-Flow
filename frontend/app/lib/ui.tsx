@@ -10,6 +10,10 @@ import type { ReactElement, ReactNode } from "react";
 // ---------------------------------------------------------------- icons
 
 const PATHS = {
+  download: "M12 3v12M7 10l5 5 5-5M4 17v4h16v-4",
+  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5",
+  moon: "M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13z",
+  logout: "M9 5H4v14h5M9 12h12M17 8l4 4-4 4",
   folder: "M3 7a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.82 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   image: "M3 5h18v14H3zM3 15l5-4 4 3 3-2 6 4",
   target: "M12 3v3M12 18v3M3 12h3M18 12h3M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z",
@@ -98,26 +102,46 @@ export function Tip({ text, children }: { text: ReactNode; children: ReactNode }
   const id = useId();
   const [hovered, setHovered] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [position, setPosition] = useState({ left: 12, top: 12 });
+  const place = (anchor: HTMLElement) => {
+    const rect = anchor.getBoundingClientRect();
+    const height = Math.min(anchor.querySelector<HTMLElement>(".tip-body")?.scrollHeight || 180, window.innerHeight - 24);
+    setPosition({
+      left: Math.max(12, Math.min(rect.left, window.innerWidth - 272)),
+      top: rect.bottom + height < window.innerHeight - 12 ? rect.bottom : Math.max(12, rect.top - height),
+    });
+    setHovered(true); setDismissed(false);
+  };
 
   useEffect(() => {
     if (!hovered || dismissed) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDismissed(true); };
+    const dismiss = (e: Event) => {
+      if (!(e.target instanceof Element && e.target.closest(".tip-body"))) setDismissed(true);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("scroll", dismiss, true);
+    window.addEventListener("resize", dismiss);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", dismiss, true);
+      window.removeEventListener("resize", dismiss);
+    };
   }, [hovered, dismissed]);
 
   return (
     <span
       className="tip"
-      onPointerEnter={() => { setHovered(true); setDismissed(false); }}
+      onPointerEnter={(e) => place(e.currentTarget)}
       onPointerLeave={() => { setHovered(false); setDismissed(false); }}
-      onFocus={() => setDismissed(false)}
+      onFocus={(e) => place(e.currentTarget)}
+      onBlur={() => setHovered(false)}
       onKeyDown={(e) => { if (e.key === "Escape") setDismissed(true); }}
     >
       {isValidElement(children)
         ? cloneElement(children as ReactElement<{ "aria-describedby"?: string }>, { "aria-describedby": id })
         : children}
-      <span className="tip-body" role="tooltip" id={id} hidden={dismissed}>{text}</span>
+      <span className="tip-body" role="tooltip" id={id} hidden={dismissed} style={{ ...position, maxHeight: `calc(100dvh - ${position.top + 12}px)` }}>{text}</span>
     </span>
   );
 }

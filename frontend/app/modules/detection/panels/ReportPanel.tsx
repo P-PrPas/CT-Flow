@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Modal from "../../../components/Modal";
 import EvalOverlay, { EVAL_LEGEND } from "../components/EvalOverlay";
 import { imgUrl } from "../api";
 import type { Session } from "../session";
@@ -40,7 +41,7 @@ export default function ReportPanel({ s }: { s: Session }) {
     <div className="col" style={{ gap: 14 }}>
       <div className="card">
         <div className="card-head">
-          <span className="card-title"><Icon name="chart" size={13} /> Overall</span>
+          <h2 className="card-title"><Icon name="chart" size={13} /> Overall</h2>
           <span className="xs muted">
             {r.images} test image{r.images === 1 ? "" : "s"} · {pct(r.iou)} overlap required · threshold {r.conf}
           </span>
@@ -78,7 +79,7 @@ export default function ReportPanel({ s }: { s: Session }) {
           </div>
 
           <div className="col" style={{ gap: 8 }}>
-            <span className="card-title">Per class</span>
+            <h3 className="card-title">Per class</h3>
             {Object.entries(r.per_class).map(([n, m]) => (
               <div key={n} className="col" style={{ gap: 5 }}>
                 <div className="row between xs">
@@ -117,7 +118,7 @@ export default function ReportPanel({ s }: { s: Session }) {
           <div className="row" style={{ gap: 4 }}>
             {([["all", `All ${r.per_image.length}`], ["errors", `With errors ${errorImages}`], ["clean", `Clean ${r.per_image.length - errorImages}`]] as [Filter, string][])
               .map(([k, label]) => (
-                <button key={k} className="step" aria-selected={filter === k} onClick={() => setFilter(k)}>
+                <button key={k} className="step" aria-pressed={filter === k} onClick={() => setFilter(k)}>
                   {label}
                 </button>
               ))}
@@ -156,28 +157,27 @@ export default function ReportPanel({ s }: { s: Session }) {
       </div>
 
       {s.zoomed && (
-        <div className="scrim" onClick={() => s.setZoomed(null)} style={{ cursor: "zoom-out" }}>
-          <div
-            className="col"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "min(94vw, 1400px)", maxHeight: "92vh", gap: 10, cursor: "default" }}
-          >
-            <div className="row between">
-              <span className="mono truncate">{s.zoomed.image}</span>
-              <button className="btn ghost icon" onClick={() => s.setZoomed(null)} aria-label="Close">
-                <Icon name="x" size={15} />
-              </button>
-            </div>
-            <div style={{ overflow: "auto" }}>
-              <EvalOverlay src={imgUrl(s.zoomed.image)} gt={s.zoomed.gt} pred={s.zoomed.pred} />
-            </div>
-            <span className="row xs" style={{ gap: 14 }}>
-              <span style={{ color: "var(--ok)" }}>{s.zoomed.tp} found</span>
-              <span style={{ color: "var(--warn)" }}>{s.zoomed.fp} false alarms</span>
-              <span style={{ color: "var(--bad)" }}>{s.zoomed.fn} missed</span>
-            </span>
+        <Modal
+          label={`${fileOf(s.zoomed.image)} — what the model got right and wrong`}
+          width={1400}
+          className="bare"
+          onClose={() => s.setZoomed(null)}
+        >
+          <div className="row between">
+            <span className="mono truncate">{s.zoomed.image}</span>
+            <button className="btn ghost icon" onClick={() => s.setZoomed(null)} aria-label="Close">
+              <Icon name="x" size={15} />
+            </button>
           </div>
-        </div>
+          <div style={{ overflow: "auto" }}>
+            <EvalOverlay src={imgUrl(s.zoomed.image)} gt={s.zoomed.gt} pred={s.zoomed.pred} />
+          </div>
+          <span className="row xs" style={{ gap: 14 }}>
+            <span style={{ color: "var(--ok)" }}>{s.zoomed.tp} found</span>
+            <span style={{ color: "var(--warn)" }}>{s.zoomed.fp} false alarms</span>
+            <span style={{ color: "var(--bad)" }}>{s.zoomed.fn} missed</span>
+          </span>
+        </Modal>
       )}
     </div>
   );

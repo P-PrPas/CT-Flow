@@ -40,7 +40,7 @@ export default function ModelPicker({ s, label = true }: { s: Session; label?: b
       {label && (
         <label className="row xs muted" style={{ gap: 6, fontWeight: 500 }}>
           Model
-          <HelpDot text="Bigger sizes are slower but generally more accurate. Locked the moment the first box is saved -- use “Switch model…” to change it in place, or start a new output folder to keep both around. The dot shows whether the weight is already on the server (green) or has to be fetched on first use (red)." />
+          <HelpDot text="Bigger sizes are slower but generally more accurate. Locked the moment the first box is saved -- use “Switch model…” to change it in place, or start a new output folder to keep both around. Each option says whether the weight is already on the server or has to be fetched on first use." />
         </label>
       )}
       {lockedId ? (
@@ -74,7 +74,7 @@ export default function ModelPicker({ s, label = true }: { s: Session; label?: b
                   <optgroup key={family} label={family}>
                     {opts.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.available ? "🟢" : "🔴"} {m.size}{m.note ? ` — ${m.note}` : ""}
+                        {m.size}{m.note ? ` — ${m.note}` : ""} {m.available ? "(on the server)" : "(downloads on first use)"}
                       </option>
                     ))}
                   </optgroup>
@@ -91,9 +91,12 @@ export default function ModelPicker({ s, label = true }: { s: Session; label?: b
         </div>
       ) : (
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          {/* Decoration now that every option says it in words -- colour plus
+              a title on a span was the only carrier before, and a title on a
+              span is not something a screen reader reliably reads. */}
           <span
+            aria-hidden="true"
             className="dot"
-            title={current?.available ? "Weight already on the server" : "Not downloaded yet — first use will fetch it"}
             style={{ color: current?.available ? "var(--ok)" : "var(--bad)" }}
           />
           <select
@@ -105,7 +108,7 @@ export default function ModelPicker({ s, label = true }: { s: Session; label?: b
               <optgroup key={family} label={family}>
                 {opts.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.available ? "🟢" : "🔴"} {m.size}{m.note ? ` — ${m.note}` : ""}
+                    {m.size}{m.note ? ` — ${m.note}` : ""} {m.available ? "(on the server)" : "(downloads on first use)"}
                   </option>
                 ))}
               </optgroup>

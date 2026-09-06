@@ -12,8 +12,9 @@ import type { FormEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Confirm from "./components/Confirm";
 import DirPicker from "./components/DirPicker";
+import Modal from "./components/Modal";
 import * as api from "./lib/api";
-import { BrandMark, Empty, fileOf, Icon, Soon, Tip } from "./lib/ui";
+import { BrandMark, Empty, fileOf, Icon, Soon, Tip, useTitle } from "./lib/ui";
 
 /** Where a project of this type is labeled. One entry today; a second module
  *  adds a branch here and a folder, and every card above keeps working. */
@@ -21,6 +22,7 @@ const workspaceHref = (p: api.Project) => `/p/${p.id}`;
 
 export default function Home() {
   const router = useRouter();
+  useTitle("Projects");
   const [auth, setAuth] = useState<api.AuthState | null>(null);
   const [projects, setProjects] = useState<api.Project[] | null>(null);
   const [error, setError] = useState("");
@@ -87,7 +89,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="col" style={{ gap: 18, padding: "18px var(--s5) var(--s6)", maxWidth: 1200, margin: "0 auto" }}>
+      <main id="main" className="col" style={{ gap: 18, padding: "18px var(--s5) var(--s6)", maxWidth: 1200, margin: "0 auto" }}>
         <div className="row between wrap" style={{ gap: 12 }}>
           <div className="col" style={{ gap: 2 }}>
             <h1 style={{ margin: 0, fontSize: 19 }}>Projects</h1>
@@ -213,8 +215,12 @@ function ProjectCard({
         <div className="row between" style={{ gap: 8, alignItems: "flex-start" }}>
           {renaming ? (
             <form onSubmit={rename} className="row grow" style={{ gap: 6 }}>
+              {/* Blur saves, so Escape has to be the way out -- otherwise a
+                  rename you have changed your mind about has no cancel. */}
               <input className="grow" autoFocus value={name} aria-label="Project name"
-                onChange={(e) => setName(e.target.value)} onBlur={rename} />
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { setName(p.name); setRenaming(false); } }}
+                onBlur={rename} />
             </form>
           ) : (
             <button className="link-title" onClick={() => router.push(workspaceHref(p))}>{p.name}</button>
@@ -323,15 +329,10 @@ function CreateDialog({
   }
 
   return (
-    <div className="scrim" onClick={onClose}>
-      <form
-        className="modal"
-        style={{ maxWidth: 520 }}
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={submit}
-      >
+    <Modal label="New project" width={520} onClose={onClose}>
+      <form onSubmit={submit} className="col" style={{ gap: 0, flex: 1, minHeight: 0 }}>
         <div className="modal-head">
-          <span className="card-title"><Icon name="plus" size={13} /> New project</span>
+          <h2 className="card-title"><Icon name="plus" size={13} /> New project</h2>
         </div>
 
         <div className="modal-body col" style={{ gap: 14 }}>
@@ -341,16 +342,20 @@ function CreateDialog({
               onChange={(e) => setName(e.target.value)} />
           </label>
 
+          {/* A real <label>, like the Name field above it. This one only ever
+              had a placeholder for a name, and a placeholder leaves the moment
+              you type -- on the field the whole project hangs off. */}
           <div className="col" style={{ gap: 6 }}>
-            <span className="xs muted">Image folder on the server</span>
+            <label className="xs muted" htmlFor="project-dir">Image folder on the server</label>
             <div className="row" style={{ gap: 6 }}>
-              <input className="grow input-mono" value={dir} required spellCheck={false}
+              <input id="project-dir" aria-describedby="project-dir-help"
+                className="grow input-mono" value={dir} required spellCheck={false}
                 placeholder="folder of images to label" onChange={(e) => setDir(e.target.value)} />
               <button type="button" className="btn" onClick={() => setPicking(true)}>
                 <Icon name="folder" size={14} /> Browse
               </button>
             </div>
-            <span className="xs faint">
+            <span className="xs faint" id="project-dir-help">
               Labels, the taught examples and the held-out test set are all managed for
               you — in the database and a hidden <code>.ctflow</code> folder in here.
             </span>
@@ -392,7 +397,7 @@ function CreateDialog({
           </div>
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 

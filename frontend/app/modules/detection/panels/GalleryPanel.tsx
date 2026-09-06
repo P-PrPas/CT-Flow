@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getPool, thumbUrl, type PoolItem } from "../api";
 import type { Session } from "../session";
-import { Empty, fileOf, Icon } from "../../../lib/ui";
+import { Empty, fileOf, Icon, type IconName } from "../../../lib/ui";
 
 const PAGE = 200;
 
@@ -27,11 +27,15 @@ const CHIPS: { key: Filter; label: string }[] = [
   { key: "unlabeled", label: "Unlabeled" },
 ];
 
-const DOT: Record<PoolItem["status"], string> = {
-  labeled: "var(--ok)",
-  auto: "var(--brand)",
-  test: "var(--info)",
-  unlabeled: "var(--line)",
+/** 1.4.1 -- a coloured dot was the only per-cell carrier of status, and the
+ *  grey one sat at 1.55:1 against the cell it was drawn on. Each status now
+ *  has a shape as well as a colour, and says its name in the cell's accessible
+ *  name, so neither colour vision nor the legend is load-bearing. */
+const MARK: Record<PoolItem["status"], { color: string; icon: IconName | null; says: string }> = {
+  labeled: { color: "var(--ok)", icon: "check", says: "labeled by hand" },
+  auto: { color: "var(--brand)", icon: "bot", says: "labeled by the model" },
+  test: { color: "var(--info)", icon: "target", says: "in the test set" },
+  unlabeled: { color: "var(--faint)", icon: null, says: "not labeled" },
 };
 
 export default function GalleryPanel({ s }: { s: Session }) {
@@ -108,6 +112,7 @@ export default function GalleryPanel({ s }: { s: Session }) {
             <button
               key={c.key}
               className={filter === c.key ? "btn sm primary" : "btn sm"}
+              aria-pressed={filter === c.key}
               onClick={() => setFilter(c.key)}
             >
               {c.label}
@@ -119,13 +124,20 @@ export default function GalleryPanel({ s }: { s: Session }) {
             </button>
           ))}
         </div>
-        <span className="xs faint row" style={{ gap: 5 }}>
-          <Icon name="user" size={12} /> green = by hand · cyan = by model · blue = test set · grey = not labeled
-        </span>
+        <div className="row wrap xs faint" style={{ gap: 12 }}>
+          {(Object.keys(MARK) as PoolItem["status"][]).map((k) => (
+            <span key={k} className="row" style={{ gap: 5 }}>
+              <span className="gallery-mark" style={{ color: MARK[k].color, position: "static" }}>
+                {MARK[k].icon && <Icon name={MARK[k].icon!} size={10} />}
+              </span>
+              {MARK[k].says}
+            </span>
+          ))}
+        </div>
       </div>
 
       {error && (
-        <div className="note bad"><Icon name="alert" size={14} /><span>{error}</span></div>
+        <div className="note bad" role="alert"><Icon name="alert" size={14} /><span>{error}</span></div>
       )}
 
       {!error && !loading && items.length === 0 ? (
@@ -142,10 +154,13 @@ export default function GalleryPanel({ s }: { s: Session }) {
               className="gallery-cell"
               onClick={() => open(it.path)}
               title={fileOf(it.path)}
+              aria-label={`${fileOf(it.path)} — ${MARK[it.status].says}${it.held_by ? `, ${it.held_by} is on it` : ""}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={thumbUrl(it.path, 200)} alt="" loading="lazy" width={150} height={112} />
-              <span className="gallery-dot" style={{ background: DOT[it.status] }} />
+              <span className="gallery-mark" aria-hidden="true" style={{ color: MARK[it.status].color }}>
+                {MARK[it.status].icon && <Icon name={MARK[it.status].icon!} size={10} />}
+              </span>
               {it.held_by && (
                 <span className="gallery-held">
                   <Icon name="user" size={10} /> {it.held_by}

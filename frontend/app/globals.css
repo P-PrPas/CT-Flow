@@ -18,13 +18,18 @@
   --surface: #111a2c;
   --surface-2: #16213a;
   --surface-3: #1d2b47;
-  --line: #223351;
-  --line-soft: #1a2540;
+  /* Two boundary tokens, not one. 1.4.11 wants 3:1 on anything that
+     identifies a control and nothing at all on a decorative divider, so the
+     old single --line was doing both jobs at 1.3:1 and failing the first.
+     --line measures >=3.2:1 on every chrome surface defined above. */
+  --line: #6079a4;       /* buttons, inputs, checkboxes, swatches, chart axes */
+  --line-hover: #8aa0c6;
+  --line-soft: #223351;  /* dividers, card edges, container outlines */
 
   /* type */
   --text: #e9eef7;
   --muted: #90a2c0;
-  --faint: #7b8db3; /* 5.2:1 on --surface -- hints are still text, they have to be readable */
+  --faint: #8a9cc0; /* 5.1:1 on --surface-3, the brightest thing it lands on */
 
   /* semantic */
   --ok: #34d399;
@@ -64,9 +69,12 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 400 13.5px/1.55 var(--sans);
+  font: 400 14px/1.55 var(--sans);
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  /* ponytail: clip, not hidden -- hidden makes <body> a scroll container and
+     breaks position:sticky on .appbar. Both still mask a reflow bug, so the
+     only thing that keeps 1.4.10 honest is checking 320px by hand. */
+  overflow-x: clip;
 }
 
 /* The ambient teal glow from the marketing site, pinned behind the app. */
@@ -99,6 +107,36 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -.01em; margin: 0; }
 }
 *::-webkit-scrollbar-thumb:hover { background: #2b3d63; background-clip: content-box; }
 
+/* ---------------------------------------------------------------- a11y utils */
+/* Visible to a screen reader, not to a monitor. Used for the headings the
+   layout has no room to show and for the canvas's live region. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 2.4.1 -- the app bar repeats on every page; this is the way past it. */
+.skip {
+  position: fixed;
+  top: var(--s3);
+  left: var(--s3);
+  z-index: 100;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  background: var(--brand);
+  color: var(--brand-ink);
+  font: 600 13px/1 var(--sans);
+  text-decoration: none;
+  transform: translateY(calc(-100% - var(--s5)));
+  transition: transform var(--fast);
+}
+.skip:focus-visible { transform: none; }
+
 /* ---------------------------------------------------------------- focus */
 :focus-visible {
   outline: 2px solid var(--brand);
@@ -123,7 +161,7 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -.01em; margin: 0; }
   white-space: nowrap;
   transition: background var(--fast), border-color var(--fast), color var(--fast), transform var(--fast);
 }
-.btn:hover:not(:disabled) { background: var(--surface-3); border-color: #2f4570; }
+.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--line-hover); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: .38; cursor: not-allowed; }
 
@@ -135,7 +173,7 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -.01em; margin: 0; }
 }
 .btn.primary:hover:not(:disabled) { background: var(--brand-hi); border-color: var(--brand-hi); }
 /* A disabled CTA must not still read as the thing to click. */
-.btn.primary:disabled { background: var(--surface-2); border-color: var(--line); color: var(--muted); opacity: .7; }
+.btn.primary:disabled { background: var(--surface-2); border-color: var(--line-soft); color: var(--muted); opacity: .7; }
 
 .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 .btn.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
@@ -162,7 +200,7 @@ input[type="text"], input[type="password"], input[type="number"], input:not([typ
   min-height: 34px;
   transition: border-color var(--fast), box-shadow var(--fast);
 }
-input:hover:not(:disabled), select:hover:not(:disabled) { border-color: #2f4570; }
+input:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--line-hover); }
 input:focus, select:focus {
   outline: none;
   border-color: var(--brand);
@@ -178,10 +216,19 @@ input[type="checkbox"] {
   border-radius: 4px;
   background: var(--bg-deep);
   cursor: pointer;
+  position: relative;
   display: grid;
   place-content: center;
   padding: 0;
   flex: none;
+}
+/* 2.5.8 -- 16px is the tick people see, 24px is the target they hit. The
+   pseudo-element is absolutely positioned, so it never becomes a grid item
+   competing with the checkmark. */
+input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
 }
 input[type="checkbox"]:checked { background: var(--brand); border-color: var(--brand); }
 input[type="checkbox"]:checked::after {
@@ -248,7 +295,7 @@ label.check:hover { color: var(--text); }
   display: flex;
   align-items: center;
   gap: 7px;
-  font: 600 11.5px/1 var(--sans);
+  font: 600 12px/1.3 var(--sans);
   letter-spacing: .09em;
   text-transform: uppercase;
   color: var(--muted);
@@ -272,7 +319,7 @@ label.check:hover { color: var(--text); }
    box -- "someone else is on this one" under a queue entry. */
 .warn { color: var(--warn); }
 .mono { font-family: var(--mono); font-size: 12px; }
-.xs { font-size: 11.5px; }
+.xs { font-size: 12px; }
 .sm { font-size: 12.5px; }
 .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -289,9 +336,9 @@ label.check:hover { color: var(--text); }
   display: flex;
   align-items: center;
   gap: var(--s3);
-  height: 56px;
+  min-height: 56px;
   padding: 0 var(--s2) 0 var(--s4);
-  border: 1px solid #262a35;
+  border: 1px solid var(--line-soft);
   border-radius: var(--r-pill);
   background: rgba(6, 10, 20, .82);
   backdrop-filter: blur(14px);
@@ -309,7 +356,7 @@ label.check:hover { color: var(--text); }
   border: 1px solid rgba(8, 217, 214, .3);
 }
 .brand-name { font: 600 14px/1 var(--sans); letter-spacing: -.01em; }
-.brand-sub { font: 500 10.5px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--brand); }
+.brand-sub { font: 500 11px/1.3 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--brand); }
 
 /* ================================================================ steps nav */
 .steps { display: flex; align-items: center; gap: var(--s1); flex-wrap: wrap; }
@@ -317,8 +364,8 @@ label.check:hover { color: var(--text); }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 34px;
-  padding: 0 13px;
+  min-height: 34px;
+  padding: 5px 13px;
   border-radius: var(--r-pill);
   border: 1px solid transparent;
   background: transparent;
@@ -328,41 +375,44 @@ label.check:hover { color: var(--text); }
   transition: color var(--fast), background var(--fast), border-color var(--fast);
 }
 .step:hover:not(:disabled) { color: var(--text); background: rgba(255, 255, 255, .04); }
-.step[aria-selected="true"] {
+/* Also matches aria-current, so the same styling survives the tablist ->
+   nav change without a second rule. */
+.step[aria-selected="true"], .step[aria-current], .step[aria-pressed="true"] {
   color: var(--brand);
   background: rgba(8, 217, 214, .1);
-  border-color: rgba(8, 217, 214, .38);
+  border-color: var(--brand);
 }
 .step:disabled { opacity: .35; cursor: not-allowed; }
 .step-idx {
   display: grid; place-items: center;
-  width: 18px; height: 18px;
-  border-radius: 50%;
-  font: 600 10.5px/1 var(--mono);
+  min-width: 20px; min-height: 20px;
+  padding: 2px;
+  border-radius: var(--r-pill);
+  font: 600 11px/1.3 var(--mono);
   background: rgba(255, 255, 255, .07);
   color: inherit;
 }
-.step[aria-selected="true"] .step-idx { background: var(--brand); color: var(--brand-ink); }
+.step[aria-selected="true"] .step-idx, .step[aria-current] .step-idx { background: var(--brand); color: var(--brand-ink); }
 
 /* ================================================================ chips / badges */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  padding: 0 10px;
+  min-height: 26px;
+  padding: 3px 10px;
   border-radius: var(--r-pill);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   background: var(--surface-2);
   color: var(--muted);
-  font: 500 11.5px/1 var(--sans);
+  font: 500 12px/1.35 var(--sans);
   white-space: nowrap;
 }
 .chip.brand { border-color: rgba(8, 217, 214, .35); background: rgba(8, 217, 214, .1); color: var(--brand); }
 .chip.ok { border-color: rgba(52, 211, 153, .35); background: rgba(52, 211, 153, .1); color: var(--ok); }
 .chip.warn { border-color: rgba(251, 191, 36, .35); background: rgba(251, 191, 36, .1); color: var(--warn); }
 .chip.bad { border-color: rgba(251, 113, 133, .35); background: rgba(251, 113, 133, .1); color: var(--bad); }
-.chip.btn-like { cursor: pointer; transition: border-color var(--fast), color var(--fast); }
+.chip.btn-like { cursor: pointer; border-color: var(--line); transition: border-color var(--fast), color var(--fast); }
 .chip.btn-like:hover { border-color: var(--brand); color: var(--brand); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: currentColor; }
@@ -374,8 +424,8 @@ label.check:hover { color: var(--text); }
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  height: 28px;
-  padding: 0 10px 0 8px;
+  min-height: 28px;
+  padding: 4px 10px 4px 8px;
   border-radius: var(--r-sm);
   border: 1px solid var(--line);
   background: var(--surface-2);
@@ -385,14 +435,35 @@ label.check:hover { color: var(--text); }
   transition: border-color var(--fast), background var(--fast);
 }
 .swatch:hover { background: var(--surface-3); }
-.swatch[aria-pressed="true"] { border-color: currentColor; background: rgba(255, 255, 255, .06); }
+/* The selected class has to be identifiable, so the indicator is the class's
+   own colour at full strength plus a doubled edge -- not a 1.06:1 white wash. */
+.swatch[aria-pressed="true"] {
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 1px currentColor;
+  background: rgba(255, 255, 255, .1);
+}
 .swatch .key {
-  font: 600 10px/1 var(--mono);
+  font: 600 11px/1.3 var(--mono);
   color: var(--faint);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: 3px;
   padding: 2px 4px;
 }
+
+/* ---------------------------------------------------- class colour picker */
+.palette { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 26px, so the target clears 2.5.8 without the swatch becoming a button. */
+.palette button {
+  width: 26px; height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--brand-ink);
+  cursor: pointer;
+}
+.palette button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--brand); }
 
 /* ================================================================ kbd */
 kbd {
@@ -400,11 +471,11 @@ kbd {
   min-width: 20px;
   padding: 2px 6px;
   border-radius: 5px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-bottom-width: 2px;
   background: var(--surface-2);
   color: var(--text);
-  font: 600 11px/1.3 var(--mono);
+  font: 600 12px/1.3 var(--mono);
   text-align: center;
 }
 
@@ -414,6 +485,7 @@ kbd {
   width: 100%;
   border-radius: var(--r-pill);
   background: var(--bg-deep);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
   overflow: hidden;
   display: flex;
 }
@@ -437,20 +509,28 @@ kbd {
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 
 /* ================================================================ list rows */
+/* A row is a <button>, not a clickable div -- these are the only way into an
+   image or a folder, so they have to be reachable by Tab. The declarations
+   after `cursor` are the button reset that makes one look like a row. */
 .thumb-row {
   display: flex;
   align-items: center;
   gap: var(--s2);
+  width: 100%;
   padding: 5px 7px;
   border-radius: var(--r-sm);
   border: 1px solid transparent;
   cursor: pointer;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   transition: background var(--fast), border-color var(--fast);
 }
 .thumb-row:hover { background: rgba(255, 255, 255, .04); }
 .thumb-row[aria-current="true"] {
-  background: rgba(8, 217, 214, .12);
-  border-color: rgba(8, 217, 214, .35);
+  background: rgba(8, 217, 214, .14);
+  border-color: var(--brand);
 }
 .thumb {
   width: 52px; height: 38px;
@@ -495,18 +575,23 @@ kbd {
   object-fit: cover;
   background: var(--bg-deep);
 }
-.gallery-dot {
-  position: absolute; top: 6px; left: 6px;
-  width: 9px; height: 9px;
+/* A shape, not just a colour (1.4.1). The empty ring is "not labeled" -- the
+   one status with nothing in it, which is the point. */
+.gallery-mark {
+  position: absolute; top: 5px; left: 5px;
+  display: grid;
+  place-items: center;
+  width: 17px; height: 17px;
   border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, .45);
+  border: 1.5px solid currentColor;
+  background: rgba(3, 6, 13, .82);
 }
 .gallery-held {
   position: absolute; top: 4px; right: 4px;
   display: flex; align-items: center; gap: 3px;
-  padding: 1px 5px;
+  padding: 2px 6px;
   border-radius: var(--r-pill);
-  font-size: 10px;
+  font-size: 11px;
   background: rgba(0, 0, 0, .6);
   color: #fff;
 }
@@ -514,7 +599,7 @@ kbd {
   display: block;
   padding: 4px 6px;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   color: var(--muted);
   border-top: 1px solid var(--line-soft);
@@ -529,10 +614,13 @@ kbd {
   transform: translateX(-50%) translateY(4px);
   z-index: 60;
   width: max-content;
-  max-width: 260px;
+  /* Clamped to the viewport as well as to 260px: an anchor near the right
+     edge used to push the tooltip past it, which is what overflow-x was
+     quietly hiding. */
+  max-width: min(260px, calc(100vw - 24px));
   padding: 8px 10px;
   border-radius: var(--r);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   background: #0a1020;
   color: var(--text);
   font: 400 12px/1.5 var(--sans);
@@ -547,10 +635,19 @@ kbd {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
-.tip-anchor {
-  border-bottom: 1px dashed var(--faint);
+/* Both anchors are buttons so a keyboard can open the explanation; these
+   strip the button back to the text it is wrapping. */
+.tip-anchor, .tip-dot {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
   cursor: help;
 }
+.tip-anchor { border-bottom: 1px dashed var(--faint); }
+.tip-dot { display: inline-flex; color: var(--faint); }
+.tip-dot:hover { color: var(--brand); }
 
 /* ================================================================ callouts */
 .note {
@@ -593,7 +690,7 @@ kbd {
   gap: 3px;
 }
 .metric-k {
-  font: 500 10.5px/1 var(--sans);
+  font: 500 11px/1.3 var(--sans);
   letter-spacing: .08em;
   text-transform: uppercase;
   color: var(--faint);
@@ -601,28 +698,38 @@ kbd {
 .metric-v { font: 600 19px/1.15 var(--sans); font-variant-numeric: tabular-nums; }
 
 /* ================================================================ overlay / modal */
-.scrim {
+/* Every overlay is a real <dialog> opened with showModal() -- see
+   components/Modal.tsx. The UA gives us the focus trap, Escape, the top layer
+   and an inert page behind; all that is left here is the look. */
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+dialog.modal {
   position: fixed;
   inset: 0;
-  z-index: 50;
-  background: rgba(3, 6, 13, .78);
-  backdrop-filter: blur(3px);
-  display: grid;
-  place-items: center;
-  padding: var(--s5);
-  animation: fade var(--fast) both;
-}
-@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-.modal {
-  width: 100%;
+  margin: auto;
+  width: calc(100% - 2 * var(--s5));
+  padding: 0;
   background: var(--surface);
-  border: 1px solid var(--line);
+  color: var(--text);
+  border: 1px solid var(--line-soft);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-3);
   display: flex;
   flex-direction: column;
   max-height: 86vh;
   animation: rise var(--med) both;
+}
+dialog.modal::backdrop {
+  background: rgba(3, 6, 13, .78);
+  backdrop-filter: blur(3px);
+  animation: fade var(--fast) both;
+}
+/* An overlay that is just a big image wants no panel around it. */
+dialog.modal.bare {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  max-height: 92vh;
+  gap: 10px;
 }
 @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.99); } to { opacity: 1; transform: none; } }
 .modal-head {
@@ -666,11 +773,11 @@ kbd {
 .soon > .soon-inner { opacity: .5; pointer-events: none; filter: saturate(.5); }
 .tag-soon {
   display: inline-flex; align-items: center; gap: 4px;
-  height: 19px; padding: 0 7px;
+  min-height: 19px; padding: 2px 7px;
   border-radius: var(--r-pill);
   border: 1px dashed rgba(8, 217, 214, .45);
   color: var(--brand);
-  font: 600 9.5px/1 var(--sans);
+  font: 600 11px/1.3 var(--sans);
   letter-spacing: .08em;
   text-transform: uppercase;
 }
@@ -701,12 +808,20 @@ kbd {
     var(--bg-deep);
   border: 1px solid var(--line-soft);
 }
+/* The canvas is a control, so its own edge has to be findable (1.4.11) and its
+   focus has to be obvious -- it is the one place in the app where the focus
+   ring is the difference between "typing does nothing" and "typing draws". */
+.canvas-wrap:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 .box-label {
   position: absolute;
   left: -1px;
   padding: 1px 5px;
   border-radius: 4px;
-  font: 600 10.5px/1.5 var(--sans);
+  font: 600 11px/1.5 var(--sans);
   white-space: nowrap;
   pointer-events: none;
 }
@@ -741,7 +856,7 @@ kbd {
   gap: var(--s3);
 }
 .project-card { transition: border-color var(--fast); }
-.project-card:hover { border-color: var(--line-strong, var(--brand)); }
+.project-card:hover { border-color: var(--brand); }
 /* The project name is the primary way into a project, so it is a real button
    for keyboard and screen readers while looking like the heading it is. */
 .link-title {

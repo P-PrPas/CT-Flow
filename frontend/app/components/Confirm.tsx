@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import Modal from "./Modal";
 import { Icon, type IconName } from "../lib/ui";
 
 /** An in-app confirm, not window.confirm: it can carry the numbers that make
@@ -17,36 +17,30 @@ export default function Confirm({
   onConfirm: () => void;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="scrim" onClick={onClose} role="alertdialog" aria-modal="true" aria-label={title}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 470 }}>
-        <div className="modal-head">
-          <strong className="row" style={{ gap: 8, fontSize: 14 }}>
-            <span style={{ color: `var(--${tone === "info" ? "brand" : tone})` }}>
-              <Icon name={icon} size={16} />
-            </span>
-            {title}
-          </strong>
-        </div>
-        <div className="modal-body col" style={{ gap: 12 }}>{body}</div>
-        <div className="modal-foot">
-          <button className="btn" onClick={onClose}>Cancel</button>
-          <button
-            className={tone === "info" ? "btn primary" : "btn"}
-            style={tone !== "info" ? { borderColor: `var(--${tone})`, color: `var(--${tone})` } : undefined}
-            onClick={() => { onConfirm(); onClose(); }}
-            autoFocus
-          >
-            {confirmLabel}
-          </button>
-        </div>
+    <Modal label={title} role="alertdialog" width={470} onClose={onClose}>
+      <div className="modal-head">
+        <h2 className="row" style={{ gap: 8, fontSize: 14 }}>
+          <span style={{ color: `var(--${tone === "info" ? "brand" : tone})` }}>
+            <Icon name={icon} size={16} />
+          </span>
+          {title}
+        </h2>
       </div>
-    </div>
+      <div className="modal-body col" style={{ gap: 12 }}>{body}</div>
+      <div className="modal-foot">
+        {/* Cancel takes the initial focus by being first in the box. The
+            confirm button used to claim it with autoFocus, which put a
+            destructive default under whatever key was pressed next. */}
+        <button className="btn" onClick={onClose}>Cancel</button>
+        <button
+          className={tone === "info" ? "btn primary" : "btn"}
+          style={tone !== "info" ? { borderColor: `var(--${tone})`, color: `var(--${tone})` } : undefined}
+          onClick={() => { onConfirm(); onClose(); }}
+        >
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
   );
 }

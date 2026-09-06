@@ -15,6 +15,10 @@ __pycache__/
 # Web
 frontend/node_modules/
 frontend/.next/
+# tsc --incremental's cache. Machine-local build output with no review
+# value, and it was tracked -- so every branch that ran a type-check
+# carried a one-line diff of it.
+frontend/tsconfig.tsbuildinfo
 
 # Media / large assets
 *.mp4

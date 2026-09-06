@@ -3,6 +3,7 @@
 import { useState } from "react";
 import BoxCanvas from "../components/BoxCanvas";
 import Confirm from "../../../components/Confirm";
+import LabelsDialog from "../components/LabelsDialog";
 import ModelPicker from "../components/ModelPicker";
 import { imgUrl } from "../api";
 import { VERDICT_STYLE } from "../history";
@@ -17,6 +18,13 @@ const QUEUE_CAP = 60;
 
 export default function PoolPanel({ s }: { s: Session }) {
   const [confirmAuto, setConfirmAuto] = useState(false);
+  const [editingLabels, setEditingLabels] = useState(false);
+
+  /** Relabelling an image teaches the model nothing, so a name the bank has
+   *  never seen would have no prompt behind it -- review offers only what is
+   *  already taught. This used to fall out of classNames being the bank's list;
+   *  now that it also carries planned names, it has to be said. */
+  const swatchNames = s.isReview ? s.bankNames : s.classNames;
 
   const f1 = s.evalResult?.overall.f1 ?? null;
   const notReady = f1 !== null && f1 < READY_F1;
@@ -72,7 +80,7 @@ export default function PoolPanel({ s }: { s: Session }) {
           <div className="card-head" style={{ flexWrap: "wrap", rowGap: 8 }}>
             <div className="row wrap" style={{ gap: 6 }}>
               {/* FR-21 — the class sticks between boxes and images; keys 1-9 switch it. */}
-              {s.classNames.map((n, i) => (
+              {swatchNames.map((n, i) => (
                 <button
                   key={n}
                   className="swatch"
@@ -86,7 +94,11 @@ export default function PoolPanel({ s }: { s: Session }) {
                   {i < 9 && <span className="key">{i + 1}</span>}
                 </button>
               ))}
-              {!s.isReview && (
+              {/* Naming a class in a 128px box mid-draw is a bad moment to be
+                  deciding what the classes are, and on a new project it was the
+                  only moment there was. The input stays for speed; the dialog is
+                  where the list is actually set up. */}
+              {!s.isReview && s.classNames.length > 0 && (
                 <input
                   value={s.cls}
                   onChange={(e) => s.setCls(e.target.value)}
@@ -94,6 +106,16 @@ export default function PoolPanel({ s }: { s: Session }) {
                   aria-label="Class for the next box"
                   style={{ width: 128, height: 28, minHeight: 28, fontSize: 12.5 }}
                 />
+              )}
+              {!s.isReview && (
+                <button
+                  type="button"
+                  className={s.classNames.length ? "btn sm" : "btn sm primary"}
+                  onClick={() => setEditingLabels(true)}
+                >
+                  <Icon name="sliders" size={13} />
+                  {s.classNames.length ? "Labels" : "Set up labels"}
+                </button>
               )}
             </div>
 
@@ -168,6 +190,7 @@ export default function PoolPanel({ s }: { s: Session }) {
 
                 <BoxCanvas
                   src={imgUrl(s.current)}
+                  label={fileOf(s.current)}
                   boxes={s.pool.boxes}
                   draftBoxes={s.drafts}
                   onRemoveDraft={(i) => s.setDrafts((cur) => cur.filter((_, idx) => idx !== i))}
@@ -176,7 +199,7 @@ export default function PoolPanel({ s }: { s: Session }) {
                   onSelect={s.setSelected}
                   onAdd={(b) => {
                     const cls = s.isReview
-                      ? (s.classNames.includes(s.cls) ? s.cls : s.classNames[0] ?? "item")
+                      ? (s.bankNames.includes(s.cls) ? s.cls : s.bankNames[0] ?? "item")
                       : (s.cls || "item");
                     s.pool.set((cur) => [...cur, { cls, box: b }]);
                   }}
@@ -285,7 +308,7 @@ export default function PoolPanel({ s }: { s: Session }) {
         {/* FR-23 — progress is permanently on screen, not buried in a status line. */}
         <div className="card">
           <div className="card-head">
-            <span className="card-title"><Icon name="flag" size={13} /> Progress</span>
+            <h2 className="card-title"><Icon name="flag" size={13} /> Progress</h2>
             <span className="xs muted num">{doneCount}/{s.images.length || 0}</span>
           </div>
           <div className="card-body col tight" style={{ gap: 10 }}>
@@ -327,7 +350,7 @@ export default function PoolPanel({ s }: { s: Session }) {
             once the bank has locked a model (see ModelPicker). */}
         <div className="card">
           <div className="card-head">
-            <span className="card-title"><Icon name="brain" size={13} /> Model</span>
+            <h2 className="card-title"><Icon name="brain" size={13} /> Model</h2>
             <HelpDot text="Bigger sizes are slower but generally more accurate. Fixed the moment the first box is saved into an output folder — start a new one to try a different model. The dot shows whether the weight is already on the server (green) or has to be fetched on first use (red)." />
           </div>
           <div className="card-body">
@@ -357,12 +380,12 @@ export default function PoolPanel({ s }: { s: Session }) {
         {/* prompt bank + per-class verdict */}
         <div className="card">
           <div className="card-head">
-            <span className="card-title">
+            <h2 className="card-title">
               <Icon name="brain" size={13} />
               <Term explain="Every box you save is turned into a visual example the model compares new images against. More varied examples, better matching.">
                 {s.simple ? "Taught examples" : "Prompt bank"}
               </Term>
-            </span>
+            </h2>
             <span className="xs muted num">{s.bankTotal}</span>
           </div>
           <div className="card-body col tight" style={{ gap: 8 }}>
@@ -394,7 +417,7 @@ export default function PoolPanel({ s }: { s: Session }) {
         {/* readiness */}
         <div className="card">
           <div className="card-head">
-            <span className="card-title"><Icon name="gauge" size={13} /> Readiness</span>
+            <h2 className="card-title"><Icon name="gauge" size={13} /> Readiness</h2>
             <HelpDot text="Both of these run the model over every image, so they only run when you ask." />
           </div>
           <div className="card-body col tight" style={{ gap: 12 }}>
@@ -484,7 +507,7 @@ export default function PoolPanel({ s }: { s: Session }) {
         {/* queue */}
         <div className="card flush">
           <div className="card-head">
-            <span className="card-title"><Icon name="layers" size={13} /> Queue</span>
+            <h2 className="card-title"><Icon name="layers" size={13} /> Queue</h2>
             <span className="xs faint">least confident first</span>
           </div>
           <div className="card-body tight" style={{ paddingTop: 8, paddingBottom: 8 }}>
@@ -504,10 +527,11 @@ export default function PoolPanel({ s }: { s: Session }) {
           </div>
           <div style={{ maxHeight: "46vh", overflow: "auto", padding: "0 8px 8px" }}>
             {s.sortedPool.slice(0, QUEUE_CAP).map((p) => (
-              <div
+              <button
+                type="button"
                 key={p}
                 className="thumb-row"
-                aria-current={p === s.current}
+                aria-current={p === s.current ? "true" : undefined}
                 onClick={() => s.goToImage(p)}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -528,7 +552,7 @@ export default function PoolPanel({ s }: { s: Session }) {
                     </div>
                   )}
                 </div>
-              </div>
+              </button>
             ))}
             {!s.images.length && (
               <div className="xs muted" style={{ padding: 10 }}>
@@ -547,6 +571,8 @@ export default function PoolPanel({ s }: { s: Session }) {
           </div>
         </div>
       </div>
+
+      {editingLabels && <LabelsDialog s={s} onClose={() => setEditingLabels(false)} />}
 
       {/* FR-27 */}
       {confirmAuto && s.evalResult && (

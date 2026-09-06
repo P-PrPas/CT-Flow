@@ -77,6 +77,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
 
                 <BoxCanvas
                   src={imgUrl(s.tsCurrent)}
+                  label={fileOf(s.tsCurrent)}
                   boxes={s.ts.boxes}
                   savedBoxes={s.tsSavedBoxes}
                   color={s.tsColor}
@@ -141,7 +142,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
       <div className="col" style={{ gap: 14 }}>
         <div className="card">
           <div className="card-head">
-            <span className="card-title"><Icon name="flag" size={13} /> Answer key progress</span>
+            <h2 className="card-title"><Icon name="flag" size={13} /> Answer key progress</h2>
             <span className="xs muted num">{done}/{total || 0}</span>
           </div>
           <div className="card-body tight col" style={{ gap: 8 }}>
@@ -160,7 +161,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
 
         <div className="card">
           <div className="card-head">
-            <span className="card-title"><Icon name="copy" size={13} /> Bring in from the pool</span>
+            <h2 className="card-title"><Icon name="copy" size={13} /> Bring in from the pool</h2>
           </div>
           <div className="card-body tight col" style={{ gap: 10 }}>
             {!s.images.length ? (
@@ -214,7 +215,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
 
         <div className="card flush">
           <div className="card-head">
-            <span className="card-title"><Icon name="image" size={13} /> Test images ({total})</span>
+            <h2 className="card-title"><Icon name="image" size={13} /> Test images ({total})</h2>
             <span className="xs faint">{s.tsPick.size} selected</span>
           </div>
           <div className="card-body tight row" style={{ gap: 8 }}>
@@ -235,25 +236,33 @@ export default function TestsetPanel({ s }: { s: Session }) {
           </div>
           <div style={{ maxHeight: "34vh", overflow: "auto", padding: "0 8px 8px" }}>
             {s.tsImages.map((p) => (
-              <div key={p} className="thumb-row" aria-current={p === s.tsCurrent} onClick={() => s.goToTsImage(p)}>
+              <div key={p} className="row" style={{ gap: 0 }}>
                 <input
                   type="checkbox"
+                  style={{ marginLeft: 7 }}
                   checked={s.tsPick.has(p)}
-                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Select ${fileOf(p)}`}
                   onChange={(e) => {
                     const next = new Set(s.tsPick);
                     if (e.target.checked) next.add(p); else next.delete(p);
                     s.setTsPick(next);
                   }}
                 />
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className="thumb" src={imgUrl(p)} alt="" loading="lazy" />
-                <div className="grow" style={{ overflow: "hidden" }}>
-                  <div className="mono truncate">{fileOf(p)}</div>
-                  <div className="xs" style={{ color: s.tsLabeledSet.has(stemOf(p)) ? "var(--ok)" : "var(--faint)" }}>
-                    {s.tsLabeledSet.has(stemOf(p)) ? "answer key written" : "not labeled"}
+                <button
+                  type="button"
+                  className="thumb-row"
+                  aria-current={p === s.tsCurrent ? "true" : undefined}
+                  onClick={() => s.goToTsImage(p)}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img className="thumb" src={imgUrl(p)} alt="" loading="lazy" />
+                  <div className="grow" style={{ overflow: "hidden" }}>
+                    <div className="mono truncate">{fileOf(p)}</div>
+                    <div className="xs" style={{ color: s.tsLabeledSet.has(stemOf(p)) ? "var(--ok)" : "var(--faint)" }}>
+                      {s.tsLabeledSet.has(stemOf(p)) ? "answer key written" : "not labeled"}
+                    </div>
                   </div>
-                </div>
+                </button>
               </div>
             ))}
             {!total && <div className="xs muted" style={{ padding: 10 }}>Nothing imported yet.</div>}

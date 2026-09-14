@@ -1,0 +1,52 @@
+# Shared reverse-proxy + auto-updater for the whole VM (docs/deploying-a-service.md).
+# One of these per VM, not per app -- every app in ../app/* just adds a
+# map{} line to config/ and a watchtower label, this file doesn't change per app.
+services:
+  nginx:
+    image: nginx:stable
+    container_name: cr-nginx
+    hostname: cr-nginx
+    networks:
+      bridge0:
+        ipv4_address: 172.20.10.1
+    volumes:
+      - type: bind
+        source: ./config
+        target: /etc/nginx/conf.d
+        read_only: true
+      - type: bind
+        source: ./log
+        target: /etc/nginx/log
+    mem_limit: 1G
+    memswap_limit: 1G
+    restart: unless-stopped
+    logging:
+      driver: none
+
+  # Polls container3.connectedtech.dev for newer tags of anything labeled
+  # watchtower.enable=true and restarts it in place -- this is the "auto" in
+  # auto-deploy; the GitHub side stops at "image exists in the registry".
+  # Needs /root/.docker/config.json on the host to already hold a working
+  # `docker login container3.connectedtech.dev` (see deploy/README.md).
+  watchtower:
+    image: nickfedor/watchtower:1
+    container_name: cr-watchtower
+    hostname: cr-watchtower
+    networks:
+      bridge0:
+        ipv4_address: 172.20.10.2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json
+    command: --schedule "*/1 * * * *" --cleanup --label-enable
+    cpus: 0.5
+    mem_limit: 256M
+    memswap_limit: 256M
+    restart: unless-stopped
+    logging:
+      driver: none
+
+networks:
+  bridge0:
+    name: bridge0
+    external: true

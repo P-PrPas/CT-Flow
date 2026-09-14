@@ -1,8 +1,8 @@
-# Auto-deploy is "build and push the three images that make up docker-compose.yml",
-# not "SSH into a box and restart it" -- nobody's picked a target server yet
-# (see docs/ARCHITECTURE.md once that decision is made). Tag a release,
-# get images; pulling and restarting them on whatever host runs this is a
-# manual `docker compose pull && docker compose up -d` for now.
+# Build and push the three images that make up docker-compose.yml, to both
+# ghcr.io and the company registry. The VM-side compose files that actually
+# run these (deploy/) pull from container3.connectedtech.dev; ghcr.io stays
+# around as a free public mirror. Nothing here touches the VM -- cr-watchtower
+# (deploy/core) polls the registry and restarts containers on its own.
 name: deploy
 
 on:
@@ -17,6 +17,7 @@ jobs:
   images:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false # api/web have nothing to do with vpe's checkpoints failing to fetch
       matrix:
         include:
           - image: ct-flow-api
@@ -32,11 +33,41 @@ jobs:
       # whatever case the account was created with.
       - run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
+      # backend/inference/Dockerfile COPYs these three checkpoints into the
+      # image (README.md#quick-start-docker) -- they're gitignored (*.pt),
+      # so a clean checkout never has them. Same fetch a dev runs by hand
+      # before their first `docker compose build`.
+      - uses: actions/setup-python@v5
+        if: matrix.image == 'ct-flow-vpe'
+        with: { python-version: "3.12" }
+
+      - uses: actions/cache@v4
+        id: cache-weights
+        if: matrix.image == 'ct-flow-vpe'
+        with:
+          path: models
+          key: vpe-checkpoints-v1
+
+      - name: Fetch baked-in checkpoints (cache miss)
+        if: matrix.image == 'ct-flow-vpe' && steps.cache-weights.outputs.cache-hit != 'true'
+        run: |
+          pip install ultralytics
+          mkdir -p models && cd models && python -c "
+          from ultralytics import YOLOE
+          for m in ('yoloe-11s-seg', 'yoloe-26s-seg', 'yoloe-26x-seg'): YOLOE(m + '.pt')"
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Company registry -- deploy/ on the VM pulls from here, not ghcr.io.
+      - uses: docker/login-action@v3
+        with:
+          registry: container3.connectedtech.dev
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -46,3 +77,5 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image }}:${{ github.ref_name }}
             ghcr.io/${{ env.OWNER }}/${{ matrix.image }}:latest
+            container3.connectedtech.dev/${{ matrix.image }}:${{ github.ref_name }}
+            container3.connectedtech.dev/${{ matrix.image }}:latest

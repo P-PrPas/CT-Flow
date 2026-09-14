@@ -1,0 +1,139 @@
+# ap-ctflow -- CT-Flow itself. Images are pulled pre-built from
+# container3.connectedtech.dev (pushed by .github/workflows/deploy.yml on
+# every `git tag v*`); nothing here runs `build:`. Env names/values mirror
+# ../../../docker-compose.yml (the dev compose) so nothing has to be
+# reinvented for prod. Copy this whole deploy/ folder onto the VM, drop a
+# real .env next to this file (cp .env.example .env), then from
+# ~/app/ctflow: docker compose up -d.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ap-ctflow-postgres
+    hostname: ap-ctflow-postgres
+    networks:
+      bridge0:
+        ipv4_address: 172.20.30.10
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: labeltool
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: labeltool
+      TZ: Asia/Bangkok
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labeltool"]
+      start_period: 10s
+      interval: 1m
+      timeout: 5s
+      retries: 5
+    cpus: 1.0
+    mem_limit: 1G
+    memswap_limit: 1G
+    restart: unless-stopped
+    logging:
+      driver: none
+
+  # Not published to the host and it must stay that way -- it trusts its
+  # caller (api) to have run every path through checked_path() already.
+  vpe:
+    image: container3.connectedtech.dev/ct-flow-vpe:${TAG}
+    container_name: ap-ctflow-vpe
+    hostname: ap-ctflow-vpe
+    networks:
+      bridge0:
+        ipv4_address: 172.20.30.11
+    environment:
+      LABEL_TOOL_VM_ROOT: /opt/mount/project
+      TZ: Asia/Bangkok
+    volumes:
+      - ${DATA_DIR}:/opt/mount/project
+      # Named, not bind-mounted like the rest of this file: the Dockerfile
+      # COPYs 3 checkpoints to this same path, and only a named volume gets
+      # pre-seeded from the image on first mount -- a bind mount would just
+      # shadow them with an empty host dir (backend/services/models.py
+      # auto-downloads whatever else gets selected; this volume is what
+      # keeps a restart from re-fetching it).
+      - models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    mem_limit: 12G
+    memswap_limit: 12G
+    restart: unless-stopped
+    logging:
+      driver: none
+
+  api:
+    image: container3.connectedtech.dev/ct-flow-api:${TAG}
+    container_name: ap-ctflow-api
+    hostname: ap-ctflow-api
+    networks:
+      bridge0:
+        ipv4_address: 172.20.30.12
+    environment:
+      LABEL_TOOL_VM_ROOT: /opt/mount/project
+      LABEL_TOOL_USERS: ${LABEL_TOOL_USERS:-}
+      LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
+      OAUTH_ENDPOINT: ${OAUTH_ENDPOINT:-}
+      FRONTEND_URL: https://ciflow.connectedtech.dev
+      LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      VPE_URL: http://ap-ctflow-vpe:8001
+      DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD}@ap-ctflow-postgres:5432/labeltool
+      TZ: Asia/Bangkok
+    volumes:
+      - ${DATA_DIR}:/opt/mount/project
+      - models:/models:ro   # read-only: only to report which checkpoints are cached
+    depends_on:
+      postgres:
+        condition: service_healthy
+      vpe:
+        condition: service_healthy
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    cpus: 2.0
+    mem_limit: 2G
+    memswap_limit: 2G
+    restart: unless-stopped
+    logging:
+      driver: none
+
+  # Reached via cr-nginx (../../core), not published here -- see
+  # ../../core/config/ciflow.conf, which proxies straight to this
+  # container's bridge0 IP.
+  web:
+    image: container3.connectedtech.dev/ct-flow-web:${TAG}
+    container_name: ap-ctflow-web
+    hostname: ap-ctflow-web
+    networks:
+      bridge0:
+        ipv4_address: 172.20.30.1
+    environment:
+      API_URL: http://ap-ctflow-api:8000
+      TZ: Asia/Bangkok
+    depends_on:
+      api:
+        condition: service_healthy
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    cpus: 1.0
+    mem_limit: 1G
+    memswap_limit: 1G
+    restart: unless-stopped
+    logging:
+      driver: none
+
+volumes:
+  models:
+
+networks:
+  bridge0:
+    name: bridge0
+    external: true

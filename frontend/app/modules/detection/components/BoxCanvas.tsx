@@ -384,7 +384,7 @@ export default function BoxCanvas({
               aria-label="Discard this suggested box"
               style={{
                 position: "absolute", top: -36, right: -6, width: 28, height: 28,
-                borderRadius: "50%", background: "var(--bad)", color: "#fff",
+                borderRadius: "50%", background: "var(--bad)", color: "var(--on-canvas-danger)",
                 border: "2px solid #0b1120", cursor: "pointer", fontSize: 13,
                 lineHeight: "16px", padding: 0, pointerEvents: "auto",
                 display: "grid", placeItems: "center",
@@ -433,7 +433,7 @@ export default function BoxCanvas({
                 // move, and deleting by accident is the worse mistake. 28px
                 // rather than 22, so it is a target 2.5.8 accepts.
                 position: "absolute", top: -36, right: -6, width: 28, height: 28,
-                borderRadius: "50%", background: "var(--bad)", color: "#fff",
+                borderRadius: "50%", background: "var(--bad)", color: "var(--on-canvas-danger)",
                 border: "2px solid #0b1120", cursor: "pointer", fontSize: 13,
                 lineHeight: "16px", padding: 0, pointerEvents: "auto",
                 display: "grid", placeItems: "center",

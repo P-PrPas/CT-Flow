@@ -83,7 +83,7 @@
 - ส่ง usage event จาก frontend ให้สถิติข้าม session และข้ามเครื่องได้จริง (backend สรุปได้แล้ว ดู REQUIREMENTS §7)
 - ~~เพิ่ม frontend type-check/build เข้า CI~~ **ทำแล้วใน T-30** (`.github/workflows/frontend.yml`: module boundary → `tsc --noEmit` → `next build`)
 - **การทดสอบที่รัน React จริง** — ไม่มีด่านไหนใน CI *รัน* โค้ด frontend เลย และ smoke test ยิง HTTP โดยไม่มี React อยู่ในภาพ · ช่องนี้ปล่อย render loop ของ claim heartbeat หลุดมาแล้ว (`setClaims` → `heldByOthers` → `nextTodo` → effect → `POST /api/claim` → `setClaims`) ซึ่งเห็นได้แค่ใน network panel ของ browser · **เงื่อนไขเริ่มงาน:** มี bug ประเภทนี้หลุดอีกครั้ง หรือเริ่มมี state logic ที่ซับซ้อนกว่านี้
-- export-format picker บน UI (`GET /api/export` รองรับ YOLO/COCO/VOC อยู่แล้ว)
+- **Export-format picker บน UI ✅** — ปุ่ม Export dataset ใน workspace เลือก YOLO/COCO/VOC และ Pool/Test set ได้ ผ่าน `GET /api/export`; ส่งออกเฉพาะ annotations ที่บันทึกแล้ว ไม่รวมรูปภาพ
 
 ## Phase 5 — Scale และ operations (conditional)
 

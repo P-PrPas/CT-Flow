@@ -9,11 +9,13 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import AppShell from "../../components/AppShell";
 import ProgressBar from "../../components/ProgressBar";
 import ShortcutsDialog from "../../modules/detection/components/ShortcutsDialog";
+import ExportDialog from "../../modules/detection/components/ExportDialog";
 import { useSession, type Panel } from "../../modules/detection/session";
 import * as api from "../../lib/api";
-import { BrandMark, fileOf, Icon, pct, Tip, useTitle, type IconName } from "../../lib/ui";
+import { fileOf, Icon, pct, Tip, useTitle, type IconName } from "../../lib/ui";
 import GalleryPanel from "../../modules/detection/panels/GalleryPanel";
 import InsightsPanel from "../../modules/detection/panels/InsightsPanel";
 import PoolPanel from "../../modules/detection/panels/PoolPanel";
@@ -46,14 +48,14 @@ export default function ProjectPage() {
 
   if (error) {
     return (
-      <main className="col" style={{ minHeight: "100dvh", justifyContent: "center", alignItems: "center", gap: 12 }}>
+      <main id="main" className="col" style={{ minHeight: "100dvh", justifyContent: "center", alignItems: "center", gap: 12 }}>
         <div className="note bad" role="alert"><Icon name="alert" size={15} /><span>{error}</span></div>
         <a className="btn" href="/">Back to projects</a>
       </main>
     );
   }
   if (!auth || !auth.user || !auth.oid || !project) {
-    return <main className="row" style={{ minHeight: "100dvh", justifyContent: "center" }}>Loading…</main>;
+    return <main id="main" className="row" style={{ minHeight: "100dvh", justifyContent: "center" }}>Loading…</main>;
   }
   return <Workspace auth={auth} me={auth.oid} project={project} />;
 }
@@ -62,6 +64,7 @@ function Workspace({
   auth, me, project,
 }: { auth: api.AuthState; me: string; project: api.Project }) {
   const s = useSession(project.input_dir, me);
+  const [exporting, setExporting] = useState(false);
   useTitle(project.name);
 
   /** F-19 — the app bar's link home is a full navigation, so ten minutes of
@@ -83,7 +86,7 @@ function Workspace({
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)) return;
-      if (s.showShortcuts) return;
+      if (s.showShortcuts || exporting) return;
       // 2.1.4 — with the single-key shortcuts switched off, only the modified
       // ones survive. Dropping Ctrl+S along with them would be a downgrade
       // nobody asked for, and 2.1.4 is about unmodified characters anyway.
@@ -150,7 +153,7 @@ function Workspace({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [s]);
+  }, [s, exporting]);
 
   const steps: { key: Panel; label: string; icon: IconName; badge?: string; disabled?: boolean; hint?: string }[] = [
     { key: "pool", label: "Label", icon: "image", badge: s.images.length ? `${s.progressBuckets.hand + s.progressBuckets.model + s.progressBuckets.test}/${s.images.length}` : undefined },
@@ -161,42 +164,13 @@ function Workspace({
   ];
 
   return (
-    <>
-      <header className="appbar">
-        <div className="appbar-inner">
-          <a className="row" href="/" style={{ gap: 10, textDecoration: "none", color: "inherit" }}
-             title="All projects">
-            <span className="brand-mark"><BrandMark /></span>
-            <span className="col" style={{ gap: 1 }}>
-              <span className="brand-name">CT-Flow</span>
-              <span className="brand-sub truncate" style={{ maxWidth: 160 }}>{project.name}</span>
-            </span>
-          </a>
-
-          {/* Not a tablist: there were no tabpanels behind it, nothing carried
-              aria-controls, and the arrow keys a tablist owes its user were
-              already taken by the image stepper. A nav with aria-current says
-              the true thing and leaves the arrows to whatever has focus. */}
-          <nav className="steps" aria-label="Workflow" style={{ marginLeft: 8 }}>
-            {steps.map((st) => (
-              <button
-                key={st.key}
-                className="step"
-                aria-current={s.panel === st.key ? "page" : undefined}
-                disabled={st.disabled}
-                title={st.disabled ? st.hint : undefined}
-                onClick={() => s.setPanel(st.key)}
-              >
-                <Icon name={st.icon} size={14} />
-                {st.label}
-                {st.badge && <span className="step-idx" style={{ width: "auto", padding: "0 5px", borderRadius: 9 }}>{st.badge}</span>}
-              </button>
-            ))}
-          </nav>
-
-          <span className="spacer" />
-
-          <div className="row" style={{ gap: 6 }}>
+    <AppShell user={auth.user!} context={project.name} navigation={
+      <nav aria-label="Workflow">
+        <a className="nav-item nav-back" href="/"><Icon name="arrowLeft" size={17} /> All projects</a>
+        <span className="nav-label">Annotation workspace</span>
+        {steps.map((st) => <button key={st.key} className="nav-item" aria-current={s.panel === st.key ? "page" : undefined} disabled={st.disabled} title={st.disabled ? st.hint : undefined} onClick={() => s.setPanel(st.key)}><Icon name={st.icon} size={18} />{st.label}{st.badge && <span className="nav-count">{st.badge}</span>}</button>)}
+      </nav>
+    } actions={<>
             {/* FR-32 — one switch swaps the vocabulary for people who don't
                 need to know what an embedding is. */}
             <Tip text="Swaps the technical wording for plain language, for anyone who doesn't work with models day to day.">
@@ -216,30 +190,12 @@ function Workspace({
               {!s.shortcuts && <span className="dot" style={{ color: "var(--warn)" }} />}
             </button>
 
-            {/* Signing in is mandatory (T-27), so there is no signed-out
-                state to render here -- Page redirects before Workspace mounts. */}
-            <button
-              className="chip btn-like"
-              title="Sign out"
-              onClick={() => api.logout()
-                .then((out) => window.location.assign(out.logoutUrl || "/entry/login"))
-                .catch(() => window.location.assign("/entry/login"))}
-            >
-              <Icon name="user" size={12} /> {auth.user}
-            </button>
-          </div>
+    </>}>
+      <main id="main" className="workspace-main">
+        <div className="page-heading">
+          <div><span className="eyebrow">Object detection</span><h1>{project.name}</h1><p>{({ pool: "Label images and teach the model with your expertise.", gallery: "Explore every image in your dataset.", testset: "Build an independent answer key to measure accuracy.", report: "Understand what the model gets right, and where it needs help.", insights: "Track improvements and decide what to teach next." })[s.panel]}</p></div>
+          <button className="btn" onClick={() => setExporting(true)} disabled={s.busy}><Icon name="download" size={16} /> Export dataset</button>
         </div>
-      </header>
-
-      <main
-        id="main"
-        className="col"
-        style={{ gap: 14, padding: "14px var(--s5) var(--s6)", maxWidth: 1600, margin: "0 auto" }}
-      >
-        {/* The app bar shows the project name but has no room for a heading,
-            and a screen reader's heading list was empty on the one screen
-            people spend the day in. */}
-        <h1 className="sr-only">{project.name} — object detection workspace</h1>
         {/* FR-51 -- the two halves of a project's state are wiped by different
             commands, and this is what half-wiped looks like from inside. */}
         {s.bankOrphaned && (
@@ -299,6 +255,10 @@ function Workspace({
         {s.panel === "insights" && <InsightsPanel s={s} />}
       </main>
 
+      {exporting && <ExportDialog inputDir={project.input_dir} projectName={project.name}
+        initialKind={s.panel === "testset" ? "testset" : "pool"}
+        unsaved={{ pool: s.pool.canUndo, testset: s.ts.canUndo }} onClose={() => setExporting(false)} />}
+
       {s.showShortcuts && (
         <ShortcutsDialog
           enabled={s.shortcuts}
@@ -307,6 +267,6 @@ function Workspace({
         />
       )}
 
-    </>
+    </AppShell>
   );
 }

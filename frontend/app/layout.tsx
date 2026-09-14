@@ -8,20 +8,18 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Poppins + IBM Plex Sans Thai are the connectedtech.co.th faces. Loaded
-            by <link> rather than next/font so an intranet build with no access
-            to fonts.googleapis.com degrades to the fallback stack instead of
-            failing the build. */}
+        {/* Middlefront typography. Intranet deployments fall back to system fonts. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap"
         />
       </head>
       <body>
+        <script dangerouslySetInnerHTML={{ __html: 'try{document.documentElement.dataset.theme=localStorage.getItem("ctflow.theme")==="dark"?"dark":"light"}catch{}' }} />
         {/* 2.4.1 — the app bar repeats on every page and is the first thing in
             the tab order. This is the way past it; it is invisible until it
             takes focus. */}

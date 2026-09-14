@@ -10,11 +10,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import AppShell from "./components/AppShell";
 import Confirm from "./components/Confirm";
 import DirPicker from "./components/DirPicker";
 import Modal from "./components/Modal";
 import * as api from "./lib/api";
-import { BrandMark, Empty, fileOf, Icon, Soon, Tip, useTitle } from "./lib/ui";
+import { Empty, fileOf, Icon, Tip, useTitle } from "./lib/ui";
 
 /** Where a project of this type is labeled. One entry today; a second module
  *  adds a branch here and a folder, and every card above keeps working. */
@@ -27,6 +28,9 @@ export default function Home() {
   const [projects, setProjects] = useState<api.Project[] | null>(null);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const [scope, setScope] = useState("all");
+  const [sort, setSort] = useState("updated");
   const [confirmDelete, setConfirmDelete] = useState<api.Project | null>(null);
 
   const reload = useCallback(
@@ -52,62 +56,54 @@ export default function Home() {
   }, [auth, router, reload]);
 
   if (!auth || !auth.user) {
-    return <main className="row" style={{ minHeight: "100dvh", justifyContent: "center" }}>Loading…</main>;
+    return <main id="main" role="status" className="row" style={{ minHeight: "100dvh", justifyContent: "center" }}>Loading…</main>;
   }
   const me = auth.user;
 
-  // Split on the subject, never on the display name. Under OIDC `auth.user` is
-  // whatever the provider calls someone today while `owner.oid` is their `sub`
-  // -- comparing the two matches nothing, and every project would land under
-  // "everyone else's" on exactly the deployment that matters. With local
-  // accounts the two strings happen to be equal, which is how that goes
-  // unnoticed all the way through development.
   const mine = projects?.filter((p) => p.owner?.oid === auth.oid) ?? [];
-  const others = projects?.filter((p) => p.owner?.oid !== auth.oid) ?? [];
+  const shown = (projects ?? []).filter((p) =>
+    (scope === "all" || (scope === "mine" ? p.owner?.oid === auth.oid : p.owner?.oid !== auth.oid)) &&
+    `${p.name} ${p.input_dir} ${p.owner?.username ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())
+  ).sort((a, b) => sort === "name" ? a.name.localeCompare(b.name) : Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  const totals = projects?.reduce((acc, p) => ({ labeled: acc.labeled + p.labeled, auto: acc.auto + p.auto }), { labeled: 0, auto: 0 });
 
   return (
-    <>
-      <header className="appbar">
-        <div className="appbar-inner">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="brand-mark"><BrandMark /></span>
-            <span className="col" style={{ gap: 1 }}>
-              <span className="brand-name">CT-Flow</span>
-              <span className="brand-sub">Connected Tech</span>
-            </span>
-          </div>
-          <span className="spacer" />
-          <button
-            className="chip btn-like"
-            title="Sign out"
-            onClick={() => api.logout()
-              .then((out) => window.location.assign(out.logoutUrl || "/entry/login"))
-              .catch(() => window.location.assign("/entry/login"))}
-          >
-            <Icon name="user" size={12} /> {me}
-          </button>
+    <AppShell user={me} context="Projects" navigation={
+      <nav aria-label="Main navigation"><span className="nav-label">Workspace</span><a className="nav-item" href="/" aria-current="page"><Icon name="folder" size={18} /> Projects <span className="nav-count">{projects?.length ?? "—"}</span></a></nav>
+    }>
+      <main id="main" className="projects-main">
+        <div className="page-heading">
+          <div><span className="eyebrow">Your workspace</span><h1>Projects</h1><p>Great models start with great data. Pick up where you left off.</p></div>
+          <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" size={17} /> New project</button>
         </div>
-      </header>
 
-      <main id="main" className="col" style={{ gap: 18, padding: "18px var(--s5) var(--s6)", maxWidth: 1200, margin: "0 auto" }}>
-        <div className="row between wrap" style={{ gap: 12 }}>
-          <div className="col" style={{ gap: 2 }}>
-            <h1 style={{ margin: 0, fontSize: 19 }}>Projects</h1>
-            <span className="xs muted">One folder of images is one project.</span>
+        <div className="overview-grid" aria-label="Workspace overview">
+          {[
+            { label: "Total projects", value: projects?.length, icon: "folder" as const, hint: "Across your workspace" },
+            { label: "Your projects", value: projects ? mine.length : undefined, icon: "user" as const, hint: "Owned by you" },
+            { label: "Labeled by hand", value: totals?.labeled, icon: "check" as const, hint: "Images labeled by your team" },
+            { label: "Labeled by model", value: totals?.auto, icon: "bot" as const, hint: "Images automatically labeled" },
+          ].map((stat) => <div className="overview-stat" key={stat.label}><div className="row between"><span>{stat.label}</span><Icon name={stat.icon} size={18} /></div><strong>{stat.value?.toLocaleString() ?? "—"}</strong><span className="xs faint">{stat.hint}</span></div>)}
+        </div>
+
+        <div className="project-toolbar">
+          <div className="filter-tabs" role="group" aria-label="Filter projects by owner">
+            {[["all", "All projects"], ["mine", "Owned by me"], ["team", "Team projects"]].map(([value, label]) => <button key={value} aria-pressed={scope === value} onClick={() => setScope(value)}>{label}</button>)}
           </div>
-          <button className="btn primary" onClick={() => setCreating(true)}>
-            <Icon name="plus" size={14} /> New project
-          </button>
+          <div className="project-tools">
+            <label className="search-field"><Icon name="search" size={17} /><input type="search" aria-label="Search projects" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search projects…" /></label>
+            <select aria-label="Sort projects" value={sort} onChange={(e) => setSort(e.target.value)}><option value="updated">Recently updated</option><option value="name">Name A–Z</option></select>
+          </div>
         </div>
 
         {error && (
           <div className="note bad" role="alert">
             <Icon name="alert" size={15} />
-            <span>{error}</span>
+            <span className="grow">{error}</span><button className="btn sm" onClick={reload}>Try again</button>
           </div>
         )}
 
-        {projects === null && !error && <span className="muted">Loading…</span>}
+        {projects === null && !error && <div className="project-grid" role="status" aria-label="Loading projects">{[0, 1, 2].map((i) => <div key={i} className="card skeleton-card"><span /><span /><span /></div>)}</div>}
 
         {projects?.length === 0 && (
           <Empty
@@ -123,25 +119,13 @@ export default function Home() {
           </Empty>
         )}
 
-        {mine.length > 0 && (
-          <Section title="Yours">
-            {mine.map((p) => (
-              <ProjectCard key={p.id} p={p} meOID={auth.oid} onChanged={reload}
-                onDelete={() => setConfirmDelete(p)} onError={setError} />
-            ))}
+        {projects !== null && projects.length > 0 && (
+          <Section title={scope === "mine" ? "Your projects" : scope === "team" ? "Team projects" : "All projects"} hint={`${shown.length} project${shown.length === 1 ? "" : "s"}`}>
+            {shown.map((p) => <ProjectCard key={p.id} p={p} meOID={auth.oid} onChanged={reload} onDelete={() => setConfirmDelete(p)} onError={setError} />)}
           </Section>
         )}
-        {others.length > 0 && (
-          <Section
-            title="Everyone else's"
-            hint="Open any of them — this is a shared server, not a set of private folders."
-          >
-            {others.map((p) => (
-              <ProjectCard key={p.id} p={p} meOID={auth.oid} onChanged={reload}
-                onDelete={() => setConfirmDelete(p)} onError={setError} />
-            ))}
-          </Section>
-        )}
+        {projects && projects.length > 0 && shown.length === 0 && <Empty icon="search" title="No matching projects" action={<button className="btn" onClick={() => { setQuery(""); setScope("all"); }}>Clear filters</button>}>Try a different name, folder, or project owner.</Empty>}
+        <footer className="workspace-footer"><span>CT-Flow <span className="faint">/</span> Connected Tech</span><span>Built for human expertise. Powered by machine vision.</span></footer>
       </main>
 
       {creating && (
@@ -174,15 +158,15 @@ export default function Home() {
           }
         />
       )}
-    </>
+    </AppShell>
   );
 }
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <section className="col" style={{ gap: 10 }}>
-      <div className="row" style={{ gap: 8, alignItems: "baseline" }}>
-        <h2 style={{ margin: 0, fontSize: 14 }}>{title}</h2>
+    <section className="project-section">
+      <div className="row between wrap">
+        <h2 style={{ margin: 0, fontSize: 16 }}>{title}</h2>
         {hint && <span className="xs faint">{hint}</span>}
       </div>
       <div className="project-grid">{children}</div>
@@ -196,7 +180,6 @@ function ProjectCard({
   p: api.Project; meOID: string | null;
   onChanged: () => void; onDelete: () => void; onError: (m: string) => void;
 }) {
-  const router = useRouter();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(p.name);
 
@@ -210,84 +193,27 @@ function ProjectCard({
   };
 
   return (
-    <div className="card project-card">
-      <div className="card-body col" style={{ gap: 10 }}>
-        <div className="row between" style={{ gap: 8, alignItems: "flex-start" }}>
-          {renaming ? (
-            <form onSubmit={rename} className="row grow" style={{ gap: 6 }}>
-              {/* Blur saves, so Escape has to be the way out -- otherwise a
-                  rename you have changed your mind about has no cancel. */}
-              <input className="grow" autoFocus value={name} aria-label="Project name"
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Escape") { setName(p.name); setRenaming(false); } }}
-                onBlur={rename} />
-            </form>
-          ) : (
-            <button className="link-title" onClick={() => router.push(workspaceHref(p))}>{p.name}</button>
-          )}
-          <span className="chip">{p.task_type}</span>
-        </div>
-
-        <span className="xs faint mono truncate" title={p.input_dir}>{fileOf(p.input_dir)}</span>
-
-        <div className="row wrap xs muted" style={{ gap: 10 }}>
-          <span className="row" style={{ gap: 4 }}>
-            <Icon name="user" size={12} /> {p.owner ? p.owner.username : "no owner"}
-          </span>
-          <span className="row" style={{ gap: 4 }}>
-            <Icon name="clock" size={12} /> {ago(p.updated_at)}
-          </span>
-        </div>
-
-        {/* Counts are what the database holds, not what the folder holds: the
-            total number of images needs a directory listing, and doing one per
-            card on every page load is not what a summary is for. */}
-        <div className="row wrap xs" style={{ gap: 8 }}>
-          <Tip text="Images labeled by a person.">
-            <span className="chip ok"><Icon name="check" size={12} /> {p.labeled} labeled</span>
-          </Tip>
-          <Tip text="Images the model labeled once its readiness was good enough.">
-            <span className="chip"><Icon name="bot" size={12} /> {p.auto} auto</span>
-          </Tip>
-          {p.labeled + p.auto === 0 && <span className="faint">nothing labeled yet</span>}
-        </div>
-
-        {p.contributors.length > 0 && (
-          <Tip text="Derived from who actually saved each box — not a membership list, so it says what happened rather than who was invited.">
-            <span className="xs muted row wrap" style={{ gap: 6 }}>
-              <Icon name="layers" size={12} />
-              {p.contributors.map((c) => `${c.username} (${c.boxes})`).join(" · ")}
-            </span>
-          </Tip>
-        )}
-
-        <div className="row wrap" style={{ gap: 6, marginTop: 2 }}>
-          <button className="btn sm primary" onClick={() => router.push(workspaceHref(p))}>
-            <Icon name="play" size={13} /> Open
-          </button>
-          <button className="btn sm ghost" onClick={() => { setName(p.name); setRenaming(true); }}>
-            Rename
-          </button>
-          {!p.owner && (
-            <Tip text="Nobody owns this yet. Claiming can only fill an empty owner — it never takes one.">
-              <button
-                className="btn sm ghost"
-                onClick={() => api.updateProject(p.id, { claim_ownership: true })
-                  .then(onChanged).catch((e: Error) => onError(e.message))}
-              >
-                Claim
-              </button>
-            </Tip>
-          )}
-          <span className="spacer" />
-          <button className="btn sm ghost" onClick={onDelete}>
-            <Icon name="trash" size={13} /> Delete
-          </button>
-        </div>
-
-        {p.owner?.oid === meOID && <span className="xs faint">You own this project.</span>}
+    <article className="card project-card">
+      <div className="project-card-top"><span className="project-symbol"><Icon name="folder" size={24} /></span><span className="chip">{p.task_type === "detection" ? "Object detection" : p.task_type}</span></div>
+      {renaming ? (
+        <form onSubmit={rename} className="row">
+          <input className="grow" autoFocus value={name} aria-label="Project name" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { setName(p.name); setRenaming(false); } }} onBlur={rename} />
+        </form>
+      ) : <h3><a className="link-title" href={workspaceHref(p)}>{p.name}</a></h3>}
+      <span className="project-folder mono" title={p.input_dir}><Icon name="folder" size={13} />{fileOf(p.input_dir)}</span>
+      <div className="project-counts">
+        <div><strong>{p.labeled.toLocaleString()}</strong><span><Icon name="check" size={13} /> Hand-labeled</span></div>
+        <div><strong>{p.auto.toLocaleString()}</strong><span><Icon name="bot" size={13} /> Auto-labeled</span></div>
       </div>
-    </div>
+      <div className="project-owner"><span className="avatar small" aria-hidden="true">{p.owner?.username.slice(0, 2).toUpperCase() ?? "—"}</span><span className="grow">{p.owner?.username ?? "Unassigned"}{p.owner?.oid === meOID && <span className="faint"> · You</span>}</span><span className="xs faint">{ago(p.updated_at)}</span></div>
+      {p.contributors.length > 0 && <Tip text={p.contributors.map((c) => `${c.username}: ${c.boxes} boxes`).join(" · ")}><span className="xs muted row"><Icon name="layers" size={13} />{p.contributors.length} contributor{p.contributors.length === 1 ? "" : "s"}</span></Tip>}
+      <div className="project-card-actions">
+        <button className="btn ghost sm" onClick={() => { setName(p.name); setRenaming(true); }}>Rename</button>
+        {!p.owner && <button className="btn ghost sm" onClick={() => api.updateProject(p.id, { claim_ownership: true }).then(onChanged).catch((e: Error) => onError(e.message))}>Claim</button>}
+        <button className="btn ghost icon sm project-delete" onClick={onDelete} aria-label={`Delete ${p.name}`} title="Delete project"><Icon name="trash" size={15} /></button>
+        <span className="spacer" /><a className="btn sm" href={workspaceHref(p)}>Open project <Icon name="arrowRight" size={14} /></a>
+      </div>
+    </article>
   );
 }
 
@@ -332,7 +258,7 @@ function CreateDialog({
     <Modal label="New project" width={520} onClose={onClose}>
       <form onSubmit={submit} className="col" style={{ gap: 0, flex: 1, minHeight: 0 }}>
         <div className="modal-head">
-          <h2 className="card-title"><Icon name="plus" size={13} /> New project</h2>
+          <h2 className="card-title"><Icon name="plus" size={16} /> New project</h2><button type="button" className="btn ghost icon" aria-label="Close new project" onClick={onClose}><Icon name="x" size={16} /></button>
         </div>
 
         <div className="modal-body col" style={{ gap: 14 }}>
@@ -370,20 +296,6 @@ function CreateDialog({
               <Icon name="target" size={12} /> object detection
             </span>
           </div>
-
-          {/* FR-29 — designed, deliberately inert: there is no answer yet for
-              where an uploaded file should land, and guessing one is how a
-              dataset ends up somewhere nobody can find. */}
-          <Soon why="Needs a decision on where uploaded files land (FR-29).">
-            <div className="dropzone" style={{ flexDirection: "row", padding: "12px 14px", textAlign: "left", gap: 12 }}>
-              <span style={{ color: "var(--brand)" }}><Icon name="upload" size={16} /></span>
-              <span className="col grow" style={{ gap: 1 }}>
-                <strong style={{ fontSize: 12.5, color: "var(--text)" }}>…or drag image files here</strong>
-                <span className="xs">For people who cannot reach the server&rsquo;s folders.</span>
-              </span>
-              <button type="button" className="btn sm" disabled>Choose files…</button>
-            </div>
-          </Soon>
 
           {error && (
             <div className="note bad" role="alert"><Icon name="alert" size={15} /><span>{error}</span></div>

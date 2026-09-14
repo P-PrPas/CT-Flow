@@ -77,6 +77,7 @@ pool.
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
 | OIDC login | Ready | company OIDC authorization-code flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
+| Dataset export | Ready | YOLO ZIP, COCO JSON and Pascal VOC ZIP; saved pool or test-set annotations, without original images |
 | Image upload | Backend only | `POST /api/upload` is built and gated by the login; no dropzone in the UI yet |
 | Per-label attribution (`labeled_by`) | Ready | every box and every taught prompt records who wrote it |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
@@ -247,6 +248,19 @@ changing what the tool does underneath.
 `Bank.classes` is insertion-ordered, never alphabetized — a label file's
 class column is an index into that list, so it stays fixed once assigned or
 older files silently decode under the wrong class.
+
+### Export annotations
+
+Open a project and choose **Export dataset** beside the project title. Pick
+**YOLO**, **COCO**, or **Pascal VOC**, then choose **Pool annotations** or
+**Test set annotations** and click **Download annotations**. Opening export
+from the Test set view selects that source automatically.
+
+Exports contain saved annotations only: YOLO includes `labels/*.txt` and
+`classes.txt`, COCO is one JSON file, and VOC is a ZIP of XML files. Original
+images, images with no saved boxes, unreadable image files, and train/validation
+splits are not included. Save edits first to include them. Export is read-only;
+you can cancel while it is preparing or retry a failed request.
 
 ## Model selection
 

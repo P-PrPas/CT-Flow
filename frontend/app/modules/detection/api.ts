@@ -12,6 +12,21 @@ export type { JobProgress };
  *  every caller of them is in this module, so one import per panel beats two. */
 export { imgUrl, thumbUrl };
 
+export type ExportFormat = "yolo" | "coco" | "voc";
+export type ExportKind = "pool" | "testset";
+
+/** Export returns file bytes, unlike the shared JSON request helper. */
+export async function exportAnnotations(input_dir: string, format: ExportFormat, kind: ExportKind, signal: AbortSignal): Promise<Blob> {
+  const query = new URLSearchParams({ input_dir, format, kind });
+  const response = await fetch(`/api/export?${query}`, { signal });
+  if (!response.ok) {
+    if (response.status === 401) throw new Error("Your session has expired. Sign in again before exporting.");
+    const error = await response.json().catch(() => null);
+    throw new Error(typeof error?.detail === "string" ? error.detail : "Export failed. Please try again.");
+  }
+  return response.blob();
+}
+
 /** Carries the box colours and the checkpoint catalog, so it belongs to the
  *  module that renders both rather than to the shared client. */
 export function getConfig(): Promise<{

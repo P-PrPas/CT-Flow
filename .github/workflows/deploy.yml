@@ -17,6 +17,7 @@ jobs:
   images:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false # api/web have nothing to do with vpe's checkpoints failing to fetch
       matrix:
         include:
           - image: ct-flow-api
@@ -31,6 +32,29 @@ jobs:
       # GHCR rejects an uppercase owner; github.repository_owner keeps
       # whatever case the account was created with.
       - run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      # backend/inference/Dockerfile COPYs these three checkpoints into the
+      # image (README.md#quick-start-docker) -- they're gitignored (*.pt),
+      # so a clean checkout never has them. Same fetch a dev runs by hand
+      # before their first `docker compose build`.
+      - uses: actions/setup-python@v5
+        if: matrix.image == 'ct-flow-vpe'
+        with: { python-version: "3.12" }
+
+      - uses: actions/cache@v4
+        id: cache-weights
+        if: matrix.image == 'ct-flow-vpe'
+        with:
+          path: models
+          key: vpe-checkpoints-v1
+
+      - name: Fetch baked-in checkpoints (cache miss)
+        if: matrix.image == 'ct-flow-vpe' && steps.cache-weights.outputs.cache-hit != 'true'
+        run: |
+          pip install ultralytics
+          mkdir -p models && cd models && python -c "
+          from ultralytics import YOLOE
+          for m in ('yoloe-11s-seg', 'yoloe-26s-seg', 'yoloe-26x-seg'): YOLOE(m + '.pt')"
 
       - uses: docker/login-action@v3
         with:

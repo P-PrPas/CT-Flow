@@ -1,0 +1,48 @@
+# Auto-deploy is "build and push the three images that make up docker-compose.yml",
+# not "SSH into a box and restart it" -- nobody's picked a target server yet
+# (see docs/ARCHITECTURE.md once that decision is made). Tag a release,
+# get images; pulling and restarting them on whatever host runs this is a
+# manual `docker compose pull && docker compose up -d` for now.
+name: deploy
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: ct-flow-api
+            dockerfile: backend/Dockerfile
+          - image: ct-flow-vpe
+            dockerfile: backend/inference/Dockerfile
+          - image: ct-flow-web
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR rejects an uppercase owner; github.repository_owner keeps
+      # whatever case the account was created with.
+      - run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER }}/${{ matrix.image }}:${{ github.ref_name }}
+            ghcr.io/${{ env.OWNER }}/${{ matrix.image }}:latest

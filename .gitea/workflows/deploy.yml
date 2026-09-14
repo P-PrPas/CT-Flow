@@ -1,0 +1,48 @@
+# Mirror of .github/workflows/deploy.yml -- same three images, pushed to this
+# Gitea instance's own container registry instead of GHCR.
+#
+# Needs a repo secret CI_TOKEN: a personal access token (Settings > Applications)
+# with package read/write scope. The auto-injected GITEA_TOKEN/GITHUB_TOKEN does
+# NOT have package-registry rights (Gitea packages belong to the owner, not the
+# repo -- go-gitea/gitea#23642), so this can't use the built-in token the way
+# the GitHub workflow does.
+#
+# Also assumes this instance has an Actions runner registered and can resolve
+# actions/checkout, docker/login-action, docker/build-push-action from
+# github.com (or has them mirrored) -- unverified from here, check
+# Site Administration > Actions > Runners before trusting a green run.
+name: deploy
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: ct-flow-api
+            dockerfile: backend/Dockerfile
+          - image: ct-flow-vpe
+            dockerfile: backend/inference/Dockerfile
+          - image: ct-flow-web
+            dockerfile: frontend/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: personal.gitea.connectedtech.dev
+          username: ${{ gitea.actor }}
+          password: ${{ secrets.CI_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            personal.gitea.connectedtech.dev/ai_solution/${{ matrix.image }}:${{ gitea.ref_name }}
+            personal.gitea.connectedtech.dev/ai_solution/${{ matrix.image }}:latest

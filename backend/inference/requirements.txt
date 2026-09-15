@@ -2,7 +2,14 @@
 # nothing else. No psycopg2 -- this process never connects to the database; the
 # API service assembles BankSummary from both halves. No python-multipart --
 # it serves no uploads.
-ultralytics>=8.4.48
+#
+# ultralytics pinned exact, not >=: an unpinned floor let CI silently resolve
+# 8.4.152 on 2026-09-14, which breaks process_mask()'s nc split the moment the
+# bank grows from 1 class to 2 mid-batch (see arm(), backend/inference/vpe.py)
+# -- a real request pattern, not a test artifact. 8.4.138 is the newest
+# version confirmed not to reproduce it; bump deliberately, re-run the smoke
+# test's class-growth scenario before raising this.
+ultralytics==8.4.138
 opencv-python>=4.13.0
 pillow>=12.2.0
 numpy

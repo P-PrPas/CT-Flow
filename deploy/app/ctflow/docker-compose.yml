@@ -13,8 +13,12 @@ services:
     networks:
       bridge0:
         ipv4_address: 172.20.30.10
+    # Mounted at the parent dir, not .../data -- bind-mounting straight onto
+    # PGDATA leaves a dot-prefixed mountpoint marker that makes initdb see a
+    # "non-empty" directory and refuse to start (docs/deploying-a-service.md
+    # gets this right; found the hard way -- see PR history).
     volumes:
-      - ./postgres:/var/lib/postgresql/data
+      - ./postgres:/var/lib/postgresql
     environment:
       POSTGRES_USER: labeltool
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -83,7 +87,7 @@ services:
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
       OAUTH_ENDPOINT: ${OAUTH_ENDPOINT:-}
-      FRONTEND_URL: https://ciflow.connectedtech.dev
+      FRONTEND_URL: https://flow.connectedtech.dev
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       VPE_URL: http://ap-ctflow-vpe:8001
       DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD}@ap-ctflow-postgres:5432/labeltool
@@ -106,7 +110,7 @@ services:
       driver: none
 
   # Reached via cr-nginx (../../core), not published here -- see
-  # ../../core/config/ciflow.conf, which proxies straight to this
+  # ../../core/config/flow.conf, which proxies straight to this
   # container's bridge0 IP.
   web:
     image: container3.connectedtech.dev/ct-flow-web:${TAG}

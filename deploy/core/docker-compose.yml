@@ -9,6 +9,8 @@ services:
     networks:
       bridge0:
         ipv4_address: 172.20.10.1
+    ports:
+      - "80:80"
     volumes:
       - type: bind
         source: ./config

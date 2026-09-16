@@ -13,8 +13,12 @@ services:
     networks:
       bridge0:
         ipv4_address: 172.20.30.10
+    # Mounted at the parent dir, not .../data -- bind-mounting straight onto
+    # PGDATA leaves a dot-prefixed mountpoint marker that makes initdb see a
+    # "non-empty" directory and refuse to start (docs/deploying-a-service.md
+    # gets this right; found the hard way -- see PR history).
     volumes:
-      - ./postgres:/var/lib/postgresql/data
+      - ./postgres:/var/lib/postgresql
     environment:
       POSTGRES_USER: labeltool
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}

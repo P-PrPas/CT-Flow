@@ -87,7 +87,7 @@ services:
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
       OAUTH_ENDPOINT: ${OAUTH_ENDPOINT:-}
-      FRONTEND_URL: https://ctflow.connectedtech.dev
+      FRONTEND_URL: https://flow.connectedtech.dev
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       VPE_URL: http://ap-ctflow-vpe:8001
       DATABASE_URL: postgresql://labeltool:${POSTGRES_PASSWORD}@ap-ctflow-postgres:5432/labeltool
@@ -110,7 +110,7 @@ services:
       driver: none
 
   # Reached via cr-nginx (../../core), not published here -- see
-  # ../../core/config/ctflow.conf, which proxies straight to this
+  # ../../core/config/flow.conf, which proxies straight to this
   # container's bridge0 IP.
   web:
     image: container3.connectedtech.dev/ct-flow-web:${TAG}

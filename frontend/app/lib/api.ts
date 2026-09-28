@@ -42,11 +42,12 @@ export type AuthState = {
    *  and the `created_by` behind `contributors`. Compare on this to answer "is
    *  this mine" -- `user` is a label, this is the identity behind it. */
   oid: string | null;
-  /** "local" is the CI and development credential path; people use "oidc". */
-  mode: "local" | "oidc";
-  /** Only on the logout response, and only under OIDC: where to send the
-   *  browser so the provider session ends too. Clearing our own cookie alone
-   *  leaves the next "sign in" silent. */
+  /** "local" is the CI and development credential path; people use "directory". */
+  mode: "local" | "directory";
+  // ponytail: the Directory SDK has no RP-initiated logout endpoint to send the
+  // browser to, so the backend never actually sets this any more -- kept typed
+  // (and AppShell's fallback to /entry/login still holds) in case a future
+  // Directory version adds one.
   logoutUrl?: string;
 };
 

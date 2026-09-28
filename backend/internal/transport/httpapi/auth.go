@@ -5,9 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
-	"strings"
-
-	"golang.org/x/oauth2"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/auth"
 )
@@ -24,12 +21,7 @@ var Public = map[string]bool{
 	"/api/public/login/callback": true,
 }
 
-const oidcStateCookie = "labeltool_oidc_state"
-
-// The state cookie carries the PKCE verifier next to the state, separated by a
-// ".". Neither half can contain one -- both are base64url -- and one cookie
-// that cannot half-arrive beats two that can.
-const oidcStateSep = "."
+const loginStateCookie = "labeltool_oidc_state"
 
 // RequireLogin gates every request that is not in Public.
 //
@@ -39,9 +31,9 @@ const oidcStateSep = "."
 //
 // It used to be inert when no login was configured, for the "one person, own
 // PC" deployment the tool started as. That deployment is gone (T-27) and the
-// process now refuses to start without OIDC or LABEL_TOOL_USERS, so the bypass
-// went with it: an unconfigured server fails closed here rather than serving
-// everything to anyone who can reach it.
+// process now refuses to start without Directory or LABEL_TOOL_USERS, so the
+// bypass went with it: an unconfigured server fails closed here rather than
+// serving everything to anyone who can reach it.
 func (s *Server) RequireLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions || Public[r.URL.Path] {
@@ -69,10 +61,11 @@ func (s *Server) currentIdentity(r *http.Request) (string, string) {
 	if err != nil {
 		return "", ""
 	}
-	attribution, display, oidcSession := auth.SessionIdentity(s.Auth.Identify(c.Value))
-	// A session issued under the other login mode is not a session here: an
-	// OIDC cookie must not survive a switch to local accounts, or the reverse.
-	if (s.authMode() == "oidc") != oidcSession {
+	attribution, display, isDirectory := auth.SessionIdentity(s.Auth.Identify(c.Value))
+	// A session issued under the other login mode is not a session here: a
+	// directory cookie must not survive a switch to local accounts, or the
+	// reverse.
+	if (s.authMode() == "directory") != isDirectory {
 		return "", ""
 	}
 	return attribution, display
@@ -83,16 +76,16 @@ type authState struct {
 	User    *string `json:"user"`
 	// OID is the caller's own attribution key -- the same value that lands in
 	// projects.owner_oid and annotations.created_by. User is the display name
-	// beside it, and under OIDC the two are different strings for the same
-	// person: the subject is a UUID, the display name is what a provider
-	// happens to call them today. The UI needs the subject to answer "is this
-	// mine", because comparing display names is comparing labels that can
-	// collide and can be renamed out from under a project.
+	// beside it, and under Directory the two are different strings for the same
+	// person: the subject is an opaque id, the display name is what the
+	// directory happens to call them today. The UI needs the subject to answer
+	// "is this mine", because comparing display names is comparing labels that
+	// can collide and can be renamed out from under a project.
 	OID  *string `json:"oid"`
 	Mode string  `json:"mode"`
-	// LogoutURL is set only by AuthLogout, and only when the provider offers
-	// RP-initiated logout. The browser has to be sent there for a sign-out to
-	// mean anything on a shared machine.
+	// LogoutURL is always empty now: the Directory SDK has no RP-initiated
+	// logout endpoint to send the browser to (see AuthLogout). The field stays
+	// on the wire because the frontend still reads it.
 	LogoutURL string `json:"logoutUrl,omitempty"`
 }
 
@@ -112,13 +105,13 @@ func state(mode, oid, user string) authState {
 	return authState{Enabled: true, User: &user, OID: &oid, Mode: mode}
 }
 
-// authMode picks which credential the session cookie is expected to carry. OIDC
-// wins where both are configured; local accounts are the CI and development
-// path (docs/PHASE2_WORKSPACE.md #2, decision 8). There is no third value: a
-// server with neither does not get past main().
+// authMode picks which credential the session cookie is expected to carry.
+// Directory wins where both are configured; local accounts are the CI and
+// development path (docs/PHASE2_WORKSPACE.md #2, decision 8). There is no
+// third value: a server with neither does not get past main().
 func (s *Server) authMode() string {
-	if s.OIDC != nil {
-		return "oidc"
+	if s.Directory != nil {
+		return "directory"
 	}
 	return "local"
 }
@@ -134,8 +127,8 @@ func (s *Server) AuthMe(w http.ResponseWriter, r *http.Request) error {
 
 // AuthLogin sets an httponly session cookie on success.
 func (s *Server) AuthLogin(w http.ResponseWriter, r *http.Request) error {
-	if s.OIDC != nil {
-		return errStatus(http.StatusBadRequest, "local login is disabled while OIDC is configured")
+	if s.Directory != nil {
+		return errStatus(http.StatusBadRequest, "local login is disabled while Directory is configured")
 	}
 	var req struct {
 		Username string `json:"username"`
@@ -159,22 +152,28 @@ func (s *Server) AuthLogin(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) OIDCRedirect(w http.ResponseWriter, r *http.Request) error {
-	if s.OIDC == nil {
-		return errStatus(http.StatusBadRequest, "OIDC is not configured on this server")
+	if s.Directory == nil {
+		return errStatus(http.StatusBadRequest, "Directory login is not configured on this server")
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return err
 	}
-	login, verifier := base64.RawURLEncoding.EncodeToString(raw), oauth2.GenerateVerifier()
-	s.setStateCookie(w, r, login+oidcStateSep+verifier, 300)
-	writeJSON(w, http.StatusOK, map[string]string{"redirectUrl": s.OIDC.AuthCodeURL(login, verifier)})
+	loginState := base64.RawURLEncoding.EncodeToString(raw)
+	s.setStateCookie(w, r, loginState, 300)
+	redirectURL, err := s.Directory.AuthorizeURL(loginState)
+	if err != nil {
+		// Most likely ErrNotConnected: the redial loop hasn't completed its
+		// first handshake yet. Transient, not a misconfiguration -- 503 says so.
+		return errStatus(http.StatusServiceUnavailable, "directory login is temporarily unavailable")
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"redirectUrl": redirectURL})
 	return nil
 }
 
 func (s *Server) OIDCCallback(w http.ResponseWriter, r *http.Request) error {
-	if s.OIDC == nil {
-		return errStatus(http.StatusBadRequest, "OIDC is not configured on this server")
+	if s.Directory == nil {
+		return errStatus(http.StatusBadRequest, "Directory login is not configured on this server")
 	}
 	var req struct {
 		Code  string `json:"code"`
@@ -183,30 +182,29 @@ func (s *Server) OIDCCallback(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	cookie, err := r.Cookie(oidcStateCookie)
+	cookie, err := r.Cookie(loginStateCookie)
 	if err != nil {
 		return errStatus(http.StatusUnauthorized, "invalid login state")
 	}
-	want, verifier, _ := strings.Cut(cookie.Value, oidcStateSep)
-	if req.State == "" || len(want) != len(req.State) ||
-		subtle.ConstantTimeCompare([]byte(want), []byte(req.State)) != 1 {
+	if req.State == "" || len(cookie.Value) != len(req.State) ||
+		subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(req.State)) != 1 {
 		return errStatus(http.StatusUnauthorized, "invalid login state")
 	}
 	s.setStateCookie(w, r, "", -1)
-	identity, err := s.OIDC.Identity(r.Context(), req.Code, verifier)
+	identity, err := s.Directory.Identity(r.Context(), req.Code)
 	if err != nil {
-		return errStatus(http.StatusUnauthorized, "OIDC login failed")
+		return errStatus(http.StatusUnauthorized, "directory login failed")
 	}
 	s.recordUser(r, identity)
 	s.setSessionCookie(w, r, auth.OIDCSessionIdentity(identity))
-	writeJSON(w, http.StatusOK, state("oidc", identity.Subject, identity.Display))
+	writeJSON(w, http.StatusOK, state("directory", identity.Subject, identity.Display))
 	return nil
 }
 
-// recordUser is what keeps FR-31 answerable. Attribution stores the provider's
-// `sub` -- the only claim that survives someone being renamed -- and a `sub` on
-// its own is a UUID belonging to no other table. The users row is where it
-// becomes a person again.
+// recordUser is what keeps FR-31 answerable. Attribution stores the
+// directory's user id -- the only claim that survives someone being renamed
+// -- and an id on its own belongs to no other table. The users row is where
+// it becomes a person again.
 //
 // Best-effort on purpose: an identity ledger that cannot be written is a
 // reporting problem, not a reason to refuse an otherwise valid login.
@@ -215,13 +213,13 @@ func (s *Server) recordUser(r *http.Request, identity auth.OIDCIdentity) {
 		return
 	}
 	if err := s.Store.UpsertUser(r.Context(), identity.Subject, identity.Display, identity.Email); err != nil {
-		s.Log.Warn("cannot record the OIDC user", "err", err)
+		s.Log.Warn("cannot record the directory user", "err", err)
 	}
 }
 
 func (s *Server) setStateCookie(w http.ResponseWriter, r *http.Request, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
-		Name: oidcStateCookie, Value: value, Path: "/", MaxAge: maxAge,
+		Name: loginStateCookie, Value: value, Path: "/", MaxAge: maxAge,
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: s.secureCookie(r),
 	})
 }
@@ -239,27 +237,22 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, user s
 // https site -- a downgrade nothing in the app would ever report.
 func (s *Server) secureCookie(r *http.Request) bool {
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" ||
-		(s.OIDC != nil && s.OIDC.Secure)
+		(s.Directory != nil && s.Directory.Secure())
 }
 
 // AuthLogout clears the cookie. Always 200, signed in or not.
 //
-// Under OIDC it also hands back the provider's end-session URL, because
-// clearing only CT-Flow's cookie makes "sign out" a lie: the provider session
-// outlives it, so the next "sign in" is silent and the next person at a shared
-// labelling machine is signed in as whoever left. No post_logout_redirect_uri
-// is attached -- that parameter has to be registered with the provider first,
-// and a logout rejected for an unregistered URL is worse than one that ends on
-// the provider's own signed-out page.
+// The Directory SDK has no RP-initiated logout endpoint, so unlike the old
+// OIDC flow this cannot also end the provider's own session: "sign out" only
+// ever clears CT-Flow's cookie. On the shared labelling machine this tool is
+// deployed on, that means the next "sign in" can be silent if the directory
+// itself still has the browser signed in -- accepted for v1, not fixable from
+// this side.
 func (s *Server) AuthLogout(w http.ResponseWriter, r *http.Request) error {
 	http.SetCookie(w, &http.Cookie{
 		Name: auth.Cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.secureCookie(r),
 	})
-	out := state(s.authMode(), "", "")
-	if s.OIDC != nil {
-		out.LogoutURL = s.OIDC.EndSession
-	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, state(s.authMode(), "", ""))
 	return nil
 }

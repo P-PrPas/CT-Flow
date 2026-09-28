@@ -32,7 +32,7 @@ export default function ProjectPage() {
   useEffect(() => {
     api.getAuth()
       .then(setAuth)
-      .catch(() => setAuth({ enabled: true, user: null, oid: null, mode: "oidc" }));
+      .catch(() => setAuth({ enabled: true, user: null, oid: null, mode: "directory" }));
   }, []);
 
   useEffect(() => {

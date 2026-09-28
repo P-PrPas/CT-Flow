@@ -71,27 +71,6 @@ func main() {
 	defer stopSignals()
 
 	ctx := context.Background()
-	oidcAuth, err := auth.NewOIDC(ctx,
-		os.Getenv("OAUTH_CLIENT_ID"), os.Getenv("OAUTH_CLIENT_SECRET"),
-		os.Getenv("OAUTH_ENDPOINT"), os.Getenv("FRONTEND_URL"),
-	)
-	if err != nil {
-		log.Error("cannot configure OIDC", "err", err)
-		os.Exit(1)
-	}
-	// Sign-in is mandatory (T-27). It used to be optional, which meant a
-	// deployment that simply forgot to set these variables served every endpoint
-	// to anyone who could reach it and reported nothing -- and now that projects
-	// carry an owner and every box carries an author, an unauthenticated server
-	// would also record every one of them as nobody. Refusing to start is the
-	// same contract docker-compose.yml already applies to POSTGRES_PASSWORD.
-	if oidcAuth == nil && !auth.Enabled() {
-		log.Error("refusing to start without a way to sign in: " +
-			"set OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_ENDPOINT and FRONTEND_URL " +
-			"for company OIDC, or LABEL_TOOL_USERS (see -hash-password) for local " +
-			"accounts. See docs/PHASE2_WORKSPACE.md T-27")
-		os.Exit(1)
-	}
 	db, err := store.Open(ctx, env("DATABASE_URL",
 		"postgresql://labeltool:labeltool@localhost:5432/labeltool"))
 	if err != nil {
@@ -107,8 +86,50 @@ func main() {
 		os.Exit(1)
 	}
 
+	directoryAuth, err := auth.NewDirectory(
+		os.Getenv("DIRECTORY_ADDRESS"), os.Getenv("DIRECTORY_KEY"), os.Getenv("DIRECTORY_SECRET"),
+		os.Getenv("FRONTEND_URL"),
+		// Best-effort profile resync, same ledger recordUser writes to on login
+		// -- see the doc comment on auth.NewDirectory's onProfileUpdate parameter.
+		func(ctx context.Context, identity auth.OIDCIdentity) {
+			if err := db.UpsertUser(ctx, identity.Subject, identity.Display, identity.Email); err != nil {
+				log.Warn("cannot record a directory profile update", "err", err)
+			}
+		},
+	)
+	if err != nil {
+		log.Error("cannot configure the directory login", "err", err)
+		os.Exit(1)
+	}
+	// Sign-in is mandatory (T-27). It used to be optional, which meant a
+	// deployment that simply forgot to set these variables served every endpoint
+	// to anyone who could reach it and reported nothing -- and now that projects
+	// carry an owner and every box carries an author, an unauthenticated server
+	// would also record every one of them as nobody. Refusing to start is the
+	// same contract docker-compose.yml already applies to POSTGRES_PASSWORD.
+	if directoryAuth == nil && !auth.Enabled() {
+		log.Error("refusing to start without a way to sign in: " +
+			"set DIRECTORY_ADDRESS, DIRECTORY_KEY, DIRECTORY_SECRET and FRONTEND_URL " +
+			"for the company Directory, or LABEL_TOOL_USERS (see -hash-password) for local " +
+			"accounts. See docs/PHASE2_WORKSPACE.md T-27")
+		os.Exit(1)
+	}
+	// loginProvider, not directoryAuth itself, goes on Server: a nil *Directory
+	// assigned straight into an auth.LoginProvider field is a non-nil interface
+	// holding a nil pointer, and every `s.Directory != nil` check downstream
+	// would then see "configured" for a server that isn't.
+	var loginProvider auth.LoginProvider
+	if directoryAuth != nil {
+		if err := directoryAuth.Start(); err != nil {
+			log.Error("cannot start the directory client", "err", err)
+			os.Exit(1)
+		}
+		defer directoryAuth.Close()
+		loginProvider = directoryAuth
+	}
+
 	srv := &httpapi.Server{
-		Cfg: cfg, Catalog: catalog, Auth: auth.New(), OIDC: oidcAuth, Log: log,
+		Cfg: cfg, Catalog: catalog, Auth: auth.New(), Directory: loginProvider, Log: log,
 		Store:  db,
 		VPE:    vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
 		Jobs:   jobs.NewTracker(),

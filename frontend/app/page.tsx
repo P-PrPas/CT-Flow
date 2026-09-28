@@ -46,7 +46,7 @@ export default function Home() {
       .then(setAuth)
       // A failed call means the API is unreachable, not that nobody is signed
       // in -- but the login screen is where both are recoverable from.
-      .catch(() => setAuth({ enabled: true, user: null, oid: null, mode: "oidc" }));
+      .catch(() => setAuth({ enabled: true, user: null, oid: null, mode: "directory" }));
   }, []);
 
   useEffect(() => {

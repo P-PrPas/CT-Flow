@@ -309,45 +309,44 @@ func TestCurrentUserIsEmptyWithoutAValidCookie(t *testing.T) {
 	}
 }
 
+// fakeDirectory is a LoginProvider double: the real one dials a persistent
+// QUIC connection to the company Directory, which httptest.Server cannot
+// fake, so the state-cookie/session-mismatch behaviour is tested against a
+// fixed AuthorizeURL/Identity result instead.
+type fakeDirectory struct {
+	authorizeURL string
+	identity     auth.OIDCIdentity
+	wantCode     string
+	redeems      int
+}
+
+func (f *fakeDirectory) AuthorizeURL(state string) (string, error) {
+	return f.authorizeURL + "?state=" + state, nil
+}
+
+func (f *fakeDirectory) Identity(_ context.Context, code string) (auth.OIDCIdentity, error) {
+	f.redeems++
+	if code != f.wantCode {
+		return auth.OIDCIdentity{}, fmt.Errorf("wrong code %q", code)
+	}
+	return f.identity, nil
+}
+
+func (f *fakeDirectory) Secure() bool { return false }
+
 func TestOIDCLoginFlow(t *testing.T) {
 	t.Setenv("LABEL_TOOL_USERS", "")
-	if unconfigured, err := auth.NewOIDC(context.Background(), "", "", "", "https://ctflow.example"); err != nil || unconfigured != nil {
-		t.Fatalf("FRONTEND_URL alone enabled OIDC: oidc=%v err=%v", unconfigured, err)
+	if unconfigured, err := auth.NewDirectory("", "", "", "https://ctflow.example", nil); err != nil || unconfigured != nil {
+		t.Fatalf("FRONTEND_URL alone enabled Directory: directory=%v err=%v", unconfigured, err)
 	}
-	tokenHits, sentVerifier := 0, ""
-	var provider *httptest.Server
-	provider = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/.well-known/openid-configuration":
-			fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"userinfo_endpoint":%q,"jwks_uri":%q,"end_session_endpoint":%q,"code_challenge_methods_supported":["S256"],"response_types_supported":["code"],"subject_types_supported":["public"],"id_token_signing_alg_values_supported":["RS256"]}`,
-				provider.URL, provider.URL+"/authorize", provider.URL+"/token", provider.URL+"/userinfo", provider.URL+"/jwks", provider.URL+"/logout")
-		case "/token":
-			tokenHits++
-			sentVerifier = r.FormValue("code_verifier")
-			if err := r.ParseForm(); err != nil || r.Form.Get("code") != "company-code" {
-				http.Error(w, `{"error":"bad code"}`, http.StatusBadRequest)
-				return
-			}
-			fmt.Fprint(w, `{"access_token":"provider-token","token_type":"Bearer"}`)
-		case "/userinfo":
-			if r.Header.Get("Authorization") != "Bearer provider-token" {
-				http.Error(w, `{"error":"bad token"}`, http.StatusUnauthorized)
-				return
-			}
-			fmt.Fprint(w, `{"sub":"company-user-1","preferred_username":"alice","email":"alice@example.com"}`)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer provider.Close()
 
-	oidcAuth, err := auth.NewOIDC(context.Background(), "client", "secret", provider.URL, "https://ctflow.example")
-	if err != nil {
-		t.Fatal(err)
+	directory := &fakeDirectory{
+		authorizeURL: "https://directory.example/entry/authorize/application",
+		wantCode:     "company-code",
+		identity:     auth.OIDCIdentity{Subject: "company-user-1", Display: "alice", Email: "alice@example.com"},
 	}
 	s := localServer(t)
-	s.OIDC = oidcAuth
+	s.Directory = directory
 	legacySession := s.Auth.Issue("legacy")
 
 	withUser(t, "legacy", "password")
@@ -355,7 +354,7 @@ func TestOIDCLoginFlow(t *testing.T) {
 		"username": "legacy", "password": "password",
 	}))
 	if local.Code != http.StatusBadRequest || len(local.Result().Cookies()) != 0 {
-		t.Fatalf("local login bypassed OIDC: status=%d cookies=%v", local.Code, local.Result().Cookies())
+		t.Fatalf("local login bypassed Directory: status=%d cookies=%v", local.Code, local.Result().Cookies())
 	}
 
 	redirect := do(s, s.OIDCRedirect, httptest.NewRequest(http.MethodGet, "/api/public/login/redirect", nil))
@@ -368,16 +367,8 @@ func TestOIDCLoginFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := redirectURL.Query().Get("state")
-	cookieState, verifier, split := strings.Cut(stateCookie.Value, oidcStateSep)
-	if state == "" || stateCookie.Name != oidcStateCookie || cookieState != state || !stateCookie.HttpOnly {
+	if state == "" || stateCookie.Name != loginStateCookie || stateCookie.Value != state || !stateCookie.HttpOnly {
 		t.Fatalf("state cookie and redirect do not match: cookie=%+v url=%s", stateCookie, redirectURL)
-	}
-	// PKCE is on because this provider's discovery document advertises S256.
-	// The challenge on the wire must be the hash, never the verifier itself.
-	challenge := redirectURL.Query().Get("code_challenge")
-	if !oidcAuth.PKCE || !split || verifier == "" || challenge == "" ||
-		redirectURL.Query().Get("code_challenge_method") != "S256" || challenge == verifier {
-		t.Fatalf("no S256 PKCE challenge on the authorize URL: %s", redirectURL)
 	}
 
 	callback := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{
@@ -388,10 +379,7 @@ func TestOIDCLoginFlow(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("callback status = %d: %s", w.Code, w.Body)
 	}
-	if sentVerifier != verifier {
-		t.Errorf("token exchange sent code_verifier %q, want the one from the state cookie %q", sentVerifier, verifier)
-	}
-	if body := decode(t, w); body["user"] != "alice" || body["mode"] != "oidc" {
+	if body := decode(t, w); body["user"] != "alice" || body["mode"] != "directory" {
 		t.Errorf("callback body = %v", body)
 	}
 	var session *http.Cookie
@@ -404,8 +392,8 @@ func TestOIDCLoginFlow(t *testing.T) {
 	if session != nil {
 		rawIdentity = s.Auth.Identify(session.Value)
 	}
-	attribution, display, oidcSession := auth.SessionIdentity(rawIdentity)
-	if session == nil || !session.HttpOnly || !oidcSession || attribution != "company-user-1" || display != "alice" {
+	attribution, display, isDirectory := auth.SessionIdentity(rawIdentity)
+	if session == nil || !session.HttpOnly || !isDirectory || attribution != "company-user-1" || display != "alice" {
 		t.Fatalf("valid HttpOnly application session was not issued: %+v", session)
 	}
 	me := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
@@ -414,11 +402,11 @@ func TestOIDCLoginFlow(t *testing.T) {
 		t.Errorf("auth state displays %v, want alice", body["user"])
 	}
 
-	// Signing out has to end the provider session too, or the next "sign in" on
-	// a shared labelling machine is silent and lands on the previous person.
+	// The Directory SDK has no RP-initiated logout endpoint, so sign-out only
+	// ever clears CT-Flow's own cookie -- accepted limitation, see AuthLogout.
 	out := do(s, s.AuthLogout, httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil))
-	if got := decode(t, out)["logoutUrl"]; got != provider.URL+"/logout" {
-		t.Errorf("logout returned logoutUrl %v, want the provider end_session_endpoint", got)
+	if got := decode(t, out)["logoutUrl"]; got != nil {
+		t.Errorf("logout returned logoutUrl %v, want none", got)
 	}
 
 	bad := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{
@@ -428,8 +416,8 @@ func TestOIDCLoginFlow(t *testing.T) {
 	if rejected := do(s, s.OIDCCallback, bad); rejected.Code != http.StatusUnauthorized {
 		t.Fatalf("mismatched state status = %d, want 401", rejected.Code)
 	}
-	if tokenHits != 1 {
-		t.Errorf("provider token endpoint called %d times; mismatched state must be rejected before exchange", tokenHits)
+	if directory.redeems != 1 {
+		t.Errorf("directory redeemed %d times; mismatched state must be rejected before redeem", directory.redeems)
 	}
 
 	oldLocal := httptest.NewRequest(http.MethodGet, "/api/boxes", nil)
@@ -438,16 +426,16 @@ func TestOIDCLoginFlow(t *testing.T) {
 		s.RequireLogin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(w, r)
 		return nil
 	}, oldLocal); got.Code != http.StatusUnauthorized {
-		t.Errorf("legacy local session reached OIDC mode: status %d", got.Code)
+		t.Errorf("legacy local session reached directory mode: status %d", got.Code)
 	}
 
-	s.OIDC = nil
-	oldOIDC := httptest.NewRequest(http.MethodGet, "/api/boxes", nil)
-	oldOIDC.AddCookie(session)
+	s.Directory = nil
+	oldDirectory := httptest.NewRequest(http.MethodGet, "/api/boxes", nil)
+	oldDirectory.AddCookie(session)
 	if got := do(s, func(w http.ResponseWriter, r *http.Request) error {
 		s.RequireLogin(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(w, r)
 		return nil
-	}, oldOIDC); got.Code != http.StatusUnauthorized {
-		t.Errorf("OIDC session reached local mode: status %d", got.Code)
+	}, oldDirectory); got.Code != http.StatusUnauthorized {
+		t.Errorf("directory session reached local mode: status %d", got.Code)
 	}
 }

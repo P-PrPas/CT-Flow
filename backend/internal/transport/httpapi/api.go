@@ -28,12 +28,15 @@ type Server struct {
 	Cfg     config.Config
 	Catalog *models.Catalog
 	Auth    *auth.Auth
-	OIDC    *auth.OIDC
-	Store   *store.Store
-	VPE     *vpe.Client
-	Jobs    *jobs.Tracker
-	Claims  *claims.Tracker
-	Log     *slog.Logger
+	// Directory is nil when only local accounts are configured. A *auth.Directory
+	// assigned here would be a nil pointer inside a non-nil interface -- see the
+	// comment in main.go where this field is set.
+	Directory auth.LoginProvider
+	Store     *store.Store
+	VPE       *vpe.Client
+	Jobs      *jobs.Tracker
+	Claims    *claims.Tracker
+	Log       *slog.Logger
 }
 
 // httpError is the only way a handler reports a failure, so the {"detail": ...}

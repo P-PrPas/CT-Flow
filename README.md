@@ -75,7 +75,7 @@ pool.
 | GPU (CUDA) inference | Ready | on by default in Docker; falls back to CPU with a one-line build-arg override |
 | Auto-label + review mode | Ready | predicted boxes are fully editable before they're accepted |
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
-| OIDC login | Ready | company OIDC authorization-code flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
+| Directory login | Ready | company Directory login flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
 | Dataset export | Ready | YOLO ZIP, COCO JSON and Pascal VOC ZIP; saved pool or test-set annotations, without original images |
 | Image upload | Backend only | `POST /api/upload` is built and gated by the login; no dropzone in the UI yet |
@@ -339,41 +339,41 @@ Opens with **`?`** in the app; inert while a text field or dialog has focus.
 
 ## Multi-user & security
 
-**Signing in is required.** With neither the OIDC variables nor
+**Signing in is required.** With neither the Directory variables nor
 `LABEL_TOOL_USERS` set, the API refuses to start — projects carry an owner and
 every box carries an author, and a server nobody signs in to would record all
 of them as nobody. Path confinement to `LABEL_TOOL_VM_ROOT` is unconditional
 for the same reason: there is no "this is my own PC" deployment left to opt out
 for.
 
-To use the same company OIDC flow as `corpus-core`, register
-`<FRONTEND_URL>/entry/callback` with the provider and set:
+To use the company Directory login, register an application with the
+directory and set:
 
 ```bash
-OAUTH_CLIENT_ID=...
-OAUTH_CLIENT_SECRET=...
-OAUTH_ENDPOINT=https://issuer.example
+DIRECTORY_ADDRESS=directory.example:443
+DIRECTORY_KEY=...
+DIRECTORY_SECRET=...
 FRONTEND_URL=https://ct-flow.example
 LABEL_TOOL_SECRET=... # stable app-session signing key
 ```
 
-The backend performs discovery, code exchange, and user-info lookup; provider
-tokens never enter browser storage or response bodies. It then issues the
-existing `labeltool_session` HttpOnly/SameSite=Lax cookie for 12 hours. The
-frontend includes login, callback, expired-session redirect, identity, and
-logout states. Audit attribution uses the stable `sub` claim while the UI shows
-`preferred_username` (falling back to email, then `sub`); every login upserts a
-`users` row keyed on that `sub`, which is what lets an attribution be read back
+The backend dials a persistent connection to the directory and redeems the
+one-use code it returns entirely on the server; directory credentials never
+enter browser storage or response bodies. It then issues the existing
+`labeltool_session` HttpOnly/SameSite=Lax cookie for 12 hours. The frontend
+includes login, callback, expired-session redirect, identity, and logout
+states. Audit attribution uses the directory's stable user id while the UI
+shows the username (falling back to email, then the id); every login upserts
+a `users` row keyed on that id, which is what lets an attribution be read back
 as a person's name rather than an opaque id.
 
-PKCE (S256) and RP-initiated logout both switch on only when the provider's
-discovery document advertises them, so a provider that supports neither is
-unaffected. When it does advertise `end_session_endpoint`, signing out ends the
-session at the provider too -- without that, "sign out" on a shared labelling
-machine leaves the next sign-in silent and signed in as whoever left.
+The Directory SDK has no RP-initiated logout endpoint, so unlike a standard
+OIDC provider signing out only ever clears CT-Flow's own cookie -- on a shared
+labelling machine the next sign-in can be silent if the directory itself still
+has the browser signed in. Known limitation, not fixable from this side.
 
-Local username/password accounts are the fallback when OIDC is not set, and the
-credential CI and local development use:
+Local username/password accounts are the fallback when Directory is not set,
+and the credential CI and local development use:
 
 ```bash
 docker compose run --rm --entrypoint /app/api api -hash-password alice 'their password'
@@ -397,11 +397,11 @@ an existing `LABEL_TOOL_USERS` value keeps working.
 | `MODELS_DIR` | `/models` in Docker | where YOLOE checkpoints are cached after auto-download — a named volume in Docker, a plain repo-local folder otherwise |
 | `POSTGRES_PASSWORD` | *(none — required)* | password for the `db` service; `docker compose up` refuses to start without it |
 | `DATABASE_URL` | set automatically in compose | where label/box storage lives (PostgreSQL, see [docs/history/DB_MIGRATION_PLAN.md](docs/history/DB_MIGRATION_PLAN.md)) — override to point at a different Postgres when running outside Docker |
-| `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — the local-account login. **Either this or the OIDC variables is required**; with neither, the API refuses to start |
+| `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — the local-account login. **Either this or the Directory variables is required**; with neither, the API refuses to start |
 | `LABEL_TOOL_SECRET` | *(random per restart)* | signs the session cookie; unset = everyone signed out on every restart |
-| `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | *(empty)* | company OIDC client credentials; both required when OIDC is enabled |
-| `OAUTH_ENDPOINT` | *(empty)* | OIDC issuer/discovery URL |
-| `FRONTEND_URL` | `http://localhost:3000` | public origin; OIDC callback is `<FRONTEND_URL>/entry/callback` |
+| `DIRECTORY_ADDRESS` | *(empty)* | `host:port` of the company Directory server; required when Directory login is enabled |
+| `DIRECTORY_KEY` / `DIRECTORY_SECRET` | *(empty)* | company Directory application credentials; both required when Directory login is enabled |
+| `FRONTEND_URL` | `http://localhost:3000` | public origin; Directory callback is `<FRONTEND_URL>/entry/callback` |
 | `LABEL_TOOL_MAX_UPLOAD_MB` | `25` | per-file upload cap |
 | `APP_UID` | `1000` | build arg — must own `DATA_DIR` on a Linux host, since the container doesn't run as root |
 | `TORCH_INDEX_URL` | `.../whl/cu126` | build arg — the pip index PyTorch installs from; override to `.../whl/cpu` for a GPU-less build |

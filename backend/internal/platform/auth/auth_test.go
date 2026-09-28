@@ -183,10 +183,10 @@ func TestUsersParsing(t *testing.T) {
 
 func TestOIDCSessionIdentityCannotCollideWithLocalUsername(t *testing.T) {
 	value := OIDCSessionIdentity(OIDCIdentity{Subject: "company-user-1", Display: "alice"})
-	if !strings.HasPrefix(value, "oidc:") {
-		t.Fatalf("OIDC session identity = %q, want reserved oidc: prefix", value)
+	if !strings.HasPrefix(value, "dir:") {
+		t.Fatalf("directory session identity = %q, want reserved dir: prefix", value)
 	}
 	if _, parsed, found := strings.Cut(value, ":"); !found || VerifyPassword("pw", parsed) {
-		t.Fatal("an OIDC session identity was accepted as a LABEL_TOOL_USERS name:hash entry")
+		t.Fatal("a directory session identity was accepted as a LABEL_TOOL_USERS name:hash entry")
 	}
 }

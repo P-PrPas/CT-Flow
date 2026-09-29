@@ -58,6 +58,11 @@ services:
       dockerfile: backend/Dockerfile
       args:
         APP_UID: ${APP_UID:-1000}
+      # Lets the build's `go mod download` authenticate to the company's
+      # private Go proxy the same way the host's `go` already does -- see
+      # the comment on this RUN in backend/Dockerfile.
+      secrets:
+        - netrc
     image: ct-flow-api
     environment:
       LABEL_TOOL_VM_ROOT: /opt/mount/project
@@ -109,3 +114,14 @@ services:
 volumes:
   models:
   pgdata:
+
+secrets:
+  # Read at build time only (see api's build.secrets); whatever's at this path
+  # is never baked into an image layer or committed. Defaults to a checked-in
+  # empty file so a machine with no company credentials still builds -- it
+  # just gets go mod download's own 404/auth error instead of Compose
+  # refusing to resolve a secret source that doesn't exist. Point NETRC_PATH
+  # at your real ~/.netrc (same file `go env GOPROXY` already trusts) to pull
+  # the Directory SDK.
+  netrc:
+    file: ${NETRC_PATH:-./.netrc.empty}

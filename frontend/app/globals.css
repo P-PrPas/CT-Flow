@@ -814,7 +814,7 @@ h1, h2, h3 { text-wrap: balance; }
 .app-shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100dvh; }
 .sidebar { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; padding: 32px 16px 16px; background: var(--surface); border-right: 1px solid var(--line-soft); gap: 28px; overflow-y: auto; }
 .brand-lockup { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; padding: 0 10px; }
-.brand-mark { display: grid; place-items: center; width: 40px; height: 40px; flex: none; background: var(--brand-soft); color: var(--brand); border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent); border-radius: 12px; }
+.brand-mark { display: grid; place-items: center; width: 52px; height: 52px; flex: none; }
 .brand-name { font-size: 21px; font-weight: 800; letter-spacing: -.7px; line-height: 1; }
 .brand-sub { font-size: 10px; text-transform: uppercase; letter-spacing: 1.6px; color: var(--muted); }
 .sidebar-workspace { display: flex; align-items: center; gap: 10px; padding: 12px 8px; border-block: 1px solid var(--line-soft); }
@@ -834,7 +834,8 @@ h1, h2, h3 { text-wrap: balance; }
 .sidebar-note p { color: var(--faint); font-size: 12px; line-height: 1.7; }
 .sidebar-account { display: flex; gap: 9px; align-items: center; border-top: 1px solid var(--line-soft); padding-top: 16px; }
 .account-name { font-size: 13px; overflow-wrap: anywhere; }
-.avatar { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border: 1px solid var(--line-soft); border-radius: 50%; background: var(--surface-3); color: var(--muted); font-size: 11px; font-weight: 600; }
+.avatar { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border: 1px solid var(--line-soft); border-radius: 50%; background: var(--surface-3); color: var(--muted); font-size: 11px; font-weight: 600; overflow: hidden; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
 .avatar.small { width: 26px; height: 26px; font-size: 9px; }
 .shell-content { min-width: 0; }
 .topbar { min-height: 76px; padding: 16px 36px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--surface); border-bottom: 1px solid var(--line-soft); }
@@ -909,7 +910,6 @@ dialog.modal.bare .btn.ghost { color: #f1f5f9; }
 .login-brand { background: #142b2e; color: #f0f7f6; padding: 48px; display: flex; flex-direction: column; justify-content: space-between; gap: 40px; position: relative; overflow: hidden; }
 .login-brand .brand-lockup { color: #f0f7f6; padding: 0; }
 .login-brand .brand-sub { color: #b5cecd; }
-.login-brand .brand-mark { background: #244649; color: #81d7d3; border-color: #476e71; }
 .login-brand h2 { font-size: clamp(32px, 3.8vw, 54px); line-height: 1.15; letter-spacing: -1.5px; max-width: 10ch; margin-bottom: 20px; }
 .login-brand p { color: #b5cecd; max-width: 37ch; font-size: 16px; line-height: 1.8; }
 .login-brand > span { color: #b5cecd; font-size: 12px; }

@@ -68,7 +68,7 @@ export default function Home() {
   const totals = projects?.reduce((acc, p) => ({ labeled: acc.labeled + p.labeled, auto: acc.auto + p.auto }), { labeled: 0, auto: 0 });
 
   return (
-    <AppShell user={me} context="Projects" navigation={
+    <AppShell user={me} picture={auth.picture} context="Projects" navigation={
       <nav aria-label="Main navigation"><span className="nav-label">Workspace</span><a className="nav-item" href="/" aria-current="page"><Icon name="folder" size={18} /> Projects <span className="nav-count">{projects?.length ?? "—"}</span></a></nav>
     }>
       <main id="main" className="projects-main">

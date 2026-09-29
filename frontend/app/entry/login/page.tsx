@@ -40,7 +40,7 @@ export default function LoginPage() {
   return (
     <main id="main" className="login-page">
       <section className="login-brand" aria-label="About CT-Flow">
-        <div className="brand-lockup"><span className="brand-mark"><BrandMark size={24} /></span><span className="col" style={{ gap: 4 }}><span className="brand-name">CT-Flow</span><span className="brand-sub">Connected Tech</span></span></div>
+        <div className="brand-lockup"><span className="brand-mark"><BrandMark /></span><span className="col" style={{ gap: 4 }}><span className="brand-name">CT-Flow</span><span className="brand-sub">Connected Tech</span></span></div>
         <div>
           <h2>Human expertise.<br />Machine precision.</h2>
           <p>A shared workspace for labeling images, teaching your model, and building better vision datasets.</p>

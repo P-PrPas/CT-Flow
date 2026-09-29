@@ -164,7 +164,7 @@ function Workspace({
   ];
 
   return (
-    <AppShell user={auth.user!} context={project.name} navigation={
+    <AppShell user={auth.user!} picture={auth.picture} context={project.name} navigation={
       <nav aria-label="Workflow">
         <a className="nav-item nav-back" href="/"><Icon name="arrowLeft" size={17} /> All projects</a>
         <span className="nav-label">Annotation workspace</span>

@@ -77,7 +77,7 @@ export function Icon({ name, size = 15, className }: { name: IconName; size?: nu
 }
 
 /** Connected Tech "C" monogram, redrawn as the two-arc mark from the site. */
-export function BrandMark({ size = 17 }: { size?: number }) {
+export function BrandMark({ size = 52 }: { size?: number }) {
   return <img src="/logo.png" width={size} height={size} alt="" aria-hidden="true" />;
 }
 

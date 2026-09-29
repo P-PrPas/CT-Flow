@@ -14,12 +14,14 @@ export default function CallbackPage() {
     started.current = true;
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
-    const state = params.get("state");
-    if (!code || !state) {
-      setError(params.get("error_description") ?? "Missing login code or state");
+    // The directory hands back no state of its own -- CSRF protection lives
+    // entirely in the httpOnly cookie /api/public/login/redirect already set,
+    // which the browser sends along with this POST automatically.
+    if (!code) {
+      setError(params.get("error_description") ?? "Missing login code");
       return;
     }
-    api.loginCallback(code, state)
+    api.loginCallback(code)
       .then(() => window.location.replace("/"))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);

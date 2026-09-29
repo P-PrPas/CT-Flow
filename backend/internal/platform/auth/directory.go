@@ -16,7 +16,7 @@ import (
 // dialling the real thing -- Directory talks a persistent QUIC connection,
 // not request/response HTTP, so there is no httptest.Server to fake it with.
 type LoginProvider interface {
-	AuthorizeURL(state string) (string, error)
+	AuthorizeURL() (string, error)
 	Identity(ctx context.Context, code string) (OIDCIdentity, error)
 	Secure() bool
 }
@@ -42,6 +42,7 @@ type OIDCIdentity struct {
 	Subject string
 	Display string
 	Email   string
+	Picture string
 }
 
 // A colon cannot occur in a LABEL_TOOL_USERS username because it is that
@@ -114,13 +115,15 @@ func (d *Directory) Close() error { return d.client.Close() }
 
 func (d *Directory) Secure() bool { return d.secure }
 
-// AuthorizeURL builds the directory's login page URL. The protocol has no
-// state parameter of its own, so CSRF state rides along in the redirect
-// target's query string instead -- the directory server preserves it and
-// hands it back next to the code on the way to /entry/callback.
-func (d *Directory) AuthorizeURL(state string) (string, error) {
-	redirect := d.redirectURL + "?state=" + url.QueryEscape(state)
-	authorizeURL, err := d.client.AuthorizeUrl(redirect)
+// AuthorizeURL builds the directory's login page URL. redirect must match a
+// URI pre-registered with the directory application exactly -- tried
+// appending our own CSRF state as a query string here first, and the
+// directory rejects the whole link for it (APPLICATION-REDIRECT-URI-FORBIDDEN,
+// found the hard way). So the protocol gets no state at all: CSRF protection
+// lives entirely in loginStateCookie, whose mere presence at the callback is
+// the proof this browser is the one that started the flow.
+func (d *Directory) AuthorizeURL() (string, error) {
+	authorizeURL, err := d.client.AuthorizeUrl(d.redirectURL)
 	if err != nil {
 		return "", fmt.Errorf("directory authorize URL: %w", err)
 	}
@@ -148,12 +151,13 @@ func identityFromUser(u *directorysdk.User) (OIDCIdentity, error) {
 		return OIDCIdentity{}, fmt.Errorf("directory user has no id")
 	}
 	email := strings.TrimSpace(deref(u.Email))
+	picture := strings.TrimSpace(deref(u.Picture))
 	for _, display := range []string{deref(u.Username), email} {
 		if display = strings.TrimSpace(display); display != "" {
-			return OIDCIdentity{Subject: subject, Display: display, Email: email}, nil
+			return OIDCIdentity{Subject: subject, Display: display, Email: email, Picture: picture}, nil
 		}
 	}
-	return OIDCIdentity{Subject: subject, Display: subject, Email: email}, nil
+	return OIDCIdentity{Subject: subject, Display: subject, Email: email, Picture: picture}, nil
 }
 
 func deref(s *string) string {
@@ -163,25 +167,33 @@ func deref(s *string) string {
 	return *s
 }
 
-// OIDCSessionIdentity keeps the stable subject and human display name in the
-// signed application session. Local-login session values remain unchanged.
+// OIDCSessionIdentity keeps the stable subject, human display name, and
+// avatar URL in the signed application session. Local-login session values
+// remain unchanged. The picture rides in the cookie rather than a DB column
+// -- it is only ever read back for the signed-in caller's own avatar, so
+// there is nothing to join against, and it goes stale the same way Display
+// already does: on next login, not before.
 func OIDCSessionIdentity(identity OIDCIdentity) string {
-	raw, _ := json.Marshal([2]string{identity.Subject, identity.Display})
+	raw, _ := json.Marshal([3]string{identity.Subject, identity.Display, identity.Picture})
 	return oidcSessionPrefix + base64.RawURLEncoding.EncodeToString(raw)
 }
 
-func SessionIdentity(value string) (attribution, display string, isDirectory bool) {
+// SessionIdentity decodes a session value. picture is "" for local logins and
+// for any directory session recorded before this field existed -- a fixed-size
+// Go array decodes a shorter JSON array by zeroing what's missing, so an old
+// two-element cookie is read as "no picture", not a decode error.
+func SessionIdentity(value string) (attribution, display, picture string, isDirectory bool) {
 	encoded, found := strings.CutPrefix(value, oidcSessionPrefix)
 	if !found {
-		return value, value, false
+		return value, value, "", false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return value, value, false
+		return value, value, "", false
 	}
-	var identity [2]string
+	var identity [3]string
 	if json.Unmarshal(raw, &identity) != nil || identity[0] == "" || identity[1] == "" {
-		return value, value, false
+		return value, value, "", false
 	}
-	return identity[0], identity[1], true
+	return identity[0], identity[1], identity[2], true
 }

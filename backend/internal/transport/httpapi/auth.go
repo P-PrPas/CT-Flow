@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
 
@@ -52,23 +51,23 @@ func (s *Server) RequireLogin(next http.Handler) http.Handler {
 // project they create. Empty only on a request RequireLogin would have rejected
 // -- every gated handler is reached with a signed-in caller.
 func (s *Server) currentUser(r *http.Request) string {
-	user, _ := s.currentIdentity(r)
+	user, _, _ := s.currentIdentity(r)
 	return user
 }
 
-func (s *Server) currentIdentity(r *http.Request) (string, string) {
+func (s *Server) currentIdentity(r *http.Request) (oid, display, picture string) {
 	c, err := r.Cookie(auth.Cookie)
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
-	attribution, display, isDirectory := auth.SessionIdentity(s.Auth.Identify(c.Value))
+	attribution, display, picture, isDirectory := auth.SessionIdentity(s.Auth.Identify(c.Value))
 	// A session issued under the other login mode is not a session here: a
 	// directory cookie must not survive a switch to local accounts, or the
 	// reverse.
 	if (s.authMode() == "directory") != isDirectory {
-		return "", ""
+		return "", "", ""
 	}
-	return attribution, display
+	return attribution, display, picture
 }
 
 type authState struct {
@@ -83,6 +82,11 @@ type authState struct {
 	// can collide and can be renamed out from under a project.
 	OID  *string `json:"oid"`
 	Mode string  `json:"mode"`
+	// Picture is the avatar Directory has on file for this person, or empty
+	// for a local account (there is nothing to fetch it from). Omitted
+	// entirely rather than sent as "" so the frontend's fallback-to-initials
+	// check is a plain truthiness test.
+	Picture string `json:"picture,omitempty"`
 	// LogoutURL is always empty now: the Directory SDK has no RP-initiated
 	// logout endpoint to send the browser to (see AuthLogout). The field stays
 	// on the wire because the frontend still reads it.
@@ -98,11 +102,11 @@ type authState struct {
 // and both are null. Nothing on the wire should ever carry one without the
 // other, because a client with a name and no subject cannot tell its own work
 // apart from anyone else's.
-func state(mode, oid, user string) authState {
+func state(mode, oid, user, picture string) authState {
 	if user == "" {
 		return authState{Enabled: true, User: nil, OID: nil, Mode: mode}
 	}
-	return authState{Enabled: true, User: &user, OID: &oid, Mode: mode}
+	return authState{Enabled: true, User: &user, OID: &oid, Mode: mode, Picture: picture}
 }
 
 // authMode picks which credential the session cookie is expected to carry.
@@ -120,8 +124,8 @@ func (s *Server) authMode() string {
 // or the app, and to tell its own projects from everyone else's. user:null
 // means signed out.
 func (s *Server) AuthMe(w http.ResponseWriter, r *http.Request) error {
-	oid, display := s.currentIdentity(r)
-	writeJSON(w, http.StatusOK, state(s.authMode(), oid, display))
+	oid, display, picture := s.currentIdentity(r)
+	writeJSON(w, http.StatusOK, state(s.authMode(), oid, display, picture))
 	return nil
 }
 
@@ -147,7 +151,7 @@ func (s *Server) AuthLogin(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.setSessionCookie(w, r, req.Username)
 	// A local account has no separate subject: the username is both.
-	writeJSON(w, http.StatusOK, state(s.authMode(), req.Username, req.Username))
+	writeJSON(w, http.StatusOK, state(s.authMode(), req.Username, req.Username, ""))
 	return nil
 }
 
@@ -161,7 +165,7 @@ func (s *Server) OIDCRedirect(w http.ResponseWriter, r *http.Request) error {
 	}
 	loginState := base64.RawURLEncoding.EncodeToString(raw)
 	s.setStateCookie(w, r, loginState, 300)
-	redirectURL, err := s.Directory.AuthorizeURL(loginState)
+	redirectURL, err := s.Directory.AuthorizeURL()
 	if err != nil {
 		// Most likely ErrNotConnected: the redial loop hasn't completed its
 		// first handshake yet. Transient, not a misconfiguration -- 503 says so.
@@ -176,18 +180,17 @@ func (s *Server) OIDCCallback(w http.ResponseWriter, r *http.Request) error {
 		return errStatus(http.StatusBadRequest, "Directory login is not configured on this server")
 	}
 	var req struct {
-		Code  string `json:"code"`
-		State string `json:"state"`
+		Code string `json:"code"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		return err
 	}
+	// The directory hands back no state of its own (see AuthorizeURL), so this
+	// cookie's mere presence is the CSRF proof instead: only a browser that hit
+	// /api/public/login/redirect on this origin has it, and it is consumed here
+	// so a captured callback URL cannot be replayed.
 	cookie, err := r.Cookie(loginStateCookie)
-	if err != nil {
-		return errStatus(http.StatusUnauthorized, "invalid login state")
-	}
-	if req.State == "" || len(cookie.Value) != len(req.State) ||
-		subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(req.State)) != 1 {
+	if err != nil || cookie.Value == "" {
 		return errStatus(http.StatusUnauthorized, "invalid login state")
 	}
 	s.setStateCookie(w, r, "", -1)
@@ -197,7 +200,7 @@ func (s *Server) OIDCCallback(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.recordUser(r, identity)
 	s.setSessionCookie(w, r, auth.OIDCSessionIdentity(identity))
-	writeJSON(w, http.StatusOK, state("directory", identity.Subject, identity.Display))
+	writeJSON(w, http.StatusOK, state("directory", identity.Subject, identity.Display, identity.Picture))
 	return nil
 }
 
@@ -253,6 +256,6 @@ func (s *Server) AuthLogout(w http.ResponseWriter, r *http.Request) error {
 		Name: auth.Cookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
 		SameSite: http.SameSiteLaxMode, Secure: s.secureCookie(r),
 	})
-	writeJSON(w, http.StatusOK, state(s.authMode(), "", ""))
+	writeJSON(w, http.StatusOK, state(s.authMode(), "", "", ""))
 	return nil
 }

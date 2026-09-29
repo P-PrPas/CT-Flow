@@ -44,6 +44,8 @@ export type AuthState = {
   oid: string | null;
   /** "local" is the CI and development credential path; people use "directory". */
   mode: "local" | "directory";
+  /** The avatar Directory has on file, or absent for a local account. */
+  picture?: string;
   // ponytail: the Directory SDK has no RP-initiated logout endpoint to send the
   // browser to, so the backend never actually sets this any more -- kept typed
   // (and AppShell's fallback to /entry/login still holds) in case a future
@@ -59,8 +61,8 @@ export function loginRedirect(): Promise<{ redirectUrl: string }> {
   return request("/api/public/login/redirect");
 }
 
-export function loginCallback(code: string, state: string): Promise<AuthState> {
-  return post("/api/public/login/callback", { code, state });
+export function loginCallback(code: string): Promise<AuthState> {
+  return post("/api/public/login/callback", { code });
 }
 
 export function localLogin(username: string, password: string): Promise<AuthState> {

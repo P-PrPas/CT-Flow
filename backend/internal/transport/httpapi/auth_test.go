@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -311,8 +310,8 @@ func TestCurrentUserIsEmptyWithoutAValidCookie(t *testing.T) {
 
 // fakeDirectory is a LoginProvider double: the real one dials a persistent
 // QUIC connection to the company Directory, which httptest.Server cannot
-// fake, so the state-cookie/session-mismatch behaviour is tested against a
-// fixed AuthorizeURL/Identity result instead.
+// fake, so the pending-login-cookie/session-mismatch behaviour is tested
+// against a fixed AuthorizeURL/Identity result instead.
 type fakeDirectory struct {
 	authorizeURL string
 	identity     auth.OIDCIdentity
@@ -320,8 +319,8 @@ type fakeDirectory struct {
 	redeems      int
 }
 
-func (f *fakeDirectory) AuthorizeURL(state string) (string, error) {
-	return f.authorizeURL + "?state=" + state, nil
+func (f *fakeDirectory) AuthorizeURL() (string, error) {
+	return f.authorizeURL, nil
 }
 
 func (f *fakeDirectory) Identity(_ context.Context, code string) (auth.OIDCIdentity, error) {
@@ -343,7 +342,7 @@ func TestOIDCLoginFlow(t *testing.T) {
 	directory := &fakeDirectory{
 		authorizeURL: "https://directory.example/entry/authorize/application",
 		wantCode:     "company-code",
-		identity:     auth.OIDCIdentity{Subject: "company-user-1", Display: "alice", Email: "alice@example.com"},
+		identity:     auth.OIDCIdentity{Subject: "company-user-1", Display: "alice", Email: "alice@example.com", Picture: "https://directory.example/avatar/alice.png"},
 	}
 	s := localServer(t)
 	s.Directory = directory
@@ -362,18 +361,17 @@ func TestOIDCLoginFlow(t *testing.T) {
 		t.Fatalf("redirect status = %d: %s", redirect.Code, redirect.Body)
 	}
 	stateCookie := redirect.Result().Cookies()[0]
-	redirectURL, err := url.Parse(decode(t, redirect)["redirectUrl"].(string))
-	if err != nil {
-		t.Fatal(err)
+	// Regression check for APPLICATION-REDIRECT-URI-FORBIDDEN: the directory
+	// validates its redirect parameter against an exact pre-registered URI, so
+	// nothing -- not even our own CSRF state -- may be appended to it.
+	if redirectURL := decode(t, redirect)["redirectUrl"]; redirectURL != directory.authorizeURL {
+		t.Fatalf("redirectUrl = %v, want exactly %q with no query string appended", redirectURL, directory.authorizeURL)
 	}
-	state := redirectURL.Query().Get("state")
-	if state == "" || stateCookie.Name != loginStateCookie || stateCookie.Value != state || !stateCookie.HttpOnly {
-		t.Fatalf("state cookie and redirect do not match: cookie=%+v url=%s", stateCookie, redirectURL)
+	if stateCookie.Name != loginStateCookie || stateCookie.Value == "" || !stateCookie.HttpOnly {
+		t.Fatalf("state cookie not set as expected: %+v", stateCookie)
 	}
 
-	callback := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{
-		"code": "company-code", "state": state,
-	})
+	callback := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{"code": "company-code"})
 	callback.AddCookie(stateCookie)
 	w := do(s, s.OIDCCallback, callback)
 	if w.Code != http.StatusOK {
@@ -381,6 +379,9 @@ func TestOIDCLoginFlow(t *testing.T) {
 	}
 	if body := decode(t, w); body["user"] != "alice" || body["mode"] != "directory" {
 		t.Errorf("callback body = %v", body)
+	}
+	if body := decode(t, w); body["picture"] != directory.identity.Picture {
+		t.Errorf("callback body picture = %v, want %q", body["picture"], directory.identity.Picture)
 	}
 	var session *http.Cookie
 	for _, cookie := range w.Result().Cookies() {
@@ -392,14 +393,14 @@ func TestOIDCLoginFlow(t *testing.T) {
 	if session != nil {
 		rawIdentity = s.Auth.Identify(session.Value)
 	}
-	attribution, display, isDirectory := auth.SessionIdentity(rawIdentity)
-	if session == nil || !session.HttpOnly || !isDirectory || attribution != "company-user-1" || display != "alice" {
+	attribution, display, picture, isDirectory := auth.SessionIdentity(rawIdentity)
+	if session == nil || !session.HttpOnly || !isDirectory || attribution != "company-user-1" || display != "alice" || picture != directory.identity.Picture {
 		t.Fatalf("valid HttpOnly application session was not issued: %+v", session)
 	}
 	me := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	me.AddCookie(session)
-	if body := decode(t, do(s, s.AuthMe, me)); body["user"] != "alice" {
-		t.Errorf("auth state displays %v, want alice", body["user"])
+	if body := decode(t, do(s, s.AuthMe, me)); body["user"] != "alice" || body["picture"] != directory.identity.Picture {
+		t.Errorf("auth state displays %v, want alice with a picture", body)
 	}
 
 	// The Directory SDK has no RP-initiated logout endpoint, so sign-out only
@@ -409,15 +410,14 @@ func TestOIDCLoginFlow(t *testing.T) {
 		t.Errorf("logout returned logoutUrl %v, want none", got)
 	}
 
-	bad := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{
-		"code": "company-code", "state": "wrong",
-	})
-	bad.AddCookie(stateCookie)
+	bad := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{"code": "company-code"})
+	// No stateCookie attached: nothing proves this browser is the one that
+	// started the flow.
 	if rejected := do(s, s.OIDCCallback, bad); rejected.Code != http.StatusUnauthorized {
-		t.Fatalf("mismatched state status = %d, want 401", rejected.Code)
+		t.Fatalf("callback without a pending-login cookie status = %d, want 401", rejected.Code)
 	}
 	if directory.redeems != 1 {
-		t.Errorf("directory redeemed %d times; mismatched state must be rejected before redeem", directory.redeems)
+		t.Errorf("directory redeemed %d times; a callback with no pending-login cookie must be rejected before redeem", directory.redeems)
 	}
 
 	oldLocal := httptest.NewRequest(http.MethodGet, "/api/boxes", nil)

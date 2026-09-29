@@ -23,13 +23,13 @@
 
 ### `GET /api/public/login/redirect`
 - **Response:** `{"redirectUrl": str}` + HttpOnly state cookie อายุ 5 นาที
-- โปรโตคอลของ Directory ไม่มี `state` parameter ของตัวเอง ฝั่งนี้จึงฝัง `state` เป็น query string ของ `redirect` ที่ส่งให้ `AuthorizeUrl` แทน — Directory server เก็บ query string เดิมไว้แล้วต่อ `code` กลับมาตอน callback
+- `AuthorizeUrl` ของ Directory validate `redirect` ตรงกับ URI ที่ลงทะเบียนไว้แบบ exact-match — ลองฝัง `state` เป็น query string ต่อท้ายมาก่อน โดน Directory ปฏิเสธทั้งลิงก์ (`APPLICATION-REDIRECT-URI-FORBIDDEN`) จึงส่ง `redirect` เปล่า ๆ ไม่มี query string ใด ๆ ทั้งสิ้น CSRF protection ทั้งหมดอยู่ที่ state cookie แทน — แค่มี cookie นี้ตอน callback ก็พอเป็นหลักฐานว่า browser นี้เป็นคนเริ่ม flow เอง (Directory ไม่มี `state` parameter ของตัวเองให้ส่งกลับมาอยู่แล้ว)
 - **503** ถ้า connection ไปยัง Directory server ยังไม่ขึ้น (`ErrNotConnected` — background redial loop ยังไม่สำเร็จครั้งแรก) ไม่ใช่ misconfiguration แค่ยังไม่พร้อม
 
 ### `POST /api/public/login/callback`
-- **Body:** `{"code": str, "state": str}`
+- **Body:** `{"code": str}`
 - **Response:** `{"enabled": true, "user": str, "oid": str, "mode": "directory"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.) — `oid` คือ user id ของ Directory ส่วน `user` คือ display name
-- **401** เมื่อ state ไม่ตรง หรือ redeem code ล้มเหลว — เทียบ state แบบ constant-time และลบ state cookie **ก่อน** redeem
+- **401** เมื่อไม่มี state cookie ที่ตั้งไว้ตอน redirect หรือ redeem code ล้มเหลว — เช็ค cookie **ก่อน** redeem แล้วลบทิ้งทันที กัน callback URL เดิมถูก replay ซ้ำ
 - สำเร็จแล้ว upsert แถวใน `users` (`oid` = user id ของ Directory) เพื่อให้ id ที่ไปอยู่ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้ · เขียนไม่สำเร็จ **ไม่** ทำให้ login พัง (เป็นปัญหาฝั่ง reporting ไม่ใช่เหตุผลที่จะปฏิเสธ login ที่ถูกต้อง)
 
 ### `GET /api/auth/me`

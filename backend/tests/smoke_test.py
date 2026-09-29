@@ -26,10 +26,12 @@ Signing in is mandatory since T-27, so SMOKE_USER/SMOKE_PASSWORD are no longer
 optional and the auth assertions are no longer skippable -- a server that does
 not need them is a server that will not start.
 """
+import io
 import json
 import os
 import shutil
 import time
+import zipfile
 from pathlib import Path
 
 import httpx
@@ -477,10 +479,15 @@ assert r.status_code == 200, r.text
 assert r.headers["content-type"] == "application/zip", r.headers
 assert "labels_yolo.zip" in r.headers.get("content-disposition", ""), r.headers
 assert len(r.content) > 0, "empty export body"
+yolo_names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+assert any(n.startswith("images/") for n in yolo_names), "yolo export has no bundled images"
 
 r = c.get("/api/export", params={"input_dir": POOL, "format": "coco", "kind": "pool"})
-assert r.status_code == 200 and r.headers["content-type"] == "application/json", r.headers
-assert json.loads(r.content).get("annotations") is not None, r.text[:200]
+assert r.status_code == 200 and r.headers["content-type"] == "application/zip", r.headers
+assert "dataset_coco.zip" in r.headers.get("content-disposition", ""), r.headers
+coco_zip = zipfile.ZipFile(io.BytesIO(r.content))
+assert json.loads(coco_zip.read("annotations_coco.json")).get("annotations") is not None, r.text[:200]
+assert any(n.startswith("images/") for n in coco_zip.namelist()), "coco export has no bundled images"
 
 assert c.get("/api/export", params={"input_dir": POOL, "format": "xml"}).status_code == 400
 assert c.get("/api/export", params={"input_dir": POOL, "kind": "sideways"}).status_code == 400
@@ -492,7 +499,7 @@ assert c.get("/api/export",
 # valid-but-empty archive.
 r = c.get("/api/export", params={"input_dir": NO_PROJECT, "format": "yolo"})
 assert r.status_code == 400 and "label something first" in r.json()["detail"], r.text
-print("export: yolo zip + coco json, pool and testset, bad format/kind rejected")
+print("export: yolo/coco/voc all zip + bundled images, pool and testset, bad format/kind rejected")
 
 # FR-19: pre-annotation for a single image, straight from the bank
 r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.05})

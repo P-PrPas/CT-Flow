@@ -323,6 +323,6 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 
 ### `GET /api/export`
 - **Query:** `input_dir` (str), `format` (`"yolo"` default | `"coco"` | `"voc"`), `kind` (`"pool"` default | `"testset"`)
-- **Response:** ไฟล์แนบ (`Content-Disposition: attachment`) — `application/zip` (yolo: `classes.txt` + `labels/*.txt`, voc: หนึ่ง XML ต่อภาพ) หรือ `application/json` (coco: `{images, annotations, categories}` เดียว)
+- **Response:** ไฟล์แนบ (`Content-Disposition: attachment`), `application/zip` เสมอ — bundle รูปต้นฉบับไว้ใต้ `images/<basename>` ในทุก format ด้วย ไม่ใช่แค่ label: yolo (`classes.txt` + `labels/*.txt` + `images/`), voc (หนึ่ง XML ต่อภาพ + `images/`), coco (`annotations_coco.json` เดียว + `images/`)
 - **400** ถ้า `format`/`kind` ไม่รู้จัก, หรือไม่มีอะไรให้ export (`kind` นั้นว่างเปล่า)
-- พิกัดในตารางเป็น pixel อยู่แล้ว (ไม่เหมือน YOLO txt เดิมที่ normalize) — yolo/voc export ต้องเปิดภาพเพื่ออ่านขนาดตอนแปลงกลับเป็น normalized/แสดงใน XML เท่านั้น ภาพที่ถูกย้าย/ลบไปแล้วจะถูกข้าม ไม่ทำให้ export ทั้งก้อนล้มเหลว
+- พิกัดในตารางเป็น pixel อยู่แล้ว (ไม่เหมือน YOLO txt เดิมที่ normalize) — ทุก format ต้องเปิดภาพสองรอบ: ครั้งหนึ่งอ่านขนาด (yolo normalize, voc ใส่ใน XML), อีกครั้งอ่าน byte ดิบไป bundle ภาพที่ถูกย้าย/ลบไปแล้วจะถูกข้าม ไม่ทำให้ export ทั้งก้อนล้มเหลว

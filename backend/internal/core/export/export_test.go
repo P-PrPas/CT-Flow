@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/testsupport"
@@ -73,6 +74,55 @@ func realDims(t *testing.T) DimsFunc {
 	}
 }
 
+// realRead reads the fixture images' raw bytes, the same way the real handler
+// does -- what the bundled export is checked against.
+func realRead(t *testing.T) ReadFunc {
+	t.Helper()
+	return func(path string) ([]byte, bool) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, false
+		}
+		return raw, true
+	}
+}
+
+// splitImages pulls the images/* entries a bundled export now carries apart
+// from the annotation entries the golden vectors pinned before bundling
+// existed, so the parity check only compares what Python actually produced.
+func splitImages(files map[string]string) (annotations, images map[string]string) {
+	annotations = map[string]string{}
+	images = map[string]string{}
+	for name, body := range files {
+		if strings.HasPrefix(name, "images/") {
+			images[name] = body
+		} else {
+			annotations[name] = body
+		}
+	}
+	return
+}
+
+// assertImagesBundled confirms every exported image is findable under
+// images/<basename> with its exact bytes -- the actual point of bundling them.
+func assertImagesBundled(t *testing.T, images map[string]string, byImage map[string][]store.Box) {
+	t.Helper()
+	for path := range byImage {
+		want, err := os.ReadFile(path)
+		if err != nil {
+			continue // deleted-since-labelled fixture: nothing to bundle, nothing to check
+		}
+		got, ok := images["images/"+filepath.Base(path)]
+		if !ok {
+			t.Errorf("images/%s missing from export", filepath.Base(path))
+			continue
+		}
+		if got != string(want) {
+			t.Errorf("images/%s bytes changed in transit", filepath.Base(path))
+		}
+	}
+}
+
 func unzip(t *testing.T, raw []byte) map[string]string {
 	t.Helper()
 	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
@@ -98,30 +148,39 @@ func unzip(t *testing.T, raw []byte) map[string]string {
 func TestYOLOMatchesPython(t *testing.T) {
 	v := load(t)
 	byImage, _ := absolute(v)
-	raw, err := buildYOLO(v.Names, byImage, realDims(t))
+	raw, err := buildYOLO(v.Names, byImage, realDims(t), realRead(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := unzip(t, raw)
-	if !reflect.DeepEqual(got, v.YOLO) {
-		t.Errorf("yolo export differs\ngot  %v\nwant %v", got, v.YOLO)
+	annotations, images := splitImages(unzip(t, raw))
+	if !reflect.DeepEqual(annotations, v.YOLO) {
+		t.Errorf("yolo export differs\ngot  %v\nwant %v", annotations, v.YOLO)
 	}
+	assertImagesBundled(t, images, byImage)
 	// The deleted image must be absent, not present and empty: a stale row is
 	// skipped, and skipping it silently is the documented behaviour.
-	if _, ok := got["labels/deleted_since_it_was_labelled.txt"]; ok {
+	if _, ok := annotations["labels/deleted_since_it_was_labelled.txt"]; ok {
 		t.Error("an image that no longer exists produced a label file")
+	}
+	if _, ok := images["images/deleted_since_it_was_labelled.jpg"]; ok {
+		t.Error("an image that no longer exists produced a bundled image")
 	}
 }
 
 func TestCOCOMatchesPython(t *testing.T) {
 	v := load(t)
 	byImage, _ := absolute(v)
-	raw, err := buildCOCO(v.Names, byImage, realDims(t))
+	raw, err := buildCOCO(v.Names, byImage, realDims(t), realRead(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+	files := unzip(t, raw)
+	body, ok := files["annotations_coco.json"]
+	if !ok {
+		t.Fatal("coco export missing annotations_coco.json")
+	}
 	var got map[string]any
-	if err := json.Unmarshal(raw, &got); err != nil {
+	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, v.COCO) {
@@ -129,19 +188,22 @@ func TestCOCOMatchesPython(t *testing.T) {
 		wantJSON, _ := json.Marshal(v.COCO)
 		t.Errorf("coco export differs\ngot  %s\nwant %s", gotJSON, wantJSON)
 	}
+	_, images := splitImages(files)
+	assertImagesBundled(t, images, byImage)
 }
 
 func TestVOCMatchesPython(t *testing.T) {
 	v := load(t)
 	byImage, _ := absolute(v)
-	raw, err := buildVOC(v.Names, byImage, realDims(t))
+	raw, err := buildVOC(v.Names, byImage, realDims(t), realRead(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := unzip(t, raw)
-	if !reflect.DeepEqual(got, v.VOC) {
-		t.Errorf("voc export differs\ngot  %v\nwant %v", got, v.VOC)
+	annotations, images := splitImages(unzip(t, raw))
+	if !reflect.DeepEqual(annotations, v.VOC) {
+		t.Errorf("voc export differs\ngot  %v\nwant %v", annotations, v.VOC)
 	}
+	assertImagesBundled(t, images, byImage)
 }
 
 // Only &, < and > -- what xml.sax.saxutils.escape does. encoding/xml also
@@ -174,14 +236,15 @@ func TestCOCOIDsSkipRatherThanRenumber(t *testing.T) {
 	dims := func(p string) (int, int, bool) {
 		return 100, 100, p != "/gone.jpg"
 	}
-	raw, err := buildCOCO([]string{"x"}, byImage, dims)
+	read := func(p string) ([]byte, bool) { return []byte("x"), true }
+	raw, err := buildCOCO([]string{"x"}, byImage, dims, read)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var doc struct {
 		Images []cocoImage `json:"images"`
 	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	if err := json.Unmarshal([]byte(unzip(t, raw)["annotations_coco.json"]), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if len(doc.Images) != 2 {

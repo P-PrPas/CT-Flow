@@ -50,7 +50,7 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 			fmt.Sprintf("nothing to export for %s -- label something first", pyRepr(kind)))
 	}
 
-	body, err := spec.Build(names, byImage, s.imageDims)
+	body, err := spec.Build(names, byImage, s.imageDims, s.readImage)
 	if err != nil {
 		return err
 	}
@@ -77,6 +77,17 @@ func (s *Server) imageDims(path string) (int, int, bool) {
 	}
 	defer f.Close()
 	return imageSize(f)
+}
+
+// readImage returns an image's raw bytes so export can bundle the file itself
+// into the archive, not just its filename -- gated behind imageDims, so a path
+// that already failed to open once isn't tried again here.
+func (s *Server) readImage(path string) ([]byte, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
 }
 
 // pyRepr and pyReprList reproduce Python's repr() for the two error messages

@@ -95,6 +95,15 @@ services:
     # `web`, and Swagger -- the only other reason this port was ever on the host
     # -- went with FastAPI. Add a ports entry back if you want to curl it
     # directly during development.
+    #
+    # An export with images=true (the default) buffers the whole zip in RAM
+    # before writing it out (N-02) -- capped per-request at
+    # maxBundledExportImages, but several concurrent exports still add up.
+    # This bounds the blast radius to this one container instead of the host.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     restart: unless-stopped
 
   web:

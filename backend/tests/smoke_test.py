@@ -241,7 +241,15 @@ r = c.post("/api/label", json={
     "boxes": [{"cls": "bad\nname", "box": [1, 1, 5, 5]}],
 })
 assert r.status_code == 400, r.text
-print("label: empty and newline class names rejected (400)")
+# N-01: a NUL byte reached Postgres before this check existed, 500ing after
+# /vpe/teach had already written the class -- an orphaned bank embedding the
+# DB never knew about, since the bank is append-only and cannot un-teach it.
+r = c.post("/api/label", json={
+    "input_dir": POOL, "image": target,
+    "boxes": [{"cls": "bad\x00name", "box": [1, 1, 5, 5]}],
+})
+assert r.status_code == 400, r.text
+print("label: empty, newline and NUL class names rejected (400)")
 
 # M-05: box shape is not validated on the way in without this -- a reversed or
 # out-of-bounds box becomes a >1 YOLO coordinate or a negative COCO width with

@@ -12,6 +12,32 @@ import (
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 )
 
+// maxBundledExportImages caps how many images a single export with
+// images=true (the default) can bundle. spec.Build holds the whole zip in a
+// bytes.Buffer before Export ever writes a byte to the response (N-02): RAM
+// use runs to several times the zip's own size, uncapped, with no per-request
+// limit and no memory ceiling on the api service. A dataset past this cap
+// still exports fine with images=false.
+//
+// ponytail: a flat image-count cap, not a byte-size budget -- cheap to check
+// (len(byImage), already in hand) and good enough for the datasets this team
+// actually has today. Move to zip.NewWriter(w) streaming straight to the
+// response if a real dataset ever needs both bundled images and a bigger
+// number than this.
+const maxBundledExportImages = 1500
+
+// tooManyToBundle refuses an images=true export past maxBundledExportImages,
+// naming the images=false escape hatch rather than letting the request run
+// and risk the api container's own memory limit (N-02).
+func tooManyToBundle(n int) error {
+	if n <= maxBundledExportImages {
+		return nil
+	}
+	return errStatus(http.StatusBadRequest,
+		fmt.Sprintf("too many images to bundle (%d > %d) -- retry with images=false",
+			n, maxBundledExportImages))
+}
+
 // Export downloads this project's annotations in whichever format a training
 // pipeline wants. Reads straight out of PostgreSQL; not a background job,
 // because there is no inference and it is fast enough to answer inline.
@@ -50,6 +76,9 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 
 	var read export.ReadFunc
 	if q.Get("images") != "false" {
+		if err := tooManyToBundle(len(byImage)); err != nil {
+			return err
+		}
 		read = s.readImage
 	}
 	body, err := spec.Build(names, byImage, s.imageDims, read)

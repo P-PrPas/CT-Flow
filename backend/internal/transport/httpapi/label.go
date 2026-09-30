@@ -33,8 +33,8 @@ func validateBoxes(boxes []store.Box) error {
 		if strings.TrimSpace(b.Cls) == "" {
 			return errStatus(http.StatusBadRequest, "class name cannot be empty")
 		}
-		if strings.ContainsAny(b.Cls, "\n\r") {
-			return errStatus(http.StatusBadRequest, "class name cannot contain a newline")
+		if strings.ContainsAny(b.Cls, "\n\r\x00") {
+			return errStatus(http.StatusBadRequest, "class name cannot contain a newline or a NUL byte")
 		}
 		if len(b.Cls) > maxClassNameLen {
 			return errStatus(http.StatusBadRequest,

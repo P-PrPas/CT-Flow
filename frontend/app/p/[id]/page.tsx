@@ -158,7 +158,7 @@ function Workspace({
   const steps: { key: Panel; label: string; icon: IconName; badge?: string; disabled?: boolean; hint?: string }[] = [
     { key: "pool", label: "Label", icon: "image", badge: s.images.length ? `${s.progressBuckets.hand + s.progressBuckets.model + s.progressBuckets.test}/${s.images.length}` : undefined },
     { key: "gallery", label: "Gallery", icon: "layers", badge: s.images.length ? `${s.images.length}` : undefined },
-    { key: "testset", label: "Test set", icon: "target", badge: s.tsImages.length ? `${s.tsLabeled.length}/${s.tsImages.length}` : undefined },
+    { key: "testset", label: "Benchmark set", icon: "target", badge: s.tsImages.length ? `${s.tsLabeled.length}/${s.tsImages.length}` : undefined },
     { key: "report", label: "Report", icon: "chart", badge: s.evalResult ? pct(s.evalResult.overall.f1) : undefined, disabled: !s.evalResult, hint: "Run Evaluate first" },
     { key: "insights", label: "Progress", icon: "spark", badge: s.history.length ? `${s.history.length}` : undefined },
   ];
@@ -256,7 +256,7 @@ function Workspace({
       </main>
 
       {exporting && <ExportDialog inputDir={project.input_dir} projectName={project.name}
-        initialKind={s.panel === "testset" ? "testset" : "pool"}
+        initialKind="all"
         unsaved={{ pool: s.pool.canUndo, testset: s.ts.canUndo }} onClose={() => setExporting(false)} />}
 
       {s.showShortcuts && (

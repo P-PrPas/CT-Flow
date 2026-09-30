@@ -22,6 +22,7 @@ import (
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/jobs"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/models"
+	"github.com/P-PrPas/CT-Flow/backend/internal/platform/projectlock"
 )
 
 type Server struct {
@@ -31,12 +32,13 @@ type Server struct {
 	// Directory is nil when only local accounts are configured. A *auth.Directory
 	// assigned here would be a nil pointer inside a non-nil interface -- see the
 	// comment in main.go where this field is set.
-	Directory auth.LoginProvider
-	Store     *store.Store
-	VPE       *vpe.Client
-	Jobs      *jobs.Tracker
-	Claims    *claims.Tracker
-	Log       *slog.Logger
+	Directory   auth.LoginProvider
+	Store       *store.Store
+	VPE         *vpe.Client
+	Jobs        *jobs.Tracker
+	Claims      *claims.Tracker
+	ProjectLock *projectlock.Tracker
+	Log         *slog.Logger
 }
 
 // httpError is the only way a handler reports a failure, so the {"detail": ...}
@@ -89,6 +91,14 @@ func (s *Server) Handle(h Handler) http.HandlerFunc {
 			// check moved out of process.
 			var ve *vpe.Error
 			if errors.As(err, &ve) {
+				// Only 5xx: a 409 model-lock conflict or a 400 empty-bank refusal is
+				// a normal business response, not a failure worth an error log --
+				// but an unhandled sidecar exception previously reached the browser
+				// and nowhere else (M-04): the traceback lived only in the vpe
+				// container's own stderr.
+				if ve.Status >= http.StatusInternalServerError {
+					s.Log.Error("sidecar error", "path", r.URL.Path, "status", ve.Status, "detail", ve.Detail)
+				}
 				writeJSON(w, ve.Status, map[string]string{"detail": ve.Detail})
 				return
 			}

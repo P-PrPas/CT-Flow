@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/core/export"
@@ -26,22 +28,18 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 	}
 	kind := q.Get("kind")
 	if kind == "" {
-		kind = store.KindPool
+		kind = "all"
 	}
-	if kind != store.KindPool && kind != store.KindTestset {
+	if kind != "all" && kind != store.KindPool && kind != store.KindTestset {
 		return errStatus(http.StatusBadRequest,
-			fmt.Sprintf("unknown kind %s -- choose 'pool' or 'testset'", pyRepr(kind)))
+			fmt.Sprintf("unknown kind %s -- choose 'all', 'pool' or 'testset'", pyRepr(kind)))
 	}
 
 	inputDir, _, err := s.stateDirFor(q.Get("input_dir"))
 	if err != nil {
 		return err
 	}
-	names, err := s.Store.Classes(r.Context(), inputDir, kind)
-	if err != nil {
-		return err
-	}
-	byImage, err := s.Store.LoadAnnotations(r.Context(), inputDir, kind)
+	names, byImage, err := s.classesAndAnnotations(r.Context(), inputDir, kind)
 	if err != nil {
 		return err
 	}
@@ -50,7 +48,11 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 			fmt.Sprintf("nothing to export for %s -- label something first", pyRepr(kind)))
 	}
 
-	body, err := spec.Build(names, byImage, s.imageDims, s.readImage)
+	var read export.ReadFunc
+	if q.Get("images") != "false" {
+		read = s.readImage
+	}
+	body, err := spec.Build(names, byImage, s.imageDims, read)
 	if err != nil {
 		return err
 	}
@@ -65,6 +67,56 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 		s.Log.Error("writing the export body", "path", r.URL.Path, "err", err)
 	}
 	return nil
+}
+
+// classesAndAnnotations resolves one kind's classes and boxes, or -- for
+// "all" -- both kinds merged. Pool and testset are separate index spaces
+// (classes.idx is scoped per kind), so a merge cannot just concatenate: it
+// unions the class names, pool's order first, then whatever testset adds.
+func (s *Server) classesAndAnnotations(ctx context.Context, inputDir, kind string) ([]string, map[string][]store.Box, error) {
+	if kind != "all" {
+		names, err := s.Store.Classes(ctx, inputDir, kind)
+		if err != nil {
+			return nil, nil, err
+		}
+		byImage, err := s.Store.LoadAnnotations(ctx, inputDir, kind)
+		if err != nil {
+			return nil, nil, err
+		}
+		return names, byImage, nil
+	}
+
+	poolNames, err := s.Store.Classes(ctx, inputDir, store.KindPool)
+	if err != nil {
+		return nil, nil, err
+	}
+	tsNames, err := s.Store.Classes(ctx, inputDir, store.KindTestset)
+	if err != nil {
+		return nil, nil, err
+	}
+	names := append([]string{}, poolNames...)
+	for _, n := range tsNames {
+		if !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+
+	byImage, err := s.Store.LoadAnnotations(ctx, inputDir, store.KindPool)
+	if err != nil {
+		return nil, nil, err
+	}
+	tsByImage, err := s.Store.LoadAnnotations(ctx, inputDir, store.KindTestset)
+	if err != nil {
+		return nil, nil, err
+	}
+	for path, boxes := range tsByImage {
+		// ponytail: the same absolute path existing under both kinds is a real
+		// but rare edge (the unique constraint is scoped per kind, so it's not
+		// forbidden) -- append rather than overwrite so neither kind's boxes
+		// silently disappear from the merged export.
+		byImage[path] = append(byImage[path], boxes...)
+	}
+	return names, byImage, nil
 }
 
 // imageDims reads an image's size from its header. An image that has moved or

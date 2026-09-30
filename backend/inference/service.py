@@ -24,19 +24,32 @@ publish this port.
 """
 import asyncio
 import json
+import logging
 import os
 import threading
 from pathlib import Path
 
 import cv2
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from . import models as model_registry
 from .bank import Bank
 from .vpe import armed, extract_embedding, model_lock, predict_one
 
 app = FastAPI(title="CT-Flow VPE", version="1.0.0")
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+    # Starlette's own default handler answers an uncaught exception with a
+    # plain-text "Internal Server Error" body and logs nothing to this
+    # process's own log line -- the traceback only ever reached this
+    # container's stderr, and the client-visible wording didn't match Go's
+    # "internal error" (M-04/L-05). logging.exception keeps the traceback
+    # exactly where it already was; the response now matches Go's own 500.
+    logging.exception("unhandled error in %s", request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "internal error"})
 
 # The same root the API service confines to, so both processes agree on what is
 # reachable. Duplicated rather than imported because backend/config.py belongs to

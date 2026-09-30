@@ -322,7 +322,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 ดาวน์โหลด annotation ของโปรเจกต์เป็น format ที่เลือกได้ อ่านตรงจาก PostgreSQL (`internal/infra/store`) ไม่ใช่ background job (ไม่มี inference, เร็วพอที่จะ synchronous ได้) — ไม่ใช้ตัวไหนแก้ state ทั้งสิ้น
 
 ### `GET /api/export`
-- **Query:** `input_dir` (str), `format` (`"yolo"` default | `"coco"` | `"voc"`), `kind` (`"pool"` default | `"testset"`)
-- **Response:** ไฟล์แนบ (`Content-Disposition: attachment`), `application/zip` เสมอ — bundle รูปต้นฉบับไว้ใต้ `images/<basename>` ในทุก format ด้วย ไม่ใช่แค่ label: yolo (`classes.txt` + `labels/*.txt` + `images/`), voc (หนึ่ง XML ต่อภาพ + `images/`), coco (`annotations_coco.json` เดียว + `images/`)
+- **Query:** `input_dir` (str), `format` (`"yolo"` default | `"coco"` | `"voc"`), `kind` (`"all"` default merges pool+testset | `"pool"` | `"testset"`), `images` (`"false"` to exclude bundled source images, default bundles them)
+- **Response:** ไฟล์แนบ (`Content-Disposition: attachment`), `application/zip` เสมอ — ค่าเริ่มต้น bundle รูปต้นฉบับไว้ใต้ `images/<basename>` (voc: `JPEGImages/<basename>`) ในทุก format ด้วย ไม่ใช่แค่ label, ปิดได้ด้วย `images=false`: yolo (`classes.txt` + `labels/*.txt` + `images/`), voc (`Annotations/*.xml` + `JPEGImages/`), coco (`annotations_coco.json` เดียว + `images/`)
 - **400** ถ้า `format`/`kind` ไม่รู้จัก, หรือไม่มีอะไรให้ export (`kind` นั้นว่างเปล่า)
 - พิกัดในตารางเป็น pixel อยู่แล้ว (ไม่เหมือน YOLO txt เดิมที่ normalize) — ทุก format ต้องเปิดภาพสองรอบ: ครั้งหนึ่งอ่านขนาด (yolo normalize, voc ใส่ใน XML), อีกครั้งอ่าน byte ดิบไป bundle ภาพที่ถูกย้าย/ลบไปแล้วจะถูกข้าม ไม่ทำให้ export ทั้งก้อนล้มเหลว

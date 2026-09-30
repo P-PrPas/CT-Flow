@@ -126,7 +126,7 @@ assert default_entry["available"] is True, default_entry  # CI/dev always has th
 # inference sidecar first. /api/label would answer 400 "cannot read image"
 # before the store is ever consulted, because the sidecar reads the image to
 # extract an embedding -- a real refusal, just not this one.
-NO_PROJECT = str(HERE / "fixtures" / "pool") + "-not-a-project"
+NO_PROJECT = str(SCRATCH / "not-a-project")
 r = c.post("/api/testset/import", json={"input_dir": NO_PROJECT, "images": []})
 assert r.status_code == 404, (r.status_code, r.text)
 assert r.json()["detail"] == "no project for this folder -- create it first", r.json()
@@ -227,6 +227,36 @@ r = c.post("/api/label", json={
 })
 assert r.status_code == 409, r.text
 print("model lock: mismatched model_id on an existing bank rejected (409)")
+
+# B-02: a bad class name must never reach the bank -- it is permanent there
+# (class indexes are append-only), so this is checked before /vpe/teach, not
+# just before the DB write.
+r = c.post("/api/label", json={
+    "input_dir": POOL, "image": target,
+    "boxes": [{"cls": "", "box": [1, 1, 5, 5]}],
+})
+assert r.status_code == 400, r.text
+r = c.post("/api/label", json={
+    "input_dir": POOL, "image": target,
+    "boxes": [{"cls": "bad\nname", "box": [1, 1, 5, 5]}],
+})
+assert r.status_code == 400, r.text
+print("label: empty and newline class names rejected (400)")
+
+# M-05: box shape is not validated on the way in without this -- a reversed or
+# out-of-bounds box becomes a >1 YOLO coordinate or a negative COCO width with
+# no error anywhere downstream.
+r = c.post("/api/label", json={
+    "input_dir": POOL, "image": target,
+    "boxes": [{"cls": "test_item", "box": [120, 120, 30, 30]}],
+})
+assert r.status_code == 400, r.text
+r = c.post("/api/label", json={
+    "input_dir": POOL, "image": target,
+    "boxes": [{"cls": "test_item", "box": [1, 1, 99999, 99999]}],
+})
+assert r.status_code == 400, r.text
+print("label: reversed and out-of-bounds boxes rejected (400)")
 
 saved0 = _dbcheck.read_boxes(POOL, "pool", target)
 assert saved0 and saved0[0]["cls"] == "test_item", saved0
@@ -493,13 +523,40 @@ assert c.get("/api/export", params={"input_dir": POOL, "format": "xml"}).status_
 assert c.get("/api/export", params={"input_dir": POOL, "kind": "sideways"}).status_code == 400
 # The test set has ground truth from the block above, so it exports too --
 # proving export reads the two kinds from their separate index spaces.
-assert c.get("/api/export",
-             params={"input_dir": POOL, "format": "yolo", "kind": "testset"}).status_code == 200
+r = c.get("/api/export", params={"input_dir": POOL, "format": "yolo", "kind": "testset"})
+assert r.status_code == 200
+testset_names = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
+
+# "all" merges pool + testset into one archive -- every label either kind on
+# its own exported shows up here too, and it is what a bare kind-less request
+# now gets (the dropdown's new default).
+r = c.get("/api/export", params={"input_dir": POOL, "format": "yolo", "kind": "all"})
+assert r.status_code == 200, r.text
+all_names = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
+assert set(yolo_names) <= all_names and testset_names <= all_names, "'all' dropped a kind's labels"
+r_default = c.get("/api/export", params={"input_dir": POOL, "format": "yolo"})
+assert set(zipfile.ZipFile(io.BytesIO(r_default.content)).namelist()) == all_names, \
+    "default kind isn't 'all'"
+
+# images=false: labels only, no images/ entries, filenames unchanged -- for
+# someone reading straight off the VM's own copy of the files.
+r = c.get("/api/export", params={"input_dir": POOL, "format": "yolo", "kind": "pool", "images": "false"})
+assert r.status_code == 200, r.text
+label_only_names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+assert not any(n.startswith("images/") for n in label_only_names), "images=false still bundled images"
+assert any(n.startswith("labels/") for n in label_only_names), "images=false dropped the labels too"
+
+r = c.get("/api/export", params={"input_dir": POOL, "format": "coco", "kind": "pool", "images": "false"})
+assert r.status_code == 200 and r.headers["content-type"] == "application/zip", r.headers
+coco_no_images = zipfile.ZipFile(io.BytesIO(r.content))
+assert not any(n.startswith("images/") for n in coco_no_images.namelist())
+assert json.loads(coco_no_images.read("annotations_coco.json"))["images"], "images=false dropped the coco image list"
+
 # A folder with nothing labeled for that kind is a 400 with a message, never a
 # valid-but-empty archive.
 r = c.get("/api/export", params={"input_dir": NO_PROJECT, "format": "yolo"})
 assert r.status_code == 400 and "label something first" in r.json()["detail"], r.text
-print("export: yolo/coco/voc all zip + bundled images, pool and testset, bad format/kind rejected")
+print("export: yolo/coco/voc all zip + bundled images, pool/testset/all, images=false, bad format/kind rejected")
 
 # FR-19: pre-annotation for a single image, straight from the bank
 r = c.post("/api/predict", json={"input_dir": POOL, "image": target, "conf": 0.05})
@@ -511,10 +568,16 @@ print("predict:", len(drafts), "draft box(es)")
 # an empty bank must cost nothing rather than error
 EMPTY_POOL = SCRATCH / "_smoke_empty"
 if EMPTY_POOL.exists():
-    shutil.rmtree(EMPTY_POOL)
+    try:
+        shutil.rmtree(EMPTY_POOL)
+    except OSError as exc:
+        print(f"note: could not clear {EMPTY_POOL} ({exc}) -- left over from a previous run")
 r = c.post("/api/predict", json={"input_dir": str(EMPTY_POOL), "image": target})
 assert r.status_code == 200 and r.json()["boxes"] == [], r.text
-shutil.rmtree(EMPTY_POOL)
+try:
+    shutil.rmtree(EMPTY_POOL)
+except OSError as exc:
+    print(f"note: could not remove {EMPTY_POOL} ({exc}) -- left for the owning user to clean up")
 
 # FR-09 / T-17: relabel mode="update" merges instead of replacing
 c.post("/api/relabel", json={"input_dir": POOL, "image": target, "boxes": []})
@@ -693,7 +756,10 @@ print("events:", stats)
 # --- FR-29 / T-13: upload ---
 UP = SCRATCH / "_smoke_upload"
 if UP.exists():
-    shutil.rmtree(UP)
+    try:
+        shutil.rmtree(UP)
+    except OSError as exc:
+        print(f"note: could not clear {UP} ({exc}) -- left over from a previous run")
 jpeg = Path(images[0]).read_bytes()
 
 # T-13's precondition -- no upload on a shared server without a login -- used
@@ -740,7 +806,10 @@ r = c.post("/api/upload", data={"dir": str(UP)},
            files=[("files", ("   ", jpeg, "image/jpeg")), ("files", (".hidden.jpg", jpeg, "image/jpeg"))])
 assert r.json()["saved"] == [] and len(r.json()["skipped"]) == 2, r.json()
 print("upload: 1 saved, rejects non-images, oversize, duplicates and nameless files")
-shutil.rmtree(UP)
+try:
+    shutil.rmtree(UP)
+except OSError as exc:
+    print(f"note: could not remove {UP} ({exc}) -- left for the owning user to clean up")
 
 # --- FR-30 / FR-47: nothing works until you sign in ------------------------
 # This block never ran in CI before T-28: it was gated on the target server
@@ -802,6 +871,21 @@ _dbcheck.delete_images(POOL)
 orphaned = c.post("/api/session", json={"input_dir": POOL})
 assert orphaned.json()["bank_orphaned"] is True, orphaned.json()
 print("bank_orphaned: reported when the bank has classes and the DB has no images")
+
+# B-03: only the owner may delete a project -- owner_oid was stored but never
+# compared anywhere before this fix, so any signed-in user could delete
+# anyone else's project.
+if SMOKE_USER2:
+    with httpx.Client(base_url=BASE_URL, timeout=30) as other:
+        r = other.post("/api/auth/login",
+                       json={"username": SMOKE_USER2, "password": SMOKE_PASSWORD2})
+        assert r.status_code == 200, f"SMOKE_USER2 could not sign in: {r.text}"
+        r = other.delete(f"/api/projects/{PROJECT_ID}")
+        assert r.status_code == 403, (r.status_code, r.text)
+    assert c.get(f"/api/projects/{PROJECT_ID}").status_code == 200
+    print(f"projects: {SMOKE_USER2} was refused deleting {SMOKE_USER}'s project (403), it survives")
+else:
+    print("projects: ownership-on-delete check skipped -- set SMOKE_USER2/SMOKE_PASSWORD2 to cover it")
 
 # --- FR-43: deleting a project takes the rows and leaves the files ----------
 # Last, because everything above needs the project to exist. The promise the UI

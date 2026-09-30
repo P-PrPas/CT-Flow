@@ -13,11 +13,11 @@ export type { JobProgress };
 export { imgUrl, thumbUrl };
 
 export type ExportFormat = "yolo" | "coco" | "voc";
-export type ExportKind = "pool" | "testset";
+export type ExportKind = "pool" | "testset" | "all";
 
 /** Export returns file bytes, unlike the shared JSON request helper. */
-export async function exportAnnotations(input_dir: string, format: ExportFormat, kind: ExportKind, signal: AbortSignal): Promise<Blob> {
-  const query = new URLSearchParams({ input_dir, format, kind });
+export async function exportAnnotations(input_dir: string, format: ExportFormat, kind: ExportKind, includeImages: boolean, signal: AbortSignal): Promise<Blob> {
+  const query = new URLSearchParams({ input_dir, format, kind, images: String(includeImages) });
   const response = await fetch(`/api/export?${query}`, { signal });
   if (!response.ok) {
     if (response.status === 401) throw new Error("Your session has expired. Sign in again before exporting.");

@@ -23,7 +23,7 @@ const CHIPS: { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "labeled", label: "By hand" },
   { key: "auto", label: "By model" },
-  { key: "test", label: "Test set" },
+  { key: "test", label: "Benchmark set" },
   { key: "unlabeled", label: "Unlabeled" },
 ];
 
@@ -34,7 +34,7 @@ const CHIPS: { key: Filter; label: string }[] = [
 const MARK: Record<PoolItem["status"], { color: string; icon: IconName | null; says: string }> = {
   labeled: { color: "var(--ok)", icon: "check", says: "labeled by hand" },
   auto: { color: "var(--brand)", icon: "bot", says: "labeled by the model" },
-  test: { color: "var(--info)", icon: "target", says: "in the test set" },
+  test: { color: "var(--info)", icon: "target", says: "in the benchmark set" },
   unlabeled: { color: "var(--faint)", icon: null, says: "not labeled" },
 };
 

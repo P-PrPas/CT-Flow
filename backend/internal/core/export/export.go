@@ -26,8 +26,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
@@ -47,7 +49,9 @@ type DimsFunc func(path string) (w, h int, ok bool)
 // ReadFunc returns an image's raw bytes to bundle into the export archive, or
 // false if it can no longer be read -- same skip-not-fail contract as DimsFunc,
 // and gated behind it: a file that failed the dimensions read never reaches
-// this one.
+// this one. A nil ReadFunc means the caller opted out of bundling images
+// entirely: labels are written exactly as if it succeeded, just with no
+// images/ entries alongside them.
 type ReadFunc func(path string) ([]byte, bool)
 
 var Formats = map[string]Format{
@@ -85,10 +89,14 @@ func stem(path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-// f6 and f1 match Python's f"{v:.6f}" and f"{v:.1f}": fixed decimals, not the
-// shortest representation.
+// f6 matches Python's f"{v:.6f}": fixed decimals, not the shortest
+// representation.
 func f6(v float64) string { return fmt.Sprintf("%.6f", v) }
-func f1(v float64) string { return fmt.Sprintf("%.1f", v) }
+
+// intStr rounds to the nearest pixel -- VOC bounding boxes are conventionally
+// integer coordinates, and "252.0" is exactly the string a standard VOC
+// reader's int() call chokes on.
+func intStr(v float64) string { return strconv.Itoa(int(math.Round(v))) }
 
 func buildYOLO(names []string, byImage map[string][]store.Box, dims DimsFunc, read ReadFunc) ([]byte, error) {
 	idx := make(map[string]int, len(names))
@@ -106,9 +114,11 @@ func buildYOLO(names []string, byImage map[string][]store.Box, dims DimsFunc, re
 		if !ok {
 			continue
 		}
-		raw, ok := read(path)
-		if !ok {
-			continue
+		var raw []byte
+		if read != nil {
+			if raw, ok = read(path); !ok {
+				continue
+			}
 		}
 		lines := make([]string, 0, len(byImage[path]))
 		for _, b := range byImage[path] {
@@ -121,8 +131,10 @@ func buildYOLO(names []string, byImage map[string][]store.Box, dims DimsFunc, re
 		if err := writeZipEntry(zw, "labels/"+stem(path)+".txt", []byte(strings.Join(lines, "\n"))); err != nil {
 			return nil, err
 		}
-		if err := writeZipEntry(zw, "images/"+filepath.Base(path), raw); err != nil {
-			return nil, err
+		if read != nil {
+			if err := writeZipEntry(zw, "images/"+filepath.Base(path), raw); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := zw.Close(); err != nil {
@@ -180,13 +192,17 @@ func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc, re
 		if !ok {
 			continue
 		}
-		raw, ok := read(path)
-		if !ok {
-			continue
+		var raw []byte
+		if read != nil {
+			if raw, ok = read(path); !ok {
+				continue
+			}
 		}
 		base := filepath.Base(path)
 		imgs = append(imgs, cocoImage{ID: imageID, FileName: base, Width: w, Height: h})
-		files = append(files, file{"images/" + base, raw})
+		if read != nil {
+			files = append(files, file{"images/" + base, raw})
+		}
 		for _, b := range byImage[path] {
 			bw, bh := b.Box[2]-b.Box[0], b.Box[3]-b.Box[1]
 			anns = append(anns, cocoAnnotation{
@@ -203,6 +219,11 @@ func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc, re
 	// strings unless told not to, which would mangle a class name containing
 	// one for no reason.
 	enc.SetEscapeHTML(false)
+	// Indented, not the default one-liner: this file is meant to be opened and
+	// read, not just parsed. ids are still the COCO-spec sequential integers
+	// every consumer (pycocotools, etc.) expects -- the actual link back to a
+	// real file is images[].file_name, present with or without bundled bytes.
+	enc.SetIndent("", "  ")
 	if err := enc.Encode(map[string]any{
 		"images": imgs, "annotations": anns, "categories": categories,
 	}); err != nil {
@@ -225,6 +246,12 @@ func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc, re
 	return buf.Bytes(), nil
 }
 
+// buildVOC writes the Pascal VOC layout a standard reader expects:
+// Annotations/<stem>.xml beside JPEGImages/<basename>, integer pixel
+// coordinates (VOC's convention, not this tool's internal float boxes), and
+// the <pose>/<truncated>/<difficult> elements a VOC parser reads
+// unconditionally -- a document missing any of the three fails with an
+// AttributeError in the reference tooling rather than a clear error.
 func buildVOC(names []string, byImage map[string][]store.Box, dims DimsFunc, read ReadFunc) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -233,25 +260,31 @@ func buildVOC(names []string, byImage map[string][]store.Box, dims DimsFunc, rea
 		if !ok {
 			continue
 		}
-		raw, ok := read(path)
-		if !ok {
-			continue
+		var raw []byte
+		if read != nil {
+			if raw, ok = read(path); !ok {
+				continue
+			}
 		}
 		var objects strings.Builder
 		for _, b := range byImage[path] {
-			objects.WriteString("<object><name>" + xmlEscape(b.Cls) + "</name><bndbox>" +
-				"<xmin>" + f1(b.Box[0]) + "</xmin><ymin>" + f1(b.Box[1]) + "</ymin>" +
-				"<xmax>" + f1(b.Box[2]) + "</xmax><ymax>" + f1(b.Box[3]) + "</ymax>" +
+			objects.WriteString("<object><name>" + xmlEscape(b.Cls) + "</name>" +
+				"<pose>Unspecified</pose><truncated>0</truncated><difficult>0</difficult>" +
+				"<bndbox>" +
+				"<xmin>" + intStr(b.Box[0]) + "</xmin><ymin>" + intStr(b.Box[1]) + "</ymin>" +
+				"<xmax>" + intStr(b.Box[2]) + "</xmax><ymax>" + intStr(b.Box[3]) + "</ymax>" +
 				"</bndbox></object>")
 		}
-		doc := "<annotation><filename>" + xmlEscape(filepath.Base(path)) + "</filename>" +
+		doc := "<annotation><folder>JPEGImages</folder><filename>" + xmlEscape(filepath.Base(path)) + "</filename>" +
 			fmt.Sprintf("<size><width>%d</width><height>%d</height><depth>3</depth></size>", w, h) +
 			objects.String() + "</annotation>"
-		if err := writeZipEntry(zw, stem(path)+".xml", []byte(doc)); err != nil {
+		if err := writeZipEntry(zw, "Annotations/"+stem(path)+".xml", []byte(doc)); err != nil {
 			return nil, err
 		}
-		if err := writeZipEntry(zw, "images/"+filepath.Base(path), raw); err != nil {
-			return nil, err
+		if read != nil {
+			if err := writeZipEntry(zw, "JPEGImages/"+filepath.Base(path), raw); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := zw.Close(); err != nil {

@@ -280,7 +280,7 @@ export default function PoolPanel({ s }: { s: Session }) {
               </>
             ) : s.images.length ? (
               <Empty icon="check" title="Nothing left in the queue">
-                Every image in this folder is labeled. Measure accuracy on the test set, or start a
+                Every image in this folder is labeled. Measure accuracy on the benchmark set, or start a
                 project on another folder.
               </Empty>
             ) : (
@@ -327,7 +327,7 @@ export default function PoolPanel({ s }: { s: Session }) {
               </span>
               {prog.test > 0 && (
                 <span className="row" style={{ gap: 5 }}>
-                  <span className="dot" style={{ color: "var(--info)" }} /> {prog.test} test set
+                  <span className="dot" style={{ color: "var(--info)" }} /> {prog.test} benchmark set
                 </span>
               )}
               {prog.nothing > 0 && (
@@ -491,7 +491,7 @@ export default function PoolPanel({ s }: { s: Session }) {
               className="btn primary block"
               onClick={askAutoLabel}
               disabled={!s.evalResult || !s.remaining.length || s.busy}
-              title={s.evalResult ? "" : "Measure accuracy on the test set first"}
+              title={s.evalResult ? "" : "Measure accuracy on the benchmark set first"}
             >
               <Icon name="bot" size={14} /> Label the remaining {s.remaining.length}
             </button>
@@ -585,7 +585,7 @@ export default function PoolPanel({ s }: { s: Session }) {
             <>
               <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
                 The model scores <strong style={{ color: gradeColor(s.evalResult.overall.f1) }}>
-                  F1 {pct(s.evalResult.overall.f1)}</strong> on your test set, under the{" "}
+                  F1 {pct(s.evalResult.overall.f1)}</strong> on your benchmark set, under the{" "}
                 {pct(READY_F1)} bar. Labeling {s.remaining.length} images now means someone corrects
                 a lot of them later — usually slower than teaching a few more examples first.
               </p>

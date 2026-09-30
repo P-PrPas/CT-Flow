@@ -26,6 +26,7 @@ import (
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/jobs"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/models"
+	"github.com/P-PrPas/CT-Flow/backend/internal/platform/projectlock"
 	"github.com/P-PrPas/CT-Flow/backend/internal/transport/httpapi"
 )
 
@@ -130,10 +131,11 @@ func main() {
 
 	srv := &httpapi.Server{
 		Cfg: cfg, Catalog: catalog, Auth: auth.New(), Directory: loginProvider, Log: log,
-		Store:  db,
-		VPE:    vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
-		Jobs:   jobs.NewTracker(),
-		Claims: claims.NewTracker(),
+		Store:       db,
+		VPE:         vpe.New(env("VPE_URL", "http://127.0.0.1:8001")),
+		Jobs:        jobs.NewTracker(),
+		Claims:      claims.NewTracker(),
+		ProjectLock: projectlock.NewTracker(),
 	}
 
 	addr := ":" + env("PORT", "8000")

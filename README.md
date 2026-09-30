@@ -77,7 +77,7 @@ pool.
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
 | Directory login | Ready | company Directory login flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
-| Dataset export | Ready | YOLO ZIP, COCO JSON and Pascal VOC ZIP; saved pool or test-set annotations, without original images |
+| Dataset export | Ready | YOLO ZIP, COCO JSON and Pascal VOC ZIP; pool, test-set, or both merged; source images bundled by default, toggleable off |
 | Image upload | Backend only | `POST /api/upload` is built and gated by the login; no dropzone in the UI yet |
 | Per-label attribution (`labeled_by`) | Ready | every box and every taught prompt records who wrote it |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
@@ -197,25 +197,25 @@ into the volume the first time it's actually selected.
 
 ## Using CT-Flow
 
-The UI has four tabs. **Label** and **Test set** write to different places
-and never share data — test images must stay held out, or the F1 you read
+The UI has four tabs. **Label** and **Benchmark set** write to different places
+and never share data — benchmark images must stay held out, or the F1 you read
 back is measuring memorization, not generalization.
 
 1. **Label** — set the image folder (`<dataset>/pool`) once in the session
    setup card; that's the only folder there is to pick. Draw a box, name the
    class, save. That save extracts a SAVPE embedding into the prompt bank at
    `<dataset>/pool/.ctflow/_bank/`.
-2. **Test set** — pull 10–20 images in with **Import from pool** ("Add
+2. **Benchmark set** — pull 10–20 images in with **Import from pool** ("Add
    random" or tick specific ones). This flags them as a separate row in
-   PostgreSQL, no file copy — a test image *is* the pool image, so there's
+   PostgreSQL, no file copy — a benchmark image *is* the pool image, so there's
    nothing to duplicate on disk. Draw ground-truth boxes the same way — Save
    here writes straight to PostgreSQL, never into a prompt bank; the backend
    rejects any attempt to teach the bank from a flagged image with a `400`.
-3. Hit **Evaluate on test set** (from either tab) — YOLOE runs against the
+3. Hit **Evaluate on benchmark set** (from either tab) — YOLOE runs against the
    held-out images with the current bank and reports precision / recall / F1
    at IoU 0.5, overall and per class. This is the readiness signal, not pool
    confidence, which only tells you *which* image to label next.
-4. **Report** tab — every test image with ground truth and predictions drawn
+4. **Report** tab — every benchmark image with ground truth and predictions drawn
    on top, color-coded by match status, so you can see *what kind* of
    mistake the model is making.
 5. **Progress** tab — F1 vs. number of examples taught, one line per class,
@@ -252,15 +252,17 @@ older files silently decode under the wrong class.
 ### Export annotations
 
 Open a project and choose **Export dataset** beside the project title. Pick
-**YOLO**, **COCO**, or **Pascal VOC**, then choose **Pool annotations** or
-**Test set annotations** and click **Download annotations**. Opening export
-from the Test set view selects that source automatically.
+**YOLO**, **COCO**, or **Pascal VOC**, then choose **All annotations**, **Pool
+annotations**, or **Benchmark set annotations** and click **Download
+annotations**. Opening export from the Benchmark set view selects that source
+automatically.
 
-Exports contain saved annotations only: YOLO includes `labels/*.txt` and
-`classes.txt`, COCO is one JSON file, and VOC is a ZIP of XML files. Original
-images, images with no saved boxes, unreadable image files, and train/validation
-splits are not included. Save edits first to include them. Export is read-only;
-you can cancel while it is preparing or retry a failed request.
+Each format bundles the source images alongside their labels by default (under
+`images/`, or VOC's own `JPEGImages/`), so the export is self-contained —
+toggle **Include source images** off for labels only. Images with no saved
+boxes, unreadable image files, and train/validation splits are not included.
+Save edits first to include them. Export is read-only; you can cancel while it
+is preparing or retry a failed request.
 
 ## Model selection
 
@@ -380,6 +382,11 @@ docker compose run --rm --entrypoint /app/api api -hash-password alice 'their pa
 # -> alice:pbkdf2$240000$...   put it in LABEL_TOOL_USERS (comma-separated)
 python -c "import secrets; print(secrets.token_hex(32))"   # LABEL_TOOL_SECRET
 ```
+
+Pasting that hash into `.env` needs one extra step: Compose interpolates `$` in
+`.env` values before the container ever sees them, so `pbkdf2$240000$salt$key`
+silently truncates at the first `$` unless every `$` is doubled to `$$`
+(`pbkdf2$$240000$$salt$$key`). There is no diagnostic — login just fails.
 
 Every endpoint except the login/config routes needs a signed session cookie, and
 every prompt-bank instance records the `labeled_by` who taught it. Local

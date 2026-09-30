@@ -149,7 +149,7 @@ export default function Home() {
                the divergence FR-51 exists to catch and nothing warns about yet
                (docs/PHASE2_WORKSPACE.md #8). */
             <>
-              Removes its labels, classes and test set from the database. The images in{" "}
+              Removes its labels, classes and benchmark set from the database. The images in{" "}
               <code>{confirmDelete.input_dir}</code> and the taught examples in its{" "}
               <code>.ctflow</code> folder are <strong>not</strong> touched — nothing on
               disk is deleted. Labeling this folder again from a new project means
@@ -210,7 +210,7 @@ function ProjectCard({
       <div className="project-card-actions">
         <button className="btn ghost sm" onClick={() => { setName(p.name); setRenaming(true); }}>Rename</button>
         {!p.owner && <button className="btn ghost sm" onClick={() => api.updateProject(p.id, { claim_ownership: true }).then(onChanged).catch((e: Error) => onError(e.message))}>Claim</button>}
-        <button className="btn ghost icon sm project-delete" onClick={onDelete} aria-label={`Delete ${p.name}`} title="Delete project"><Icon name="trash" size={15} /></button>
+        {(!p.owner || p.owner.oid === meOID) && <button className="btn ghost icon sm project-delete" onClick={onDelete} aria-label={`Delete ${p.name}`} title="Delete project"><Icon name="trash" size={15} /></button>}
         <span className="spacer" /><a className="btn sm" href={workspaceHref(p)}>Open project <Icon name="arrowRight" size={14} /></a>
       </div>
     </article>
@@ -282,7 +282,7 @@ function CreateDialog({
               </button>
             </div>
             <span className="xs faint" id="project-dir-help">
-              Labels, the taught examples and the held-out test set are all managed for
+              Labels, the taught examples and the held-out benchmark set are all managed for
               you — in the database and a hidden <code>.ctflow</code> folder in here.
             </span>
           </div>

@@ -205,7 +205,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
                     </label>
                   ))}
                   {!s.poolCandidates.length && (
-                    <div className="xs muted" style={{ padding: 8 }}>Every pool image is already in the test set.</div>
+                    <div className="xs muted" style={{ padding: 8 }}>Every pool image is already in the benchmark set.</div>
                   )}
                 </div>
               </>

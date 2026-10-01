@@ -22,7 +22,12 @@ export default function LoginPage() {
   const oidcLogin = async () => {
     setLoading(true); setError("");
     try {
-      window.location.assign((await api.loginRedirect()).redirectUrl);
+      const { redirectUrl, state } = await api.loginRedirect();
+      // Written by real same-origin JS right here -- the callback page echoes
+      // it back so the backend can tell "this browser started the flow" from
+      // "this browser was forced to carry the state cookie" (see callback).
+      sessionStorage.setItem("oidc_state", state);
+      window.location.assign(redirectUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e)); setLoading(false);
     }
@@ -40,7 +45,7 @@ export default function LoginPage() {
   return (
     <main id="main" className="login-page">
       <section className="login-brand" aria-label="About CT-Flow">
-        <div className="brand-lockup"><span className="brand-mark"><BrandMark size={24} /></span><span className="col" style={{ gap: 4 }}><span className="brand-name">CT-Flow</span><span className="brand-sub">Connected Tech</span></span></div>
+        <div className="brand-lockup"><span className="brand-mark"><BrandMark /></span><span className="col" style={{ gap: 4 }}><span className="brand-name">CT-Flow</span><span className="brand-sub">Connected Tech</span></span></div>
         <div>
           <h2>Human expertise.<br />Machine precision.</h2>
           <p>A shared workspace for labeling images, teaching your model, and building better vision datasets.</p>

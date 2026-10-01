@@ -58,7 +58,7 @@ export const clearHistory = (inputDir: string): Promise<EvalPoint[]> =>
 
 // ------------------------------------------------------------------ advice
 
-export type Verdict = "ready" | "improving" | "plateau" | "cold";
+export type Verdict = "ready" | "improving" | "plateau" | "cold" | "unmeasured";
 
 export type ClassAdvice = {
   cls: string;
@@ -104,6 +104,17 @@ export function adviseClass(cls: string, history: EvalPoint[]): ClassAdvice {
       detail: "Run Evaluate once to get a baseline for this class.",
     };
   }
+  // tp + fn counts ground-truth boxes for this class in the benchmark set.
+  // Zero means nothing to measure against (L-01) -- fp alone scores F1=0.0,
+  // which reads as "doing badly" when it's really "can't be scored yet".
+  const gt = last.perClass[cls];
+  if (gt && gt.tp + gt.fn === 0) {
+    return {
+      cls, f1, prompts, delta, verdict: "unmeasured",
+      headline: "No ground truth for this class yet",
+      detail: "The benchmark set has no boxes for this class, so F1 is undefined -- add ground truth there before more hand-labeling here can move the number.",
+    };
+  }
   if (f1 >= READY_F1) {
     return {
       cls, f1, prompts, delta, verdict: "ready",
@@ -136,4 +147,5 @@ export const VERDICT_STYLE: Record<Verdict, { chip: string; note: string; label:
   improving: { chip: "brand", note: "info", label: "Improving" },
   plateau: { chip: "warn", note: "warn", label: "Stalled" },
   cold: { chip: "", note: "", label: "No data" },
+  unmeasured: { chip: "", note: "", label: "No ground truth" },
 };

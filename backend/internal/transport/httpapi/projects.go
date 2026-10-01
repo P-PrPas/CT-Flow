@@ -163,6 +163,21 @@ func (s *Server) DeleteProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// Ownership is checked before anything is deleted: ownership is stored but
+	// never compared anywhere in the handler layer, which is B-03 -- any
+	// signed-in user could delete any other user's project. An unowned project
+	// stays deletable by anyone, matching UpdateProject's take-it-not-assign-it
+	// model above; QA scoped this to DELETE, not to tightening ownership itself.
+	existing, found, err := s.Store.GetProject(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errStatus(http.StatusNotFound, "no such project")
+	}
+	if existing.Owner != nil && existing.Owner.OID != s.currentUser(r) {
+		return errStatus(http.StatusForbidden, "only the project's owner can delete it")
+	}
 	p, found, err := s.Store.DeleteProjectByID(r.Context(), id)
 	if err != nil {
 		return err

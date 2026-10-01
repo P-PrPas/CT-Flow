@@ -1,7 +1,7 @@
 # CT-Flow
 
 ![backend CI](https://github.com/P-PrPas/CT-Flow/actions/workflows/backend.yml/badge.svg)
-![go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white)
+![go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)
 ![python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 ![next.js](https://img.shields.io/badge/next.js-15.5-000000?logo=nextdotjs&logoColor=white)
 ![docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
@@ -75,9 +75,9 @@ pool.
 | GPU (CUDA) inference | Ready | on by default in Docker; falls back to CPU with a one-line build-arg override |
 | Auto-label + review mode | Ready | predicted boxes are fully editable before they're accepted |
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
-| OIDC login | Ready | company OIDC authorization-code flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
+| Directory login | Ready | company Directory login flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
-| Dataset export | Ready | YOLO ZIP, COCO JSON and Pascal VOC ZIP; saved pool or test-set annotations, without original images |
+| Dataset export | Ready | YOLO ZIP, COCO ZIP and Pascal VOC ZIP; pool (default), benchmark set, or both merged; source images bundled by default, toggleable off |
 | Image upload | Backend only | `POST /api/upload` is built and gated by the login; no dropzone in the UI yet |
 | Per-label attribution (`labeled_by`) | Ready | every box and every taught prompt records who wrote it |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
@@ -197,25 +197,25 @@ into the volume the first time it's actually selected.
 
 ## Using CT-Flow
 
-The UI has four tabs. **Label** and **Test set** write to different places
-and never share data — test images must stay held out, or the F1 you read
+The UI has four tabs. **Label** and **Benchmark set** write to different places
+and never share data — benchmark images must stay held out, or the F1 you read
 back is measuring memorization, not generalization.
 
 1. **Label** — set the image folder (`<dataset>/pool`) once in the session
    setup card; that's the only folder there is to pick. Draw a box, name the
    class, save. That save extracts a SAVPE embedding into the prompt bank at
    `<dataset>/pool/.ctflow/_bank/`.
-2. **Test set** — pull 10–20 images in with **Import from pool** ("Add
+2. **Benchmark set** — pull 10–20 images in with **Import from pool** ("Add
    random" or tick specific ones). This flags them as a separate row in
-   PostgreSQL, no file copy — a test image *is* the pool image, so there's
+   PostgreSQL, no file copy — a benchmark image *is* the pool image, so there's
    nothing to duplicate on disk. Draw ground-truth boxes the same way — Save
    here writes straight to PostgreSQL, never into a prompt bank; the backend
    rejects any attempt to teach the bank from a flagged image with a `400`.
-3. Hit **Evaluate on test set** (from either tab) — YOLOE runs against the
+3. Hit **Evaluate on benchmark set** (from either tab) — YOLOE runs against the
    held-out images with the current bank and reports precision / recall / F1
    at IoU 0.5, overall and per class. This is the readiness signal, not pool
    confidence, which only tells you *which* image to label next.
-4. **Report** tab — every test image with ground truth and predictions drawn
+4. **Report** tab — every benchmark image with ground truth and predictions drawn
    on top, color-coded by match status, so you can see *what kind* of
    mistake the model is making.
 5. **Progress** tab — F1 vs. number of examples taught, one line per class,
@@ -252,15 +252,18 @@ older files silently decode under the wrong class.
 ### Export annotations
 
 Open a project and choose **Export dataset** beside the project title. Pick
-**YOLO**, **COCO**, or **Pascal VOC**, then choose **Pool annotations** or
-**Test set annotations** and click **Download annotations**. Opening export
-from the Test set view selects that source automatically.
+**YOLO**, **COCO**, or **Pascal VOC**, then choose **Pool annotations**
+(default), **Benchmark set annotations**, or **All annotations** and click
+**Download annotations**. "All" merges both into one archive — a training
+export should stay on **Pool** unless you mean to fold the benchmark set in
+too, since anything in it stops being held-out the moment it's trained on.
 
-Exports contain saved annotations only: YOLO includes `labels/*.txt` and
-`classes.txt`, COCO is one JSON file, and VOC is a ZIP of XML files. Original
-images, images with no saved boxes, unreadable image files, and train/validation
-splits are not included. Save edits first to include them. Export is read-only;
-you can cancel while it is preparing or retry a failed request.
+Each format bundles the source images alongside their labels by default (under
+`images/`, or VOC's own `JPEGImages/`), so the export is self-contained —
+toggle **Include source images** off for labels only. Images with no saved
+boxes, unreadable image files, and train/validation splits are not included.
+Save edits first to include them. Export is read-only; you can cancel while it
+is preparing or retry a failed request.
 
 ## Model selection
 
@@ -339,47 +342,52 @@ Opens with **`?`** in the app; inert while a text field or dialog has focus.
 
 ## Multi-user & security
 
-**Signing in is required.** With neither the OIDC variables nor
+**Signing in is required.** With neither the Directory variables nor
 `LABEL_TOOL_USERS` set, the API refuses to start — projects carry an owner and
 every box carries an author, and a server nobody signs in to would record all
 of them as nobody. Path confinement to `LABEL_TOOL_VM_ROOT` is unconditional
 for the same reason: there is no "this is my own PC" deployment left to opt out
 for.
 
-To use the same company OIDC flow as `corpus-core`, register
-`<FRONTEND_URL>/entry/callback` with the provider and set:
+To use the company Directory login, register an application with the
+directory and set:
 
 ```bash
-OAUTH_CLIENT_ID=...
-OAUTH_CLIENT_SECRET=...
-OAUTH_ENDPOINT=https://issuer.example
+DIRECTORY_ADDRESS=directory.example:443
+DIRECTORY_KEY=...
+DIRECTORY_SECRET=...
 FRONTEND_URL=https://ct-flow.example
 LABEL_TOOL_SECRET=... # stable app-session signing key
 ```
 
-The backend performs discovery, code exchange, and user-info lookup; provider
-tokens never enter browser storage or response bodies. It then issues the
-existing `labeltool_session` HttpOnly/SameSite=Lax cookie for 12 hours. The
-frontend includes login, callback, expired-session redirect, identity, and
-logout states. Audit attribution uses the stable `sub` claim while the UI shows
-`preferred_username` (falling back to email, then `sub`); every login upserts a
-`users` row keyed on that `sub`, which is what lets an attribution be read back
+The backend dials a persistent connection to the directory and redeems the
+one-use code it returns entirely on the server; directory credentials never
+enter browser storage or response bodies. It then issues the existing
+`labeltool_session` HttpOnly/SameSite=Lax cookie for 12 hours. The frontend
+includes login, callback, expired-session redirect, identity, and logout
+states. Audit attribution uses the directory's stable user id while the UI
+shows the username (falling back to email, then the id); every login upserts
+a `users` row keyed on that id, which is what lets an attribution be read back
 as a person's name rather than an opaque id.
 
-PKCE (S256) and RP-initiated logout both switch on only when the provider's
-discovery document advertises them, so a provider that supports neither is
-unaffected. When it does advertise `end_session_endpoint`, signing out ends the
-session at the provider too -- without that, "sign out" on a shared labelling
-machine leaves the next sign-in silent and signed in as whoever left.
+The Directory SDK has no RP-initiated logout endpoint, so unlike a standard
+OIDC provider signing out only ever clears CT-Flow's own cookie -- on a shared
+labelling machine the next sign-in can be silent if the directory itself still
+has the browser signed in. Known limitation, not fixable from this side.
 
-Local username/password accounts are the fallback when OIDC is not set, and the
-credential CI and local development use:
+Local username/password accounts are the fallback when Directory is not set,
+and the credential CI and local development use:
 
 ```bash
 docker compose run --rm --entrypoint /app/api api -hash-password alice 'their password'
 # -> alice:pbkdf2$240000$...   put it in LABEL_TOOL_USERS (comma-separated)
 python -c "import secrets; print(secrets.token_hex(32))"   # LABEL_TOOL_SECRET
 ```
+
+Pasting that hash into `.env` needs one extra step: Compose interpolates `$` in
+`.env` values before the container ever sees them, so `pbkdf2$240000$salt$key`
+silently truncates at the first `$` unless every `$` is doubled to `$$`
+(`pbkdf2$$240000$$salt$$key`). There is no diagnostic — login just fails.
 
 Every endpoint except the login/config routes needs a signed session cookie, and
 every prompt-bank instance records the `labeled_by` who taught it. Local
@@ -397,11 +405,11 @@ an existing `LABEL_TOOL_USERS` value keeps working.
 | `MODELS_DIR` | `/models` in Docker | where YOLOE checkpoints are cached after auto-download — a named volume in Docker, a plain repo-local folder otherwise |
 | `POSTGRES_PASSWORD` | *(none — required)* | password for the `db` service; `docker compose up` refuses to start without it |
 | `DATABASE_URL` | set automatically in compose | where label/box storage lives (PostgreSQL, see [docs/history/DB_MIGRATION_PLAN.md](docs/history/DB_MIGRATION_PLAN.md)) — override to point at a different Postgres when running outside Docker |
-| `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — the local-account login. **Either this or the OIDC variables is required**; with neither, the API refuses to start |
+| `LABEL_TOOL_USERS` | *(empty)* | `name:hash,name:hash` — the local-account login. **Either this or the Directory variables is required**; with neither, the API refuses to start |
 | `LABEL_TOOL_SECRET` | *(random per restart)* | signs the session cookie; unset = everyone signed out on every restart |
-| `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` | *(empty)* | company OIDC client credentials; both required when OIDC is enabled |
-| `OAUTH_ENDPOINT` | *(empty)* | OIDC issuer/discovery URL |
-| `FRONTEND_URL` | `http://localhost:3000` | public origin; OIDC callback is `<FRONTEND_URL>/entry/callback` |
+| `DIRECTORY_ADDRESS` | *(empty)* | `host:port` of the company Directory server; required when Directory login is enabled |
+| `DIRECTORY_KEY` / `DIRECTORY_SECRET` | *(empty)* | company Directory application credentials; both required when Directory login is enabled |
+| `FRONTEND_URL` | `http://localhost:3000` | public origin; Directory callback is `<FRONTEND_URL>/entry/callback` |
 | `LABEL_TOOL_MAX_UPLOAD_MB` | `25` | per-file upload cap |
 | `APP_UID` | `1000` | build arg — must own `DATA_DIR` on a Linux host, since the container doesn't run as root |
 | `TORCH_INDEX_URL` | `.../whl/cu126` | build arg — the pip index PyTorch installs from; override to `.../whl/cpu` for a GPU-less build |

@@ -30,6 +30,7 @@ import (
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/config"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/jobs"
 	"github.com/P-PrPas/CT-Flow/backend/internal/platform/models"
+	"github.com/P-PrPas/CT-Flow/backend/internal/platform/projectlock"
 	"github.com/P-PrPas/CT-Flow/backend/internal/testsupport"
 )
 
@@ -42,11 +43,12 @@ func testServer(t *testing.T, cfg config.Config) *Server {
 		t.Fatal(err)
 	}
 	return &Server{
-		Cfg:     cfg,
-		Catalog: catalog,
-		Auth:    auth.NewWithSecret("test-secret"),
-		Jobs:    jobs.NewTracker(),
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Cfg:         cfg,
+		Catalog:     catalog,
+		Auth:        auth.NewWithSecret("test-secret"),
+		Jobs:        jobs.NewTracker(),
+		ProjectLock: projectlock.NewTracker(),
+		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
 

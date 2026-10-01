@@ -1,6 +1,6 @@
 # CT-Flow — Roadmap
 
-> **สถานะ ณ 2026-08-28:** backend refactor (Go) และ OIDC login merge เข้า `main` แล้ว · **Phase 2 ก้อนที่ 1 (T-26–T-28) merge แล้ว · ก้อนที่ 2 (T-29, T-30) implement แล้ว** — งานถัดไปคือก้อนที่ 3 แผนเต็มอยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
+> **สถานะ ณ 2026-09-30:** backend refactor (Go) merge เข้า `main` แล้ว · login ย้ายจาก OIDC ไปใช้ company Directory SDK แล้ว · **Phase 2 ก้อนที่ 1 (T-26–T-28) merge แล้ว · ก้อนที่ 2 (T-29, T-30) implement แล้ว** — งานถัดไปคือก้อนที่ 3 แผนเต็มอยู่ที่ [PHASE2_WORKSPACE.md](./PHASE2_WORKSPACE.md)
 >
 > เอกสารนี้คือ **source of truth ของลำดับงาน** · requirement รายข้ออยู่ที่ [REQUIREMENTS.md](./REQUIREMENTS.md) · บันทึกงานที่จบไปแล้วอยู่ที่ [`history/`](./history/)
 
@@ -8,7 +8,7 @@
 
 - API เป็น Go, inference + prompt bank เป็น Python sidecar
 - PostgreSQL เก็บ label/box metadata และรองรับหลายคนแก้ project เดียวกันได้ในระดับ storage
-- OIDC login ครบทั้ง backend และ frontend · local username/password ยังเป็น fallback
+- Company Directory SDK login ครบทั้ง backend และ frontend · local username/password ยังเป็น fallback
 - CI มี `go`, `python`, `smoke` (workflow `backend`) และ `frontend` (boundary → `tsc` → `build`) · `smoke` รันแบบล็อกอินด้วย local account ตั้งแต่ T-28 บล็อก auth จึงเดินจริงทุก push
 - โปรเจกต์มีชื่อ/เจ้าของ/ชนิดงาน และมี `/api/projects` ครบห้า endpoint · write path ทุกตัวต้องมีโปรเจกต์อยู่ก่อน · login เป็นสิ่งบังคับ (T-26/T-27)
 - ยังเป็นระบบสำหรับทีมภายในบน instance เดียว ไม่ใช่ production-scale deployment
@@ -83,7 +83,7 @@
 - ส่ง usage event จาก frontend ให้สถิติข้าม session และข้ามเครื่องได้จริง (backend สรุปได้แล้ว ดู REQUIREMENTS §7)
 - ~~เพิ่ม frontend type-check/build เข้า CI~~ **ทำแล้วใน T-30** (`.github/workflows/frontend.yml`: module boundary → `tsc --noEmit` → `next build`)
 - **การทดสอบที่รัน React จริง** — ไม่มีด่านไหนใน CI *รัน* โค้ด frontend เลย และ smoke test ยิง HTTP โดยไม่มี React อยู่ในภาพ · ช่องนี้ปล่อย render loop ของ claim heartbeat หลุดมาแล้ว (`setClaims` → `heldByOthers` → `nextTodo` → effect → `POST /api/claim` → `setClaims`) ซึ่งเห็นได้แค่ใน network panel ของ browser · **เงื่อนไขเริ่มงาน:** มี bug ประเภทนี้หลุดอีกครั้ง หรือเริ่มมี state logic ที่ซับซ้อนกว่านี้
-- **Export-format picker บน UI ✅** — ปุ่ม Export dataset ใน workspace เลือก YOLO/COCO/VOC และ Pool/Test set ได้ ผ่าน `GET /api/export`; ส่งออกเฉพาะ annotations ที่บันทึกแล้ว ไม่รวมรูปภาพ
+- **Export-format picker บน UI ✅** — ปุ่ม Export dataset ใน workspace เลือก YOLO/COCO/VOC และ All/Pool/Benchmark set ได้ ผ่าน `GET /api/export`; bundle รูปต้นฉบับไปด้วยโดย default (`images=false` ปิดได้)
 
 ## Phase 5 — Scale และ operations (conditional)
 

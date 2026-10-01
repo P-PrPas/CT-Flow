@@ -58,6 +58,11 @@ services:
       dockerfile: backend/Dockerfile
       args:
         APP_UID: ${APP_UID:-1000}
+      # Lets the build's `go mod download` authenticate to the company's
+      # private Go proxy the same way the host's `go` already does -- see
+      # the comment on this RUN in backend/Dockerfile.
+      secrets:
+        - netrc
     image: ct-flow-api
     environment:
       LABEL_TOOL_VM_ROOT: /opt/mount/project
@@ -67,9 +72,9 @@ services:
       # secret, so everyone is signed out whenever the API restarts; set it to
       # keep sessions across a redeploy.
       LABEL_TOOL_SECRET: ${LABEL_TOOL_SECRET:-}
-      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
-      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
-      OAUTH_ENDPOINT: ${OAUTH_ENDPOINT:-}
+      DIRECTORY_ADDRESS: ${DIRECTORY_ADDRESS:-}
+      DIRECTORY_KEY: ${DIRECTORY_KEY:-}
+      DIRECTORY_SECRET: ${DIRECTORY_SECRET:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       LABEL_TOOL_MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       VPE_URL: http://vpe:8001
@@ -90,6 +95,15 @@ services:
     # `web`, and Swagger -- the only other reason this port was ever on the host
     # -- went with FastAPI. Add a ports entry back if you want to curl it
     # directly during development.
+    #
+    # An export with images=true (the default) buffers the whole zip in RAM
+    # before writing it out (N-02) -- capped per-request at
+    # maxBundledExportImages, but several concurrent exports still add up.
+    # This bounds the blast radius to this one container instead of the host.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     restart: unless-stopped
 
   web:
@@ -109,3 +123,14 @@ services:
 volumes:
   models:
   pgdata:
+
+secrets:
+  # Read at build time only (see api's build.secrets); whatever's at this path
+  # is never baked into an image layer or committed. Defaults to a checked-in
+  # empty file so a machine with no company credentials still builds -- it
+  # just gets go mod download's own 404/auth error instead of Compose
+  # refusing to resolve a secret source that doesn't exist. Point NETRC_PATH
+  # at your real ~/.netrc (same file `go env GOPROXY` already trusts) to pull
+  # the Directory SDK.
+  netrc:
+    file: ${NETRC_PATH:-./.netrc.empty}

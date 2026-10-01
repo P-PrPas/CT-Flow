@@ -11,7 +11,7 @@
 - **`input_dir`:** ทุก endpoint ที่ทำงานกับ project ใดโปรเจกต์หนึ่งรับแค่ `input_dir` ตัวเดียว — prompt bank อยู่ใต้ subfolder ตายตัว `<input_dir>/.ctflow/` (ดู `deps.state_dir()`) ส่วนป้ายและ test-set membership อยู่ใน PostgreSQL คีย์ด้วย `input_dir` เดียวกัน (T-21, ดู `internal/infra/store`) ไม่มี output folder หรือ test-set folder ให้เลือกแยกอีกต่อไป
 - **Box model ที่ใช้ร่วมกันทั้งพูลและ test set:** `{"cls": "<ชื่อคลาส>", "box": [x1, y1, x2, y2]}` พิกัดเป็นพิกเซลจริงของภาพต้นฉบับ (ไม่ normalize)
 - **BankSummary** (โครงสร้างที่หลาย endpoint คืนกลับมา): `{"classes": [{"name": str, "count": int}], "labeled": [path...], "auto": [path...], "model": str|null}` — `model` เป็น `null` จนกว่าจะมี embedding แรกเข้า bank แล้วล็อกตลอดไป (ดู `POST /api/label`)
-- **Auth (บังคับตั้งแต่ T-27):** ทุก endpoint **ยกเว้น** config/login routes ต้องมี `labeltool_session` cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ต้องตั้ง OIDC (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ENDPOINT`, `FRONTEND_URL`) หรือ `LABEL_TOOL_USERS` อย่างใดอย่างหนึ่ง **ไม่ตั้งเลย = API ไม่ start** · OIDC มี priority เหนือ local fallback
+- **Auth (บังคับตั้งแต่ T-27):** ทุก endpoint **ยกเว้น** config/login routes ต้องมี `labeltool_session` cookie ไม่งั้นได้ `401 {"detail": "not signed in"}` · ต้องตั้ง Directory (`DIRECTORY_ADDRESS`, `DIRECTORY_KEY`, `DIRECTORY_SECRET`, `FRONTEND_URL`) หรือ `LABEL_TOOL_USERS` อย่างใดอย่างหนึ่ง **ไม่ตั้งเลย = API ไม่ start** · Directory มี priority เหนือ local fallback
 - **`404 {"detail": "no project for this folder -- create it first"}`:** ทุก write path (`/api/label`, `/api/relabel`, `/api/testset/import`, `/api/testset/remove`, `/api/testset/label`, และ job ที่เขียนสถานะอย่าง `/api/autolabel`) ปฏิเสธ `input_dir` ที่ยังไม่มีแถวใน `projects` — ก่อน Phase 2 write path สร้างแถวให้เองเงียบ ๆ ทำให้เกิดโปรเจกต์ไร้ชื่อไร้เจ้าของจาก path ที่พิมพ์ผิด · สร้างโปรเจกต์ได้สองทางเท่านั้น: `POST /api/projects` หรือ `POST /api/session` (ดูหัวข้อ Projects) · แปลงจาก `store.ErrNoProject` ที่ `Handle` ที่เดียว status กับข้อความจึงไม่มีทางเพี้ยนกันระหว่าง endpoint
 - **`conf_by_class`:** `/api/predict`, `/api/evaluate`, `/api/autolabel` รับ dict `{ชื่อคลาส: threshold}` เพื่อ override `conf` เป็นรายคลาส (`{}` = พฤติกรรมเดิม) — เหตุผลและตัวเลขอยู่ใน [EXPERIMENT_T01_CONF.md](./history/EXPERIMENT_T01_CONF.md)
 
@@ -19,33 +19,32 @@
 
 ## Auth (`internal/transport/httpapi/auth.go`)
 
-ปิดอยู่โดย default ทั้งชุด OIDC ใช้ authorization-code flow แบบเดียวกับ `corpus-core`; backend exchange code และออก application-session cookie โดยไม่ส่ง provider token กลับ browser
+ปิดอยู่โดย default ทั้งชุด Directory เป็น proprietary Go SDK (`go.cntt.one/product/directory`) ที่คุยผ่าน persistent connection กับ Directory server ของบริษัท ไม่ใช่ OIDC/HTTP — backend redeem code แล้วออก application-session cookie โดยไม่ส่ง credential ของ Directory กลับ browser
 
 ### `GET /api/public/login/redirect`
 - **Response:** `{"redirectUrl": str}` + HttpOnly state cookie อายุ 5 นาที
-- state cookie เก็บ `<state>.<PKCE verifier>` ไว้ด้วยกัน (ทั้งสองส่วนเป็น base64url จึงไม่มี `.` ปนแน่นอน) — cookie เดียวที่มาไม่ครบไม่ได้ ดีกว่าสอง cookie ที่มาครึ่งเดียวได้
-- แนบ `code_challenge` (S256) **เฉพาะเมื่อ discovery document ของ provider ประกาศ `code_challenge_methods_supported: ["S256"]`** — provider ที่ไม่รองรับจะไม่ได้รับ parameter ที่ไม่ได้ขอ
+- `AuthorizeUrl` ของ Directory validate `redirect` ตรงกับ URI ที่ลงทะเบียนไว้แบบ exact-match — ลองฝัง `state` เป็น query string ต่อท้ายมาก่อน โดน Directory ปฏิเสธทั้งลิงก์ (`APPLICATION-REDIRECT-URI-FORBIDDEN`) จึงส่ง `redirect` เปล่า ๆ ไม่มี query string ใด ๆ ทั้งสิ้น CSRF protection ทั้งหมดอยู่ที่ state cookie แทน — แค่มี cookie นี้ตอน callback ก็พอเป็นหลักฐานว่า browser นี้เป็นคนเริ่ม flow เอง (Directory ไม่มี `state` parameter ของตัวเองให้ส่งกลับมาอยู่แล้ว)
+- **503** ถ้า connection ไปยัง Directory server ยังไม่ขึ้น (`ErrNotConnected` — background redial loop ยังไม่สำเร็จครั้งแรก) ไม่ใช่ misconfiguration แค่ยังไม่พร้อม
 
 ### `POST /api/public/login/callback`
-- **Body:** `{"code": str, "state": str}`
-- **Response:** `{"enabled": true, "user": str, "oid": str, "mode": "oidc"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.) — `oid` คือ `sub` ของ provider ส่วน `user` คือ display name
-- **401** เมื่อ state ไม่ตรง, code exchange ล้มเหลว หรือ user-info ใช้ไม่ได้ — เทียบ state แบบ constant-time และลบ state cookie **ก่อน** แลก code
-- สำเร็จแล้ว upsert แถวใน `users` (`oid` = `sub` ของ provider) เพื่อให้ `sub` ที่ไปอยู่ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้ · เขียนไม่สำเร็จ **ไม่** ทำให้ login พัง (เป็นปัญหาฝั่ง reporting ไม่ใช่เหตุผลที่จะปฏิเสธ login ที่ถูกต้อง)
+- **Body:** `{"code": str}`
+- **Response:** `{"enabled": true, "user": str, "oid": str, "mode": "directory"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.) — `oid` คือ user id ของ Directory ส่วน `user` คือ display name
+- **401** เมื่อไม่มี state cookie ที่ตั้งไว้ตอน redirect หรือ redeem code ล้มเหลว — เช็ค cookie **ก่อน** redeem แล้วลบทิ้งทันที กัน callback URL เดิมถูก replay ซ้ำ
+- สำเร็จแล้ว upsert แถวใน `users` (`oid` = user id ของ Directory) เพื่อให้ id ที่ไปอยู่ใน `annotations.created_by` / `labeled_by` แปลกลับเป็นชื่อคนได้ · เขียนไม่สำเร็จ **ไม่** ทำให้ login พัง (เป็นปัญหาฝั่ง reporting ไม่ใช่เหตุผลที่จะปฏิเสธ login ที่ถูกต้อง)
 
 ### `GET /api/auth/me`
-- **Response:** `{"enabled": true, "user": str|null, "oid": str|null, "mode": "local"|"oidc"}` — `user: null` แปลว่ายังไม่ได้ login · `enabled` เป็น `true` เสมอตั้งแต่ T-27 (ไม่มีเซิร์ฟเวอร์ที่ไม่มี login อีกแล้ว) เก็บฟิลด์ไว้เพราะ frontend กับ smoke test อ่านมันอยู่ การลบฟิลด์เป็น breaking change คนละเรื่องกับ T-27
-- **`oid` คือกุญแจ attribution ของคนที่เรียก** — ค่าเดียวกับที่ลงใน `projects.owner_oid` และ `annotations.created_by` · `user` คือ**ชื่อที่เอาไว้แสดง** ไม่ใช่ identity: บน OIDC มันคือ display name ที่ provider เปลี่ยนได้และซ้ำกันได้ ส่วน `oid` คือ `sub` · UI ต้องเทียบด้วย `oid` เมื่อจะตอบว่า "อันนี้ของฉันหรือเปล่า" (T-29) · บน local account ทั้งสองค่าเท่ากันคือ username ซึ่งเป็นเหตุผลที่การเทียบผิดจะดูถูกต้องตอน dev · `user` กับ `oid` มาคู่กันเสมอ ไม่มีทางที่ตัวหนึ่ง null อีกตัวไม่ null
+- **Response:** `{"enabled": true, "user": str|null, "oid": str|null, "mode": "local"|"directory"}` — `user: null` แปลว่ายังไม่ได้ login · `enabled` เป็น `true` เสมอตั้งแต่ T-27 (ไม่มีเซิร์ฟเวอร์ที่ไม่มี login อีกแล้ว) เก็บฟิลด์ไว้เพราะ frontend กับ smoke test อ่านมันอยู่ การลบฟิลด์เป็น breaking change คนละเรื่องกับ T-27
+- **`oid` คือกุญแจ attribution ของคนที่เรียก** — ค่าเดียวกับที่ลงใน `projects.owner_oid` และ `annotations.created_by` · `user` คือ**ชื่อที่เอาไว้แสดง** ไม่ใช่ identity: บน Directory มันคือ display name ที่เปลี่ยนได้และซ้ำกันได้ ส่วน `oid` คือ user id ที่ Directory ออกให้ · UI ต้องเทียบด้วย `oid` เมื่อจะตอบว่า "อันนี้ของฉันหรือเปล่า" (T-29) · บน local account ทั้งสองค่าเท่ากันคือ username ซึ่งเป็นเหตุผลที่การเทียบผิดจะดูถูกต้องตอน dev · `user` กับ `oid` มาคู่กันเสมอ ไม่มีทางที่ตัวหนึ่ง null อีกตัวไม่ null
 
 ### `POST /api/auth/login`
 - **Body:** `{"username": str, "password": str}`
 - **Response:** `{"enabled": true, "user": str, "oid": str, "mode": "local"}` + `Set-Cookie: labeltool_session` (HttpOnly, SameSite=Lax, อายุ 12 ชม.) — local account ไม่มี subject แยก `oid` จึงเท่ากับ username
 - **401** เมื่อรหัสผ่านหรือชื่อผู้ใช้ผิด (ข้อความเดียวกันทั้งสองกรณี โดยตั้งใจ)
-- **400** ถ้า OIDC active อยู่ (local login เป็น fallback เท่านั้น) — เคส "เซิร์ฟเวอร์ไม่มี user เลย" ไม่มีอีกแล้ว process ตายตั้งแต่ boot
+- **400** ถ้า Directory active อยู่ (local login เป็น fallback เท่านั้น) — เคส "เซิร์ฟเวอร์ไม่มี user เลย" ไม่มีอีกแล้ว process ตายตั้งแต่ boot
 
 ### `POST /api/auth/logout`
-- ลบ cookie · **Response:** `{"enabled": true, "user": null, "oid": null, "mode": "local"|"oidc", "logoutUrl"?: str}`
-- `logoutUrl` มีเฉพาะโหมด `oidc` และเฉพาะเมื่อ discovery document มี `end_session_endpoint` — frontend ต้องพา browser ไปที่ URL นั้น ไม่งั้น session ฝั่ง provider ยังอยู่ แล้วการกด "sign in" ครั้งถัดไปบนเครื่อง label ที่ใช้ร่วมกันจะ login เงียบ ๆ เป็นคนเดิม
-- **ไม่**แนบ `post_logout_redirect_uri`: parameter นั้นต้อง register กับ provider ก่อน และ logout ที่พังเพราะ URL ไม่ได้ register แย่กว่า logout ที่จบบนหน้า signed-out ของ provider เอง
+- ลบ cookie · **Response:** `{"enabled": true, "user": null, "oid": null, "mode": "local"|"directory"}`
+- `logoutUrl` หายไปเสมอตอนนี้: Directory SDK ไม่มี RP-initiated logout endpoint ให้พา browser ไป ต่างจาก OIDC เดิม — "sign out" จึงลบได้แค่ cookie ของ CT-Flow เอง บนเครื่อง label ที่ใช้ร่วมกัน การกด "sign in" ครั้งถัดไปอาจ login เงียบ ๆ เป็นคนเดิมถ้าฝั่ง Directory ยังจำ session ของ browser อยู่ — ข้อจำกัดที่รับไว้ ไม่ใช่บั๊ก แก้จากฝั่งนี้ไม่ได้
 
 ---
 
@@ -323,7 +322,7 @@ Ground truth สำหรับวัดผล ตั้งใจให้แย
 ดาวน์โหลด annotation ของโปรเจกต์เป็น format ที่เลือกได้ อ่านตรงจาก PostgreSQL (`internal/infra/store`) ไม่ใช่ background job (ไม่มี inference, เร็วพอที่จะ synchronous ได้) — ไม่ใช้ตัวไหนแก้ state ทั้งสิ้น
 
 ### `GET /api/export`
-- **Query:** `input_dir` (str), `format` (`"yolo"` default | `"coco"` | `"voc"`), `kind` (`"pool"` default | `"testset"`)
-- **Response:** ไฟล์แนบ (`Content-Disposition: attachment`) — `application/zip` (yolo: `classes.txt` + `labels/*.txt`, voc: หนึ่ง XML ต่อภาพ) หรือ `application/json` (coco: `{images, annotations, categories}` เดียว)
+- **Query:** `input_dir` (str), `format` (`"yolo"` default | `"coco"` | `"voc"`), `kind` (`"pool"` default | `"testset"` | `"all"` merges pool+testset), `images` (`"false"` to exclude bundled source images, default bundles them)
+- **Response:** ไฟล์แนบ (`Content-Disposition: attachment`), `application/zip` เสมอ — ค่าเริ่มต้น bundle รูปต้นฉบับไว้ใต้ `images/<basename>` (voc: `JPEGImages/<basename>`) ในทุก format ด้วย ไม่ใช่แค่ label, ปิดได้ด้วย `images=false`: yolo (`classes.txt` + `labels/*.txt` + `images/`), voc (`Annotations/*.xml` + `JPEGImages/`), coco (`annotations_coco.json` เดียว + `images/`)
 - **400** ถ้า `format`/`kind` ไม่รู้จัก, หรือไม่มีอะไรให้ export (`kind` นั้นว่างเปล่า)
-- พิกัดในตารางเป็น pixel อยู่แล้ว (ไม่เหมือน YOLO txt เดิมที่ normalize) — yolo/voc export ต้องเปิดภาพเพื่ออ่านขนาดตอนแปลงกลับเป็น normalized/แสดงใน XML เท่านั้น ภาพที่ถูกย้าย/ลบไปแล้วจะถูกข้าม ไม่ทำให้ export ทั้งก้อนล้มเหลว
+- พิกัดในตารางเป็น pixel อยู่แล้ว (ไม่เหมือน YOLO txt เดิมที่ normalize) — ทุก format ต้องเปิดภาพสองรอบ: ครั้งหนึ่งอ่านขนาด (yolo normalize, voc ใส่ใน XML), อีกครั้งอ่าน byte ดิบไป bundle ภาพที่ถูกย้าย/ลบไปแล้วจะถูกข้าม ไม่ทำให้ export ทั้งก้อนล้มเหลว

@@ -121,7 +121,7 @@
     ]
   },
   "voc": {
-    "contact1.xml": "<annotation><filename>contact1.jpg</filename><size><width>2240</width><height>1260</height><depth>3</depth></size><object><name>test_item</name><bndbox><xmin>30.0</xmin><ymin>30.0</ymin><xmax>120.0</xmax><ymax>120.0</ymax></bndbox></object><object><name>aaa_new_class</name><bndbox><xmin>1.5</xmin><ymin>2.5</ymin><xmax>20.2</xmax><ymax>40.8</ymax></bndbox></object></annotation>",
-    "contact_165_255.xml": "<annotation><filename>contact_165_255.jpg</filename><size><width>1680</width><height>790</height><depth>3</depth></size><object><name>aaa_new_class</name><bndbox><xmin>0.0</xmin><ymin>0.0</ymin><xmax>10.0</xmax><ymax>10.0</ymax></bndbox></object></annotation>"
+    "Annotations/contact1.xml": "<annotation><folder>JPEGImages</folder><filename>contact1.jpg</filename><size><width>2240</width><height>1260</height><depth>3</depth></size><object><name>test_item</name><pose>Unspecified</pose><truncated>0</truncated><difficult>0</difficult><bndbox><xmin>30</xmin><ymin>30</ymin><xmax>120</xmax><ymax>120</ymax></bndbox></object><object><name>aaa_new_class</name><pose>Unspecified</pose><truncated>0</truncated><difficult>0</difficult><bndbox><xmin>2</xmin><ymin>3</ymin><xmax>20</xmax><ymax>41</ymax></bndbox></object></annotation>",
+    "Annotations/contact_165_255.xml": "<annotation><folder>JPEGImages</folder><filename>contact_165_255.jpg</filename><size><width>1680</width><height>790</height><depth>3</depth></size><object><name>aaa_new_class</name><pose>Unspecified</pose><truncated>0</truncated><difficult>0</difficult><bndbox><xmin>0</xmin><ymin>0</ymin><xmax>10</xmax><ymax>10</ymax></bndbox></object></annotation>"
   }
 }

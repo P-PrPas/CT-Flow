@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/vpe"
@@ -14,7 +16,52 @@ import (
 // the bank from a held-out image would make /api/evaluate report memorization
 // instead of generalization, so it is refused at the endpoint rather than left
 // to the UI.
-const testSetRefusal = "this image is in the test set -- it can never be taught to the model"
+const testSetRefusal = "this image is in the benchmark set -- it can never be taught to the model"
+
+// maxClassNameLen is a sanity cap, not a real limit anyone should hit.
+// ponytail: 100 chars, raise it the day a real class name needs more.
+const maxClassNameLen = 100
+
+// validateBoxes is every write path's trust boundary for box content, called
+// before a box reaches the bank or the database. A bad class name is
+// permanent: class indexes are append-only (CLAUDE.md invariant #1), so an
+// empty or newline-containing name silently shifts every index after it in a
+// classes.txt-style reader (B-02). A malformed box shape is silent too, just
+// downstream instead: a reversed or negative box turns into a YOLO normalized
+// value outside [0,1] or a negative COCO width with no error anywhere (M-05).
+func validateBoxes(boxes []store.Box) error {
+	for _, b := range boxes {
+		if strings.TrimSpace(b.Cls) == "" {
+			return errStatus(http.StatusBadRequest, "class name cannot be empty")
+		}
+		if strings.ContainsAny(b.Cls, "\n\r\x00") {
+			return errStatus(http.StatusBadRequest, "class name cannot contain a newline or a NUL byte")
+		}
+		if utf8.RuneCountInString(b.Cls) > maxClassNameLen {
+			return errStatus(http.StatusBadRequest,
+				fmt.Sprintf("class name longer than %d characters", maxClassNameLen))
+		}
+		x1, y1, x2, y2 := b.Box[0], b.Box[1], b.Box[2], b.Box[3]
+		if x2 <= x1 || y2 <= y1 {
+			return errStatus(http.StatusBadRequest, "box has zero or negative area")
+		}
+		if x1 < 0 || y1 < 0 {
+			return errStatus(http.StatusBadRequest, "box coordinates cannot be negative")
+		}
+	}
+	return nil
+}
+
+// boxesWithinImage is the bounds check validateBoxes cannot do on its own --
+// it needs the image's actual pixel size, which only the caller can read.
+func boxesWithinImage(boxes []store.Box, w, h int) error {
+	for _, b := range boxes {
+		if b.Box[2] > float64(w) || b.Box[3] > float64(h) {
+			return errStatus(http.StatusBadRequest, "box extends outside the image")
+		}
+	}
+	return nil
+}
 
 // SaveLabel extracts embeddings for these boxes into the prompt bank, then
 // writes the label into PostgreSQL.
@@ -43,6 +90,9 @@ func (s *Server) SaveLabel(w http.ResponseWriter, r *http.Request) error {
 	if len(req.Boxes) == 0 {
 		return errStatus(http.StatusBadRequest, "no boxes")
 	}
+	if err := validateBoxes(req.Boxes); err != nil {
+		return err
+	}
 	// The trust boundary comes before anything that uses the path, the database
 	// included: a rejected path should not be able to reach a query at all, and
 	// a path outside the root should answer 403 rather than whatever the test-set
@@ -58,11 +108,18 @@ func (s *Server) SaveLabel(w http.ResponseWriter, r *http.Request) error {
 	if isTest {
 		return errStatus(http.StatusBadRequest, testSetRefusal)
 	}
+	if iw, ih, ok := s.imageDims(image); ok {
+		if err := boxesWithinImage(req.Boxes, iw, ih); err != nil {
+			return err
+		}
+	}
 
 	var user *string
 	if u := s.currentUser(r); u != "" {
 		user = &u // FR-31: the signed-in name lands on each instance taught here
 	}
+	unlock := s.ProjectLock.Lock(inputDir)
+	defer unlock()
 	if _, err := s.VPE.Teach(r.Context(), stateDir, image, toVPEBoxes(req.Boxes),
 		req.ModelID, user); err != nil {
 		return err
@@ -153,6 +210,14 @@ func (s *Server) Relabel(w http.ResponseWriter, r *http.Request) error {
 
 	if !readableImage(image) {
 		return errStatus(http.StatusBadRequest, "cannot read image")
+	}
+	if err := validateBoxes(req.Boxes); err != nil {
+		return err
+	}
+	if iw, ih, ok := s.imageDims(image); ok {
+		if err := boxesWithinImage(req.Boxes, iw, ih); err != nil {
+			return err
+		}
 	}
 
 	var user *string

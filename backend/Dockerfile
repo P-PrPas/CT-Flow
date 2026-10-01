@@ -1,17 +1,27 @@
 # The Go API service. Build context is the repo root (it needs certs/), see
 # docker-compose.yml. The inference sidecar has its own: backend/inference/Dockerfile.
 
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 
 # Any .crt dropped in certs/ becomes trusted at build time, same as the Python
 # image: a corporate TLS proxy intercepts the module download too.
+# git: the company proxy mirrors go.cntt.one/* but not every public module,
+# so go mod download falls back to "direct" (a plain git clone) for those --
+# alpine's golang image ships neither.
 COPY certs/ /usr/local/share/ca-certificates/
-RUN apk add --no-cache ca-certificates && update-ca-certificates
+RUN apk add --no-cache ca-certificates git && update-ca-certificates
 
 # Module files first so a source-only change reuses the download layer.
 COPY backend/go.mod backend/go.sum ./
-RUN go mod download
+# go.cntt.one/* (the Directory SDK) lives behind the company's private,
+# authenticated proxy -- same one `go env GOPROXY` points at on a dev
+# machine. The --mount=type=secret keeps the depot.cntt.app token that
+# .netrc carries out of the image layer entirely (it's gone once this RUN
+# ends), unlike a COPY of the file would be.
+RUN --mount=type=secret,id=netrc,target=/root/.netrc,required=false \
+    GOPROXY=https://depot.cntt.app/goproxy,direct GONOSUMDB=go.cntt.one/* \
+    go mod download
 
 COPY backend/cmd/ cmd/
 COPY backend/internal/ internal/

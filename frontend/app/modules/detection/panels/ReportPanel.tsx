@@ -25,7 +25,7 @@ export default function ReportPanel({ s }: { s: Session }) {
             <Icon name="arrowLeft" size={14} /> Back to labeling
           </button>}
         >
-          Run Evaluate from the Label tab once you have a test set with answer keys.
+          Run Evaluate from the Label tab once you have a benchmark set with answer keys.
         </Empty>
       </div>
     );
@@ -150,7 +150,7 @@ export default function ReportPanel({ s }: { s: Session }) {
             </div>
           ) : (
             <Empty icon="check" title="Nothing in this view">
-              {filter === "errors" ? "The model made no mistakes on the test set." : "Every test image has at least one error."}
+              {filter === "errors" ? "The model made no mistakes on the benchmark set." : "Every benchmark image has at least one error."}
             </Empty>
           )}
         </div>

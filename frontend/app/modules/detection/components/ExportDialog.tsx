@@ -6,9 +6,9 @@ import { Icon } from "../../../lib/ui";
 import { exportAnnotations, type ExportFormat, type ExportKind } from "../api";
 
 const FORMATS = [
-  { id: "yolo", name: "YOLO", extension: "ZIP", detail: "Text labels + classes.txt", filename: "labels_yolo.zip" },
-  { id: "coco", name: "COCO", extension: "JSON", detail: "One annotation file", filename: "annotations_coco.json" },
-  { id: "voc", name: "Pascal VOC", extension: "ZIP", detail: "One XML file per image", filename: "labels_voc.zip" },
+  { id: "yolo", name: "YOLO", extension: "ZIP", detail: "Text labels + classes.txt + images", filename: "labels_yolo.zip" },
+  { id: "coco", name: "COCO", extension: "ZIP", detail: "One annotation file + images", filename: "dataset_coco.zip" },
+  { id: "voc", name: "Pascal VOC", extension: "ZIP", detail: "One XML file per image + images", filename: "labels_voc.zip" },
 ] as const;
 
 export default function ExportDialog({ inputDir, projectName, initialKind, unsaved, onClose }: {
@@ -17,6 +17,7 @@ export default function ExportDialog({ inputDir, projectName, initialKind, unsav
 }) {
   const [format, setFormat] = useState<ExportFormat>("yolo");
   const [kind, setKind] = useState<ExportKind>(initialKind);
+  const [includeImages, setIncludeImages] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [started, setStarted] = useState(false);
@@ -32,9 +33,9 @@ export default function ExportDialog({ inputDir, projectName, initialKind, unsav
     request.current = controller;
     setBusy(true); setError(""); setStarted(false);
     try {
-      // ponytail: annotation-only payload buffered as a Blob; stream via a
-      // server download job if exports grow to include original image files.
-      const blob = await exportAnnotations(inputDir, format, kind, controller.signal);
+      // ponytail: whole zip buffered as a Blob, images and all. Stream via a
+      // server download job if datasets grow large enough for this to matter.
+      const blob = await exportAnnotations(inputDir, format, kind, includeImages, controller.signal);
       if (controller.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -75,13 +76,25 @@ export default function ExportDialog({ inputDir, projectName, initialKind, unsav
           <label className="col" style={{ gap: 8 }}>
             <strong className="sm">Data source</strong>
             <select value={kind} disabled={busy} aria-describedby="export-source-help" onChange={(event) => { setKind(event.target.value as ExportKind); setError(""); setStarted(false); }}>
+              <option value="all">All annotations</option>
               <option value="pool">Pool annotations</option>
-              <option value="testset">Test set annotations</option>
+              <option value="testset">Benchmark set annotations</option>
             </select>
-            <span id="export-source-help" className="xs muted">{kind === "pool" ? "Saved pool annotations, including labels created by your team and the model." : "Saved ground-truth annotations from the test set, with its own class list."}</span>
+            <span id="export-source-help" className="xs muted">
+              {kind === "all" ? "Pool and benchmark set annotations merged into one export, classes combined by name."
+                : kind === "pool" ? "Saved pool annotations, including labels created by your team and the model."
+                : "Saved ground-truth annotations from the benchmark set, with its own class list."}
+            </span>
           </label>
-          <div className="note info"><Icon name="info" size={17} /><span><strong>Annotations only.</strong> Original images and train/validation splits are not included. Images with no saved boxes or unreadable source files are omitted.</span></div>
-          {unsaved[kind] && <div className="note warn"><Icon name="alert" size={17} /><span>You have unsaved edits in this set. This export uses the last saved annotations. Close this dialog and save first to include your changes.</span></div>}
+          <label className="row" style={{ gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={includeImages} disabled={busy} onChange={(event) => { setIncludeImages(event.target.checked); setError(""); setStarted(false); }} />
+            <span className="sm">Include source images</span>
+          </label>
+          <div className="note info"><Icon name="info" size={17} /><span>{includeImages
+            ? <><strong>Annotations and images.</strong> Each format bundles the source images alongside their labels, under <code>images/</code>, so the export is self-contained. Train/validation splits are not included. Images with no saved boxes or unreadable source files are omitted.</>
+            : <><strong>Labels only.</strong> No images are included in the archive. Every label still names its original file by the same filename it has on the VM, so this only works for someone reading labels alongside those original files directly.</>}</span></div>
+          {kind === "all" && <div className="note warn"><Icon name="alert" size={17} /><span>Mixes the benchmark set into the export. Training on it makes F1 scores measured against that set meaningless -- use Pool annotations for training data.</span></div>}
+          {(kind === "all" ? unsaved.pool || unsaved.testset : unsaved[kind]) && <div className="note warn"><Icon name="alert" size={17} /><span>You have unsaved edits in this set. This export uses the last saved annotations. Close this dialog and save first to include your changes.</span></div>}
           <div className="export-file"><Icon name="download" size={18} /><span className="col" style={{ gap: 2 }}><strong className="sm">Your download</strong><span className="mono muted">{selected.filename}</span></span></div>
           {error && <div className="note bad" role="alert"><Icon name="alert" size={17} /><span>{error}</span></div>}
           <p className="xs muted" role="status">{busy ? "Preparing your annotations. You can cancel while the export is running." : started ? "Download started. Check your browser’s downloads." : "Exports use saved annotations and do not change your project."}</p>

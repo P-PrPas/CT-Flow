@@ -152,8 +152,8 @@ func (s *Server) TestsetLabel(w http.ResponseWriter, r *http.Request) error {
 	if err := validateBoxes(req.Boxes); err != nil {
 		return err
 	}
-	if w, h, ok := s.imageDims(image); ok {
-		if err := boxesWithinImage(req.Boxes, w, h); err != nil {
+	if iw, ih, ok := s.imageDims(image); ok {
+		if err := boxesWithinImage(req.Boxes, iw, ih); err != nil {
 			return err
 		}
 	}

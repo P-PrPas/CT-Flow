@@ -536,15 +536,17 @@ assert r.status_code == 200
 testset_names = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
 
 # "all" merges pool + testset into one archive -- every label either kind on
-# its own exported shows up here too, and it is what a bare kind-less request
-# now gets (the dropdown's new default).
+# its own exported shows up here too.
 r = c.get("/api/export", params={"input_dir": POOL, "format": "yolo", "kind": "all"})
 assert r.status_code == 200, r.text
 all_names = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
 assert set(yolo_names) <= all_names and testset_names <= all_names, "'all' dropped a kind's labels"
+# A bare kind-less request stays scoped to the pool -- a benchmark set exists
+# so F1 means something, and a default that silently folds it into a training
+# export would make that number worthless the day someone forgets `kind=`.
 r_default = c.get("/api/export", params={"input_dir": POOL, "format": "yolo"})
-assert set(zipfile.ZipFile(io.BytesIO(r_default.content)).namelist()) == all_names, \
-    "default kind isn't 'all'"
+assert set(zipfile.ZipFile(io.BytesIO(r_default.content)).namelist()) == set(yolo_names), \
+    "default kind isn't 'pool'"
 
 # images=false: labels only, no images/ entries, filenames unchanged -- for
 # someone reading straight off the VM's own copy of the files.

@@ -171,7 +171,11 @@ func (s *Server) OIDCRedirect(w http.ResponseWriter, r *http.Request) error {
 		// first handshake yet. Transient, not a misconfiguration -- 503 says so.
 		return errStatus(http.StatusServiceUnavailable, "directory login is temporarily unavailable")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"redirectUrl": redirectURL})
+	// state travels back to the client in the body, not just the cookie: the
+	// callback's double-submit check (below) needs the frontend to echo it,
+	// and a cookie is the only half of that a page never running any JS could
+	// still have.
+	writeJSON(w, http.StatusOK, map[string]string{"redirectUrl": redirectURL, "state": loginState})
 	return nil
 }
 
@@ -180,17 +184,22 @@ func (s *Server) OIDCCallback(w http.ResponseWriter, r *http.Request) error {
 		return errStatus(http.StatusBadRequest, "Directory login is not configured on this server")
 	}
 	var req struct {
-		Code string `json:"code"`
+		Code  string `json:"code"`
+		State string `json:"state"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		return err
 	}
 	// The directory hands back no state of its own (see AuthorizeURL), so this
-	// cookie's mere presence is the CSRF proof instead: only a browser that hit
-	// /api/public/login/redirect on this origin has it, and it is consumed here
-	// so a captured callback URL cannot be replayed.
+	// is a double-submit check instead of the usual "state echoed by the IdP"
+	// one: /api/public/login/redirect wrote the same random value into both an
+	// httpOnly cookie and its JSON response. A forged cross-site request can
+	// make the browser send the cookie (cookies are attached automatically),
+	// but it cannot make the browser's sessionStorage hold a value only real
+	// same-origin JS ever wrote there -- so the cookie's mere presence was
+	// never actually proof of anything, only the two values matching is.
 	cookie, err := r.Cookie(loginStateCookie)
-	if err != nil || cookie.Value == "" {
+	if err != nil || cookie.Value == "" || req.State == "" || req.State != cookie.Value {
 		return errStatus(http.StatusUnauthorized, "invalid login state")
 	}
 	s.setStateCookie(w, r, "", -1)

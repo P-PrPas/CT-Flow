@@ -1,9 +1,12 @@
 // Package auth is password login (T-12 / FR-30) and who-labeled-what (FR-31).
 //
-// Off unless you configure users. With no users the whole app behaves exactly
-// as before -- that is the "one person, own PC" case the tool started as, and
-// adding a login screen to it would be pure friction. Configure users and every
-// endpoint except /api/config and /api/auth/* needs a session cookie.
+// Signing in is mandatory since T-27: the process refuses to start without
+// either this package's LABEL_TOOL_USERS or platform/auth's Directory client
+// configured, and every endpoint except /api/config and /api/auth/* needs a
+// session cookie (see httpapi.RequireLogin). This package itself only ever
+// covers the local-account half of that -- the CI and development path, not
+// the "one person, own PC, no login at all" case the tool started as, which
+// T-27 removed.
 //
 // Ported from the FastAPI service's services/auth.py, and the formats are frozen rather than
 // modernised. Two of them are compatibility surfaces, not implementation

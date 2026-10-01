@@ -73,7 +73,10 @@ def checked(path: str) -> Path:
 
 
 def _bank(state_dir: str) -> Bank:
-    return Bank(str(checked(state_dir)))
+    try:
+        return Bank(str(checked(state_dir)))
+    except PermissionError as exc:
+        raise HTTPException(500, str(exc))
 
 
 def _ndjson(lines):

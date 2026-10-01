@@ -1,7 +1,7 @@
 # CT-Flow
 
 ![backend CI](https://github.com/P-PrPas/CT-Flow/actions/workflows/backend.yml/badge.svg)
-![go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go&logoColor=white)
+![go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go&logoColor=white)
 ![python](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
 ![next.js](https://img.shields.io/badge/next.js-15.5-000000?logo=nextdotjs&logoColor=white)
 ![docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)
@@ -77,7 +77,7 @@ pool.
 | Learning-curve / plateau advice | Ready | "keep labeling" vs "diminishing returns" per class |
 | Directory login | Ready | company Directory login flow, login/callback UI, HttpOnly app session, logout, and legacy local-login fallback |
 | Go backend | Ready | the API is Go; only YOLOE inference and the prompt bank are still Python, see [repository layout](#repository-layout) |
-| Dataset export | Ready | YOLO ZIP, COCO JSON and Pascal VOC ZIP; pool, test-set, or both merged; source images bundled by default, toggleable off |
+| Dataset export | Ready | YOLO ZIP, COCO ZIP and Pascal VOC ZIP; pool (default), benchmark set, or both merged; source images bundled by default, toggleable off |
 | Image upload | Backend only | `POST /api/upload` is built and gated by the login; no dropzone in the UI yet |
 | Per-label attribution (`labeled_by`) | Ready | every box and every taught prompt records who wrote it |
 | Usage metrics (`_bank/events.jsonl`) | Backend only | abandonment / correction-rate math is ready; nothing calls `POST /api/events` from the UI yet |
@@ -252,10 +252,11 @@ older files silently decode under the wrong class.
 ### Export annotations
 
 Open a project and choose **Export dataset** beside the project title. Pick
-**YOLO**, **COCO**, or **Pascal VOC**, then choose **All annotations**, **Pool
-annotations**, or **Benchmark set annotations** and click **Download
-annotations**. Opening export from the Benchmark set view selects that source
-automatically.
+**YOLO**, **COCO**, or **Pascal VOC**, then choose **Pool annotations**
+(default), **Benchmark set annotations**, or **All annotations** and click
+**Download annotations**. "All" merges both into one archive — a training
+export should stay on **Pool** unless you mean to fold the benchmark set in
+too, since anything in it stops being held-out the moment it's trained on.
 
 Each format bundles the source images alongside their labels by default (under
 `images/`, or VOC's own `JPEGImages/`), so the export is self-contained —

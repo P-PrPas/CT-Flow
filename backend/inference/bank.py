@@ -19,7 +19,6 @@ import time
 from pathlib import Path
 
 import torch
-from fastapi import HTTPException
 from filelock import FileLock
 
 from . import models as model_registry
@@ -32,12 +31,11 @@ class Bank:
         try:
             self.bank_dir.mkdir(parents=True, exist_ok=True)
         except PermissionError:
-            # The specific case QA reproduced: a root-owned project directory.
-            # The generic handler in service.py would still catch this, but
-            # "permission denied" on a specific path beats "internal error".
-            raise HTTPException(
-                500, f"cannot create the prompt bank directory: {self.bank_dir} (permission denied)"
-            )
+            # Framework-agnostic on purpose (this module has no business
+            # knowing what FastAPI is) -- service.py's _bank() is the one
+            # choke point that turns this into the specific 500 a caller
+            # sees, instead of the generic handler's "internal error".
+            raise PermissionError(f"cannot create the prompt bank directory: {self.bank_dir} (permission denied)")
         self.emb_path = self.bank_dir / "embeddings.pt"
         self.meta_path = self.bank_dir / "metadata.json"
         self.lock = FileLock(str(self.bank_dir / ".lock"))

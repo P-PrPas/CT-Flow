@@ -57,12 +57,12 @@ export function getAuth(): Promise<AuthState> {
   return request("/api/auth/me");
 }
 
-export function loginRedirect(): Promise<{ redirectUrl: string }> {
+export function loginRedirect(): Promise<{ redirectUrl: string; state: string }> {
   return request("/api/public/login/redirect");
 }
 
-export function loginCallback(code: string): Promise<AuthState> {
-  return post("/api/public/login/callback", { code });
+export function loginCallback(code: string, state: string): Promise<AuthState> {
+  return post("/api/public/login/callback", { code, state });
 }
 
 export function localLogin(username: string, password: string): Promise<AuthState> {

@@ -364,14 +364,22 @@ func TestOIDCLoginFlow(t *testing.T) {
 	// Regression check for APPLICATION-REDIRECT-URI-FORBIDDEN: the directory
 	// validates its redirect parameter against an exact pre-registered URI, so
 	// nothing -- not even our own CSRF state -- may be appended to it.
-	if redirectURL := decode(t, redirect)["redirectUrl"]; redirectURL != directory.authorizeURL {
+	redirectBody := decode(t, redirect)
+	if redirectURL := redirectBody["redirectUrl"]; redirectURL != directory.authorizeURL {
 		t.Fatalf("redirectUrl = %v, want exactly %q with no query string appended", redirectURL, directory.authorizeURL)
 	}
 	if stateCookie.Name != loginStateCookie || stateCookie.Value == "" || !stateCookie.HttpOnly {
 		t.Fatalf("state cookie not set as expected: %+v", stateCookie)
 	}
+	// The double-submit value: a real frontend echoes this back from
+	// sessionStorage, not the cookie -- the cookie alone is exactly what an
+	// attacker's forced cross-site request would also carry.
+	echoedState, _ := redirectBody["state"].(string)
+	if echoedState == "" || echoedState != stateCookie.Value {
+		t.Fatalf("response state = %v, want it to match the cookie value %q", redirectBody["state"], stateCookie.Value)
+	}
 
-	callback := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{"code": "company-code"})
+	callback := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{"code": "company-code", "state": echoedState})
 	callback.AddCookie(stateCookie)
 	w := do(s, s.OIDCCallback, callback)
 	if w.Code != http.StatusOK {
@@ -418,6 +426,18 @@ func TestOIDCLoginFlow(t *testing.T) {
 	}
 	if directory.redeems != 1 {
 		t.Errorf("directory redeemed %d times; a callback with no pending-login cookie must be rejected before redeem", directory.redeems)
+	}
+
+	// Cookie present, but the echoed state doesn't match it: the cookie's mere
+	// presence was never real proof, only the two halves agreeing is -- the
+	// exact gap the double-submit fix closes.
+	mismatched := jsonReq(http.MethodPost, "/api/public/login/callback", map[string]string{"code": "company-code", "state": "not-the-real-state"})
+	mismatched.AddCookie(stateCookie)
+	if rejected := do(s, s.OIDCCallback, mismatched); rejected.Code != http.StatusUnauthorized {
+		t.Fatalf("callback with a mismatched state status = %d, want 401", rejected.Code)
+	}
+	if directory.redeems != 1 {
+		t.Errorf("directory redeemed %d times; a callback with a mismatched state must be rejected before redeem", directory.redeems)
 	}
 
 	oldLocal := httptest.NewRequest(http.MethodGet, "/api/boxes", nil)

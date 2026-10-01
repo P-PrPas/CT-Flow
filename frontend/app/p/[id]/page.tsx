@@ -256,7 +256,7 @@ function Workspace({
       </main>
 
       {exporting && <ExportDialog inputDir={project.input_dir} projectName={project.name}
-        initialKind="all"
+        initialKind="pool"
         unsaved={{ pool: s.pool.canUndo, testset: s.ts.canUndo }} onClose={() => setExporting(false)} />}
 
       {s.showShortcuts && (

@@ -178,7 +178,7 @@
 | ID | Requirement | สถานะ | หมายเหตุ |
 |---|---|---|---|
 | FR-29 | **อัปโหลดภาพผ่าน UI (drag & drop)** | 🟡 | **backend เสร็จแล้ว** — `POST /api/upload` (multipart) ตรวจนามสกุล + decode จริง + ขนาด + ไม่เขียนทับ + ตัด path ออกจากชื่อไฟล์ · **เหลือ dropzone บน UI** — เลื่อนไป Phase 4 เพราะยังไม่มีคำตอบว่าไฟล์ที่อัปโหลดไปลงโฟลเดอร์ไหน ใครตั้งชื่อ และลบโปรเจกต์แล้วไฟล์หายไหม |
-| FR-30 | **Authentication** | ✅ | OIDC (authorization-code + PKCE + RP-initiated logout) พร้อมหน้า login/callback/logout บน UI · `LABEL_TOOL_USERS` (PBKDF2 + signed cookie) เหลือไว้เป็นทางเข้าของ CI/dev · **บังคับตั้งแต่ Phase 2 (FR-47)** — ไม่ตั้งอย่างใดอย่างหนึ่ง = แอปไม่ start |
+| FR-30 | **Authentication** | ✅ | Directory SDK login (authorization-code-style, no PKCE, no RP-initiated logout) พร้อมหน้า login/callback บน UI · `LABEL_TOOL_USERS` (PBKDF2 + signed cookie) เหลือไว้เป็นทางเข้าของ CI/dev · **บังคับตั้งแต่ Phase 2 (FR-47)** — ไม่ตั้งอย่างใดอย่างหนึ่ง = แอปไม่ start |
 | FR-31 | **บันทึกว่าใคร label instance ไหน** | ✅ | `labeled_by` ในทุก instance ของ `metadata.json` และ `annotations.created_by` ในทุกกล่อง — เก็บ `sub` ของ provider แล้วแปลกลับเป็นชื่อผ่านตาราง `users` |
 | FR-32 | โหมดง่าย (simple mode) ที่ซ่อนศัพท์เทคนิค | ✅ | สวิตช์ "Plain language" บน top bar |
 

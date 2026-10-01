@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/vpe"
@@ -15,7 +16,7 @@ import (
 // the bank from a held-out image would make /api/evaluate report memorization
 // instead of generalization, so it is refused at the endpoint rather than left
 // to the UI.
-const testSetRefusal = "this image is in the test set -- it can never be taught to the model"
+const testSetRefusal = "this image is in the benchmark set -- it can never be taught to the model"
 
 // maxClassNameLen is a sanity cap, not a real limit anyone should hit.
 // ponytail: 100 chars, raise it the day a real class name needs more.
@@ -36,7 +37,7 @@ func validateBoxes(boxes []store.Box) error {
 		if strings.ContainsAny(b.Cls, "\n\r\x00") {
 			return errStatus(http.StatusBadRequest, "class name cannot contain a newline or a NUL byte")
 		}
-		if len(b.Cls) > maxClassNameLen {
+		if utf8.RuneCountInString(b.Cls) > maxClassNameLen {
 			return errStatus(http.StatusBadRequest,
 				fmt.Sprintf("class name longer than %d characters", maxClassNameLen))
 		}
@@ -107,8 +108,8 @@ func (s *Server) SaveLabel(w http.ResponseWriter, r *http.Request) error {
 	if isTest {
 		return errStatus(http.StatusBadRequest, testSetRefusal)
 	}
-	if w, h, ok := s.imageDims(image); ok {
-		if err := boxesWithinImage(req.Boxes, w, h); err != nil {
+	if iw, ih, ok := s.imageDims(image); ok {
+		if err := boxesWithinImage(req.Boxes, iw, ih); err != nil {
 			return err
 		}
 	}
@@ -213,8 +214,8 @@ func (s *Server) Relabel(w http.ResponseWriter, r *http.Request) error {
 	if err := validateBoxes(req.Boxes); err != nil {
 		return err
 	}
-	if w, h, ok := s.imageDims(image); ok {
-		if err := boxesWithinImage(req.Boxes, w, h); err != nil {
+	if iw, ih, ok := s.imageDims(image); ok {
+		if err := boxesWithinImage(req.Boxes, iw, ih); err != nil {
 			return err
 		}
 	}

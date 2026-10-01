@@ -14,14 +14,20 @@ export default function CallbackPage() {
     started.current = true;
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
-    // The directory hands back no state of its own -- CSRF protection lives
-    // entirely in the httpOnly cookie /api/public/login/redirect already set,
-    // which the browser sends along with this POST automatically.
     if (!code) {
       setError(params.get("error_description") ?? "Missing login code");
       return;
     }
-    api.loginCallback(code)
+    // The directory hands back no state of its own, so CSRF protection here is
+    // a double-submit: /redirect wrote the same random value into an httpOnly
+    // cookie AND this sessionStorage entry. A cookie alone proves nothing --
+    // it rides along on any cross-site request an attacker forces -- but
+    // sessionStorage can only be set by real same-origin JS, which a forced
+    // request never runs. Only a browser that genuinely visited /entry/login
+    // has both halves to echo back here.
+    const state = sessionStorage.getItem("oidc_state") ?? "";
+    sessionStorage.removeItem("oidc_state");
+    api.loginCallback(code, state)
       .then(() => window.location.replace("/"))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);

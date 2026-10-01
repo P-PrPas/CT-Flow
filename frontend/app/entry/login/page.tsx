@@ -22,7 +22,12 @@ export default function LoginPage() {
   const oidcLogin = async () => {
     setLoading(true); setError("");
     try {
-      window.location.assign((await api.loginRedirect()).redirectUrl);
+      const { redirectUrl, state } = await api.loginRedirect();
+      // Written by real same-origin JS right here -- the callback page echoes
+      // it back so the backend can tell "this browser started the flow" from
+      // "this browser was forced to carry the state cookie" (see callback).
+      sessionStorage.setItem("oidc_state", state);
+      window.location.assign(redirectUrl);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e)); setLoading(false);
     }

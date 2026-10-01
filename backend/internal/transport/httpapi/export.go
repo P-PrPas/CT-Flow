@@ -12,30 +12,41 @@ import (
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
 )
 
-// maxBundledExportImages caps how many images a single export with
-// images=true (the default) can bundle. spec.Build holds the whole zip in a
-// bytes.Buffer before Export ever writes a byte to the response (N-02): RAM
-// use runs to several times the zip's own size, uncapped, with no per-request
-// limit and no memory ceiling on the api service. A dataset past this cap
-// still exports fine with images=false.
+// maxBundledExportBytes caps the total on-disk size of the images a single
+// export with images=true (the default) can bundle. spec.Build holds the
+// whole zip in a bytes.Buffer before Export ever writes a byte to the
+// response (N-02): RAM use runs to several times that size, with no
+// per-request limit beyond docker-compose.yml's container-wide memory cap. A
+// flat image count doesn't bound this -- 1500 tiny thumbnails and 1500 raw
+// 20MB photos cost wildly different amounts of RAM for the same count. A
+// dataset past this cap still exports fine with images=false.
 //
-// ponytail: a flat image-count cap, not a byte-size budget -- cheap to check
-// (len(byImage), already in hand) and good enough for the datasets this team
-// actually has today. Move to zip.NewWriter(w) streaming straight to the
-// response if a real dataset ever needs both bundled images and a bigger
-// number than this.
-const maxBundledExportImages = 1500
+// ponytail: sums os.Stat sizes before Build ever reads a byte -- a budget on
+// bytes actually read, not the larger peak (deflate buffers, the zip
+// central directory) the real request holds, but far closer than counting
+// files. Move to zip.NewWriter(w) streaming straight to the response if a
+// real dataset ever needs both bundled images and a bigger budget than this.
+const maxBundledExportBytes = 512 << 20 // 512 MiB of source images
 
-// tooManyToBundle refuses an images=true export past maxBundledExportImages,
-// naming the images=false escape hatch rather than letting the request run
-// and risk the api container's own memory limit (N-02).
-func tooManyToBundle(n int) error {
-	if n <= maxBundledExportImages {
+// tooManyToBundle refuses an images=true export whose images sum past
+// maxBundledExportBytes, naming the images=false escape hatch rather than
+// letting the request run and risk the api container's own memory limit
+// (N-02). A path that fails to stat is skipped here exactly like
+// imageDims/readImage skip it later -- a stale row must not block an export
+// instead of just dropping out of it.
+func tooManyToBundle(paths []string) error {
+	var total int64
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil {
+			total += fi.Size()
+		}
+	}
+	if total <= maxBundledExportBytes {
 		return nil
 	}
 	return errStatus(http.StatusBadRequest,
-		fmt.Sprintf("too many images to bundle (%d > %d) -- retry with images=false",
-			n, maxBundledExportImages))
+		fmt.Sprintf("too much image data to bundle (%dMB > %dMB) -- retry with images=false",
+			total>>20, int64(maxBundledExportBytes)>>20))
 }
 
 // Export downloads this project's annotations in whichever format a training
@@ -54,7 +65,7 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 	}
 	kind := q.Get("kind")
 	if kind == "" {
-		kind = "all"
+		kind = store.KindPool
 	}
 	if kind != "all" && kind != store.KindPool && kind != store.KindTestset {
 		return errStatus(http.StatusBadRequest,
@@ -76,7 +87,11 @@ func (s *Server) Export(w http.ResponseWriter, r *http.Request) error {
 
 	var read export.ReadFunc
 	if q.Get("images") != "false" {
-		if err := tooManyToBundle(len(byImage)); err != nil {
+		paths := make([]string, 0, len(byImage))
+		for p := range byImage {
+			paths = append(paths, p)
+		}
+		if err := tooManyToBundle(paths); err != nil {
 			return err
 		}
 		read = s.readImage

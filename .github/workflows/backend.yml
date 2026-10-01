@@ -43,8 +43,10 @@ jobs:
       # a repo secret instead of a BuildKit one since nothing here builds an
       # image.
       - name: Go proxy credentials
+        env:
+          GOPROXY_NETRC: ${{ secrets.GOPROXY_NETRC }}
         run: |
-          printf '%s\n' "${{ secrets.GOPROXY_NETRC }}" > ~/.netrc
+          printf '%s\n' "$GOPROXY_NETRC" > ~/.netrc
           chmod 600 ~/.netrc
       - name: go vet
         working-directory: backend
@@ -153,8 +155,10 @@ jobs:
       # See the same step in the go job -- go build here needs the Directory
       # SDK too.
       - name: Go proxy credentials
+        env:
+          GOPROXY_NETRC: ${{ secrets.GOPROXY_NETRC }}
         run: |
-          printf '%s\n' "${{ secrets.GOPROXY_NETRC }}" > ~/.netrc
+          printf '%s\n' "$GOPROXY_NETRC" > ~/.netrc
           chmod 600 ~/.netrc
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }

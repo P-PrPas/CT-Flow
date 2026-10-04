@@ -13,13 +13,19 @@ services:
     networks:
       bridge0:
         ipv4_address: 172.20.30.10
-    # Mounted at the parent dir, not .../data -- bind-mounting straight onto
-    # PGDATA leaves a dot-prefixed mountpoint marker that makes initdb see a
-    # "non-empty" directory and refuse to start (docs/deploying-a-service.md
-    # gets this right; found the hard way -- see PR history).
+    # Bind-mounted exactly onto the image's own `VOLUME /var/lib/postgresql/data`
+    # -- mounting the *parent* instead (an earlier version of this file did)
+    # leaves that path unbound, so Docker silently grants it a fresh anonymous
+    # volume of its own on every container recreation; the bind mount sits
+    # right next to it and never gets written to. PGDATA one level deeper than
+    # the mount, not at its root, because bind-mounting straight onto PGDATA
+    # leaves a dot-prefixed mountpoint marker that makes initdb see a
+    # "non-empty" directory and refuse to start (found the hard way -- see PR
+    # history, and PR history's own prior fix for that same mistake).
     volumes:
-      - ./postgres:/var/lib/postgresql
+      - ./postgres:/var/lib/postgresql/data
     environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
       POSTGRES_USER: labeltool
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: labeltool

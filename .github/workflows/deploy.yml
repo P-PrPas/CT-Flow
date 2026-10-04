@@ -72,15 +72,23 @@ jobs:
       # backend/Dockerfile's go mod download runs behind --mount=type=secret,
       # id=netrc (required=false, so vpe/web's builds just ignore this unused
       # secret) -- same GOPROXY_NETRC repo secret backend.yml writes to
-      # ~/.netrc for plain `go` runner invocations, here handed to BuildKit
-      # instead since this is a Docker build.
+      # ~/.netrc for plain `go` runner invocations. A file on disk, handed to
+      # BuildKit via secret-files, not secrets: -- GOPROXY_NETRC is a whole
+      # .netrc (multiple machine/login/password blocks), and secrets: splits
+      # its value on newlines expecting one KEY=VALUE per line, which silently
+      # keeps only the first line and warns away the rest.
+      - name: Go proxy credentials
+        env:
+          GOPROXY_NETRC: ${{ secrets.GOPROXY_NETRC }}
+        run: printf '%s\n' "$GOPROXY_NETRC" > "$RUNNER_TEMP/netrc"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
-          secrets: |
-            netrc=${{ secrets.GOPROXY_NETRC }}
+          secret-files: |
+            netrc=${{ runner.temp }}/netrc
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image }}:${{ github.ref_name }}
             ghcr.io/${{ env.OWNER }}/${{ matrix.image }}:latest

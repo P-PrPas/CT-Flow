@@ -9,9 +9,9 @@ name: frontend
 
 on:
   push:
-    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+    paths: ["frontend/**", ".github/workflows/frontend.yml", ".github/workflows/deploy.yml"]
   pull_request:
-    paths: ["frontend/**", ".github/workflows/frontend.yml"]
+    paths: ["frontend/**", ".github/workflows/frontend.yml", ".github/workflows/deploy.yml"]
   workflow_dispatch:
 
 jobs:

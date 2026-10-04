@@ -8,9 +8,9 @@ name: backend
 
 on:
   push:
-    paths: ["backend/**", ".github/workflows/backend.yml"]
+    paths: ["backend/**", ".github/workflows/backend.yml", ".github/workflows/deploy.yml"]
   pull_request:
-    paths: ["backend/**", ".github/workflows/backend.yml"]
+    paths: ["backend/**", ".github/workflows/backend.yml", ".github/workflows/deploy.yml"]
   workflow_dispatch:
 
 jobs:

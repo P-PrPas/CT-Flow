@@ -28,7 +28,14 @@ class Bank:
     def __init__(self, output_dir: str):
         self.dir = Path(output_dir)
         self.bank_dir = self.dir / "_bank"
-        self.bank_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.bank_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            # Framework-agnostic on purpose (this module has no business
+            # knowing what FastAPI is) -- service.py's _bank() is the one
+            # choke point that turns this into the specific 500 a caller
+            # sees, instead of the generic handler's "internal error".
+            raise PermissionError(f"cannot create the prompt bank directory: {self.bank_dir} (permission denied)")
         self.emb_path = self.bank_dir / "embeddings.pt"
         self.meta_path = self.bank_dir / "metadata.json"
         self.lock = FileLock(str(self.bank_dir / ".lock"))

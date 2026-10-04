@@ -1,5 +1,5 @@
-// Package export writes a project's annotations in whichever format a training
-// pipeline actually wants.
+// Package export writes a project's annotations, bundled with the source
+// images themselves, in whichever format a training pipeline actually wants.
 //
 // Ported from backend/the FastAPI export router (T-24). Pure read: nothing here writes
 // state, and it does not care whether the images came from the pool or the
@@ -9,10 +9,16 @@
 // VOC -- cover every consumer anyone has asked for. Add a fourth builder the day
 // someone actually needs one; the dispatch is a plain map, not a registry.
 //
-// Coordinates come out of the database in pixels, so only YOLO and VOC reopen
-// the image, and only for its dimensions. An image that has moved or been
-// deleted since it was annotated is skipped rather than failing the whole
-// export -- a stale row must not make the rest of a dataset unexportable.
+// Coordinates come out of the database in pixels, so every format reopens the
+// image: once for its dimensions (YOLO normalises, VOC's XML states them) and
+// once for its raw bytes, written into the archive under images/<basename>.
+// Without that second read, a label names a file that only ever existed on the
+// VM, and an export handed to someone else has nothing to open -- filename
+// alone is not a link back to the image if the image never leaves the server.
+// COCO used to be a bare JSON response; it is a zip too now, so it has
+// somewhere to put them. An image that has moved or been deleted since it was
+// annotated is skipped rather than failing the whole export -- a stale row
+// must not make the rest of a dataset unexportable.
 package export
 
 import (
@@ -20,8 +26,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/P-PrPas/CT-Flow/backend/internal/infra/store"
@@ -31,16 +39,24 @@ import (
 type Format struct {
 	MediaType string
 	Filename  string
-	Build     func(names []string, byImage map[string][]store.Box, dims DimsFunc) ([]byte, error)
+	Build     func(names []string, byImage map[string][]store.Box, dims DimsFunc, read ReadFunc) ([]byte, error)
 }
 
 // DimsFunc reports an image's pixel dimensions, or false if it can no longer be
 // read. Injected so the exporters stay testable without a filesystem.
 type DimsFunc func(path string) (w, h int, ok bool)
 
+// ReadFunc returns an image's raw bytes to bundle into the export archive, or
+// false if it can no longer be read -- same skip-not-fail contract as DimsFunc,
+// and gated behind it: a file that failed the dimensions read never reaches
+// this one. A nil ReadFunc means the caller opted out of bundling images
+// entirely: labels are written exactly as if it succeeded, just with no
+// images/ entries alongside them.
+type ReadFunc func(path string) ([]byte, bool)
+
 var Formats = map[string]Format{
 	"yolo": {"application/zip", "labels_yolo.zip", buildYOLO},
-	"coco": {"application/json", "annotations_coco.json", buildCOCO},
+	"coco": {"application/zip", "dataset_coco.zip", buildCOCO},
 	"voc":  {"application/zip", "labels_voc.zip", buildVOC},
 }
 
@@ -73,12 +89,16 @@ func stem(path string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
-// f6 and f1 match Python's f"{v:.6f}" and f"{v:.1f}": fixed decimals, not the
-// shortest representation.
+// f6 matches Python's f"{v:.6f}": fixed decimals, not the shortest
+// representation.
 func f6(v float64) string { return fmt.Sprintf("%.6f", v) }
-func f1(v float64) string { return fmt.Sprintf("%.1f", v) }
 
-func buildYOLO(names []string, byImage map[string][]store.Box, dims DimsFunc) ([]byte, error) {
+// intStr rounds to the nearest pixel -- VOC bounding boxes are conventionally
+// integer coordinates, and "252.0" is exactly the string a standard VOC
+// reader's int() call chokes on.
+func intStr(v float64) string { return strconv.Itoa(int(math.Round(v))) }
+
+func buildYOLO(names []string, byImage map[string][]store.Box, dims DimsFunc, read ReadFunc) ([]byte, error) {
 	idx := make(map[string]int, len(names))
 	for i, n := range names {
 		idx[n] = i
@@ -86,13 +106,19 @@ func buildYOLO(names []string, byImage map[string][]store.Box, dims DimsFunc) ([
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	if err := writeZipEntry(zw, "classes.txt", strings.Join(names, "\n")); err != nil {
+	if err := writeZipEntry(zw, "classes.txt", []byte(strings.Join(names, "\n"))); err != nil {
 		return nil, err
 	}
 	for _, path := range sortedPaths(byImage) {
 		w, h, ok := dims(path)
 		if !ok {
 			continue
+		}
+		var raw []byte
+		if read != nil {
+			if raw, ok = read(path); !ok {
+				continue
+			}
 		}
 		lines := make([]string, 0, len(byImage[path]))
 		for _, b := range byImage[path] {
@@ -102,8 +128,13 @@ func buildYOLO(names []string, byImage map[string][]store.Box, dims DimsFunc) ([
 			lines = append(lines, fmt.Sprintf("%d %s %s %s %s",
 				idx[b.Cls], f6(cx), f6(cy), f6(bw), f6(bh)))
 		}
-		if err := writeZipEntry(zw, "labels/"+stem(path)+".txt", strings.Join(lines, "\n")); err != nil {
+		if err := writeZipEntry(zw, "labels/"+stem(path)+".txt", []byte(strings.Join(lines, "\n"))); err != nil {
 			return nil, err
+		}
+		if read != nil {
+			if err := writeZipEntry(zw, "images/"+filepath.Base(path), raw); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := zw.Close(); err != nil {
@@ -133,7 +164,7 @@ type cocoCategory struct {
 	Name string `json:"name"`
 }
 
-func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc) ([]byte, error) {
+func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc, read ReadFunc) ([]byte, error) {
 	catID := make(map[string]int, len(names))
 	categories := make([]cocoCategory, 0, len(names))
 	for i, n := range names {
@@ -143,6 +174,14 @@ func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc) ([
 
 	imgs := []cocoImage{}
 	anns := []cocoAnnotation{}
+	// file_name stays a bare basename -- COCO convention reads it relative to
+	// an "images" folder beside the annotation file, which is exactly where
+	// this zip puts it.
+	type file struct {
+		name string
+		raw  []byte
+	}
+	var files []file
 	annID := 1
 	for i, path := range sortedPaths(byImage) {
 		// The id counts positions, not emitted images: a skipped image consumes
@@ -153,7 +192,17 @@ func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc) ([
 		if !ok {
 			continue
 		}
-		imgs = append(imgs, cocoImage{ID: imageID, FileName: filepath.Base(path), Width: w, Height: h})
+		var raw []byte
+		if read != nil {
+			if raw, ok = read(path); !ok {
+				continue
+			}
+		}
+		base := filepath.Base(path)
+		imgs = append(imgs, cocoImage{ID: imageID, FileName: base, Width: w, Height: h})
+		if read != nil {
+			files = append(files, file{"images/" + base, raw})
+		}
 		for _, b := range byImage[path] {
 			bw, bh := b.Box[2]-b.Box[0], b.Box[3]-b.Box[1]
 			anns = append(anns, cocoAnnotation{
@@ -164,21 +213,46 @@ func buildCOCO(names []string, byImage map[string][]store.Box, dims DimsFunc) ([
 		}
 	}
 
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
+	var jsonBuf bytes.Buffer
+	enc := json.NewEncoder(&jsonBuf)
 	// Python wrote this with ensure_ascii=False; Go escapes <, > and & in
 	// strings unless told not to, which would mangle a class name containing
 	// one for no reason.
 	enc.SetEscapeHTML(false)
+	// Indented, not the default one-liner: this file is meant to be opened and
+	// read, not just parsed. ids are still the COCO-spec sequential integers
+	// every consumer (pycocotools, etc.) expects -- the actual link back to a
+	// real file is images[].file_name, present with or without bundled bytes.
+	enc.SetIndent("", "  ")
 	if err := enc.Encode(map[string]any{
 		"images": imgs, "annotations": anns, "categories": categories,
 	}); err != nil {
 		return nil, err
 	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	if err := writeZipEntry(zw, "annotations_coco.json", bytes.TrimRight(jsonBuf.Bytes(), "\n")); err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		if err := writeZipEntry(zw, f.name, f.raw); err != nil {
+			return nil, err
+		}
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
-func buildVOC(names []string, byImage map[string][]store.Box, dims DimsFunc) ([]byte, error) {
+// buildVOC writes the Pascal VOC layout a standard reader expects:
+// Annotations/<stem>.xml beside JPEGImages/<basename>, integer pixel
+// coordinates (VOC's convention, not this tool's internal float boxes), and
+// the <pose>/<truncated>/<difficult> elements a VOC parser reads
+// unconditionally -- a document missing any of the three fails with an
+// AttributeError in the reference tooling rather than a clear error.
+func buildVOC(names []string, byImage map[string][]store.Box, dims DimsFunc, read ReadFunc) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for _, path := range sortedPaths(byImage) {
@@ -186,18 +260,31 @@ func buildVOC(names []string, byImage map[string][]store.Box, dims DimsFunc) ([]
 		if !ok {
 			continue
 		}
+		var raw []byte
+		if read != nil {
+			if raw, ok = read(path); !ok {
+				continue
+			}
+		}
 		var objects strings.Builder
 		for _, b := range byImage[path] {
-			objects.WriteString("<object><name>" + xmlEscape(b.Cls) + "</name><bndbox>" +
-				"<xmin>" + f1(b.Box[0]) + "</xmin><ymin>" + f1(b.Box[1]) + "</ymin>" +
-				"<xmax>" + f1(b.Box[2]) + "</xmax><ymax>" + f1(b.Box[3]) + "</ymax>" +
+			objects.WriteString("<object><name>" + xmlEscape(b.Cls) + "</name>" +
+				"<pose>Unspecified</pose><truncated>0</truncated><difficult>0</difficult>" +
+				"<bndbox>" +
+				"<xmin>" + intStr(b.Box[0]) + "</xmin><ymin>" + intStr(b.Box[1]) + "</ymin>" +
+				"<xmax>" + intStr(b.Box[2]) + "</xmax><ymax>" + intStr(b.Box[3]) + "</ymax>" +
 				"</bndbox></object>")
 		}
-		doc := "<annotation><filename>" + xmlEscape(filepath.Base(path)) + "</filename>" +
+		doc := "<annotation><folder>JPEGImages</folder><filename>" + xmlEscape(filepath.Base(path)) + "</filename>" +
 			fmt.Sprintf("<size><width>%d</width><height>%d</height><depth>3</depth></size>", w, h) +
 			objects.String() + "</annotation>"
-		if err := writeZipEntry(zw, stem(path)+".xml", doc); err != nil {
+		if err := writeZipEntry(zw, "Annotations/"+stem(path)+".xml", []byte(doc)); err != nil {
 			return nil, err
+		}
+		if read != nil {
+			if err := writeZipEntry(zw, "JPEGImages/"+filepath.Base(path), raw); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := zw.Close(); err != nil {
@@ -216,13 +303,16 @@ func xmlEscape(s string) string {
 	return strings.ReplaceAll(s, ">", "&gt;")
 }
 
-func writeZipEntry(zw *zip.Writer, name, body string) error {
+func writeZipEntry(zw *zip.Writer, name string, body []byte) error {
 	// Deflate, matching zipfile.ZIP_DEFLATED -- the default here is Store.
+	// Re-deflating an already-compressed JPEG buys nothing, but one method for
+	// every entry is simpler than branching on content, and it costs nothing
+	// image bundling wasn't already going to cost in CPU.
 	w, err := zw.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate})
 	if err != nil {
 		return err
 	}
-	_, err = w.Write([]byte(body))
+	_, err = w.Write(body)
 	return err
 }
 

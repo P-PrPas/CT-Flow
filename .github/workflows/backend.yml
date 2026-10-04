@@ -34,7 +34,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.26", cache: true, cache-dependency-path: backend/go.sum }
+        with: { go-version: "1.27", cache: true, cache-dependency-path: backend/go.sum }
+      # go.cntt.one/* (the Directory SDK) lives behind the company's private,
+      # authenticated Go proxy -- this runner's default GOPROXY already points
+      # there (see the 404 in go vet's own error without this step, not a 401:
+      # the proxy treats an unauthenticated request as not-found). Same
+      # credential convention as backend/Dockerfile's netrc secret mount, just
+      # a repo secret instead of a BuildKit one since nothing here builds an
+      # image.
+      - name: Go proxy credentials
+        env:
+          GOPROXY_NETRC: ${{ secrets.GOPROXY_NETRC }}
+        run: |
+          printf '%s\n' "$GOPROXY_NETRC" > ~/.netrc
+          chmod 600 ~/.netrc
       - name: go vet
         working-directory: backend
         run: go vet ./...
@@ -138,7 +151,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: "1.26", cache: true, cache-dependency-path: backend/go.sum }
+        with: { go-version: "1.27", cache: true, cache-dependency-path: backend/go.sum }
+      # See the same step in the go job -- go build here needs the Directory
+      # SDK too.
+      - name: Go proxy credentials
+        env:
+          GOPROXY_NETRC: ${{ secrets.GOPROXY_NETRC }}
+        run: |
+          printf '%s\n' "$GOPROXY_NETRC" > ~/.netrc
+          chmod 600 ~/.netrc
       - uses: actions/setup-python@v5
         with: { python-version: "3.12", cache: pip }
 

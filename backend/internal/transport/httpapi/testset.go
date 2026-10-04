@@ -149,6 +149,14 @@ func (s *Server) TestsetLabel(w http.ResponseWriter, r *http.Request) error {
 	if len(req.Boxes) == 0 {
 		return errStatus(http.StatusBadRequest, "no boxes")
 	}
+	if err := validateBoxes(req.Boxes); err != nil {
+		return err
+	}
+	if iw, ih, ok := s.imageDims(image); ok {
+		if err := boxesWithinImage(req.Boxes, iw, ih); err != nil {
+			return err
+		}
+	}
 	names, err := s.Store.WriteBoxes(r.Context(), inputDir, store.KindTestset, req.Image,
 		req.Boxes, nil, req.Mode == "update")
 	if err != nil {

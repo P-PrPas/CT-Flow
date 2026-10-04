@@ -544,8 +544,9 @@ export function useSession(inputDir: string, me: string) {
       setLabelSecs([]);
       setReviewed(0);
       setFirstAutoSecs(null);
+      const flagged = new Set(d.testset.images);
       const done = new Set<string>([...d.bank.labeled, ...d.bank.auto]);
-      setCurrent(d.images.find((p) => !done.has(p)) ?? d.images[0] ?? null);
+      setCurrent(d.images.find((p) => !done.has(p) && !flagged.has(p)) ?? d.images[0] ?? null);
       setPanel("pool");
       setStatus(`${d.images.length} image(s) · ${d.bank.labeled.length} labeled by hand`);
 
@@ -705,12 +706,12 @@ export function useSession(inputDir: string, me: string) {
     });
 
   const runEval = () =>
-    guard("Measuring accuracy on the test set…", async () => {
+    guard("Measuring accuracy on the benchmark set…", async () => {
       const r = await api.evaluateTestSet(inputDir, conf, setProgress);
       setEvalResult(r);
       setZoomed(null);
       setHistory(await appendHistory(inputDir, r, promptCounts));
-      setStatus(`Test set: F1 ${(r.overall.f1 * 100).toFixed(1)}% over ${r.images} image(s)`);
+      setStatus(`Benchmark set: F1 ${(r.overall.f1 * 100).toFixed(1)}% over ${r.images} image(s)`);
     });
 
   const runAuto = () =>
@@ -769,7 +770,7 @@ export function useSession(inputDir: string, me: string) {
       setTsClasses(d.classes);
       setPoolPick(new Set());
       if (!tsCurrent) setTsCurrent(d.images[0] ?? null);
-      setStatus(`Flagged ${d.imported.length} image(s) as test set`);
+      setStatus(`Flagged ${d.imported.length} image(s) for the benchmark set`);
     });
 
   const addRandomFromPool = () =>
@@ -788,7 +789,7 @@ export function useSession(inputDir: string, me: string) {
     });
 
   const removeFromTestset = (paths: string[]) =>
-    guard("Removing from the test set…", async () => {
+    guard("Removing from the benchmark set…", async () => {
       if (!inputDir || !paths.length) return;
       const d = await api.removeTestset(inputDir, paths);
       setTsImages(d.images);

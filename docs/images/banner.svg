@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-labelledby="t d">
+  <title id="t">CT-Flow</title>
+  <desc id="d">CT-Flow by Connected Tech — teach a model by drawing one box.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="1" stop-color="#0e3147"/>
+    </linearGradient>
+    <linearGradient id="w1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0b7a96" stop-opacity=".15"/>
+      <stop offset=".6" stop-color="#2fd0cf" stop-opacity=".65"/>
+      <stop offset="1" stop-color="#8ff7ea" stop-opacity=".95"/>
+    </linearGradient>
+    <linearGradient id="w2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0b4d6b" stop-opacity=".1"/>
+      <stop offset="1" stop-color="#1fb5c9" stop-opacity=".55"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#8ff7ea"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="340" fill="url(#bg)"/>
+  <path d="M0 250 C 220 190, 380 300, 620 262 S 1000 150, 1280 120 L1280 340 L0 340 Z" fill="url(#w2)"/>
+  <path d="M0 292 C 260 230, 420 320, 700 280 S 1060 190, 1280 190 L1280 340 L0 340 Z" fill="url(#w1)"/>
+  <path d="M0 292 C 260 230, 420 320, 700 280 S 1060 190, 1280 190" fill="none" stroke="#b8fff4" stroke-opacity=".55" stroke-width="1.5"/>
+  <!-- the "draw one box" idea: a bounding box with its corner handles -->
+  <g transform="translate(1010 52)" fill="none" stroke="#8ff7ea" stroke-width="2.5">
+    <rect width="170" height="110" rx="4" stroke-dasharray="9 7" stroke-opacity=".8"/>
+    <g fill="#8ff7ea" stroke="none">
+      <rect x="-5" y="-5" width="10" height="10"/><rect x="165" y="-5" width="10" height="10"/>
+      <rect x="-5" y="105" width="10" height="10"/><rect x="165" y="105" width="10" height="10"/>
+    </g>
+  </g>
+  <text x="1018" y="44" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="15" fill="#8ff7ea">good_part 0.91</text>
+  <text x="80" y="150" font-family="Figtree,'Segoe UI',system-ui,-apple-system,Helvetica,Arial,sans-serif" font-size="92" font-weight="800" letter-spacing="-3" fill="url(#title)">CT-Flow</text>
+  <text x="84" y="196" font-family="Figtree,'Segoe UI',system-ui,-apple-system,Helvetica,Arial,sans-serif" font-size="26" fill="#c9e6ee">Teach a model by drawing one box.</text>
+  <text x="84" y="232" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="15" letter-spacing="3" fill="#6fb8c8">HUMAN-IN-THE-LOOP VISUAL-PROMPT LABELING  ·  YOLOE</text>
+</svg>

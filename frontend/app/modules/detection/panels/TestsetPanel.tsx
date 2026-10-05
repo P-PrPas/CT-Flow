@@ -28,7 +28,7 @@ export default function TestsetPanel({ s }: { s: Session }) {
         <div className="card">
           <div className="card-head" style={{ flexWrap: "wrap", rowGap: 8 }}>
             <div className="row wrap" style={{ gap: 6 }}>
-              {s.tsClasses.map((n, i) => (
+              {s.tsNames.map((n, i) => (
                 <button
                   key={n}
                   className="swatch"

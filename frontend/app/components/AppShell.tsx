@@ -25,9 +25,7 @@ export default function AppShell({ user, picture, context, navigation, actions, 
           <span className="brand-mark"><BrandMark /></span>
           <span className="col" style={{ gap: 4 }}><span className="brand-name">CT-Flow</span><span className="brand-sub">Connected Tech</span></span>
         </a>
-        <div className="sidebar-workspace"><span className="workspace-symbol"><Icon name="layers" size={18} /></span><span className="col" style={{ gap: 0 }}><strong>Team workspace</strong><span className="xs muted">Visual intelligence, together</span></span></div>
         <div className="sidebar-nav">{navigation}</div>
-        <div className="sidebar-note"><Icon name="target" size={20} /><strong>Better data. Better vision.</strong><p>Turn your team’s expertise into quality image datasets.</p></div>
         <div className="sidebar-account">
           <span className="avatar" aria-hidden="true">
             {picture ? <img src={picture} alt="" /> : user.slice(0, 2).toUpperCase()}

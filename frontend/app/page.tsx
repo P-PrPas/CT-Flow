@@ -73,7 +73,7 @@ export default function Home() {
     }>
       <main id="main" className="projects-main">
         <div className="page-heading">
-          <div><span className="eyebrow">Your workspace</span><h1>Projects</h1><p>Great models start with great data. Pick up where you left off.</p></div>
+          <div><span className="eyebrow">Your workspace</span><h1>Projects</h1><p>Pick up where you left off.</p></div>
           <button className="btn primary" onClick={() => setCreating(true)}><Icon name="plus" size={17} /> New project</button>
         </div>
 
@@ -125,7 +125,7 @@ export default function Home() {
           </Section>
         )}
         {projects && projects.length > 0 && shown.length === 0 && <Empty icon="search" title="No matching projects" action={<button className="btn" onClick={() => { setQuery(""); setScope("all"); }}>Clear filters</button>}>Try a different name, folder, or project owner.</Empty>}
-        <footer className="workspace-footer"><span>CT-Flow <span className="faint">/</span> Connected Tech</span><span>Built for human expertise. Powered by machine vision.</span></footer>
+        <footer className="workspace-footer"><span>CT-Flow <span className="faint">/</span> Connected Tech</span></footer>
       </main>
 
       {creating && (

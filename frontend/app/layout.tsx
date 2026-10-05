@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CT-Flow · Connected Tech",
-  description: "Visual-prompt labeling for manufacturing vision datasets.",
+  description: "Human-in-the-loop visual-prompt labeling tool for YOLOE.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -357,12 +357,27 @@ export function useSession(inputDir: string, me: string) {
     return colors[(i < 0 ? classNames.length : i) % (colors.length || 1)] ?? "#08d9d6";
   }, [classNames, colors, plan.colors]);
 
+  /** What the benchmark swatch row offers: the pool's labels first, so the
+   *  answer key is drawn with the same names the model was taught (an F1 only
+   *  matches boxes by class name), then any the benchmark set alone has. Names
+   *  only -- the two index spaces stay separate (CLAUDE.md invariant #2). */
+  const tsNames = useMemo(
+    () => [...classNames, ...tsClasses.filter((n) => !classNames.includes(n))],
+    [classNames, tsClasses]
+  );
+
+  // "item" is only the empty-field placeholder; once there are real names to
+  // pick from, start on one instead of silently drawing a class nobody named.
+  useEffect(() => {
+    if (tsCls === "item" && tsNames.length && !tsNames.includes("item")) setTsCls(tsNames[0]);
+  }, [tsCls, tsNames]);
+
   const tsColor = useCallback((name: string) => {
     const chosen = plan.colors[name];
     if (chosen) return chosen;
-    const i = tsClasses.indexOf(name);
-    return colors[(i < 0 ? tsClasses.length : i) % (colors.length || 1)] ?? "#08d9d6";
-  }, [tsClasses, colors, plan.colors]);
+    const i = tsNames.indexOf(name);
+    return colors[(i < 0 ? tsNames.length : i) % (colors.length || 1)] ?? "#08d9d6";
+  }, [tsNames, colors, plan.colors]);
 
   const tsLabeledSet = useMemo(() => new Set(tsLabeled), [tsLabeled]);
   /** Test images are pool images by path now (no copy, no filename dance) --
@@ -829,7 +844,7 @@ export function useSession(inputDir: string, me: string) {
     // eval
     evalResult, runEval, history, advice, resetHistory, zoomed, setZoomed,
     // test set
-    tsImages, tsLabeled, tsClasses, tsCurrent, tsSavedBoxes, tsCls, setTsCls,
+    tsImages, tsLabeled, tsClasses, tsNames, tsCurrent, tsSavedBoxes, tsCls, setTsCls,
     tsUpdateMode, setTsUpdateMode, ts, tsSet, tsColor, tsLabeledSet, poolCandidates,
     poolPick, setPoolPick, tsPick, setTsPick, sampleN, setSampleN,
     importToTestset, addRandomFromPool, saveTestset, removeFromTestset, goToTsImage,
